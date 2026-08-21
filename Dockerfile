@@ -2,7 +2,7 @@
 FROM mcr.microsoft.com/playwright:v1.62.1-noble AS dependencies
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN --mount=type=cache,target=/root/.npm npm ci
+RUN npm ci
 
 FROM dependencies AS builder
 ARG APP_VERSION=0.1.0
