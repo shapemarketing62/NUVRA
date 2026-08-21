@@ -1,0 +1,1 @@
+export async function register(){if(process.env.NEXT_RUNTIME==="nodejs"){const{getServerEnv}=await import("@/lib/server/env");const env=getServerEnv();if(env.REDIS_REST_URL&&env.REDIS_REST_TOKEN){const{configureRateLimitStore,RedisRateLimitStore}=await import("@/lib/server/rate-limit");configureRateLimitStore(new RedisRateLimitStore(env.REDIS_REST_URL,env.REDIS_REST_TOKEN))}}}

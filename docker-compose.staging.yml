@@ -1,0 +1,36 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: nuvra_staging
+      POSTGRES_USER: nuvra
+      POSTGRES_PASSWORD: staging-only-change-me
+    volumes: [postgres_staging:/var/lib/postgresql/data]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U nuvra -d nuvra_staging"], interval: 5s, timeout: 5s, retries: 20 }
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes: [redis_staging:/data]
+    healthcheck: { test: ["CMD", "redis-cli", "ping"], interval: 5s, timeout: 3s, retries: 20 }
+  redis-rest:
+    image: hiett/serverless-redis-http:latest
+    environment:
+      SRH_MODE: env
+      SRH_TOKEN: staging-redis-token
+      SRH_CONNECTION_STRING: redis://redis:6379
+    depends_on: { redis: { condition: service_healthy } }
+  web:
+    build:
+      context: .
+      args: { APP_VERSION: "0.1.0-staging", COMMIT_SHA: "local", BUILD_DATE: "local" }
+    environment:
+      APP_ENV: staging
+      DATABASE_URL: postgresql://nuvra:staging-only-change-me@postgres:5432/nuvra_staging?schema=public
+      EMAIL_PROVIDER: development
+      BILLING_PROVIDER: mock
+      INTEGRATION_MASTER_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+      REDIS_REST_URL: http://redis-rest:80
+      REDIS_REST_TOKEN: staging-redis-token
+    ports: ["3000:3000"]
+    depends_on: { postgres: { condition: service_healthy }, redis-rest: { condition: service_started } }
+volumes: { postgres_staging: {}, redis_staging: {} }

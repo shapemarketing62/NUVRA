@@ -1,0 +1,47 @@
+{
+  "generatedAt": "2026-08-21T01:10:19.885Z",
+  "detected": 8,
+  "assigned": [],
+  "manualReview": [
+    {
+      "businessId": "cmsv1oin70000vdno471ugpe8",
+      "name": "Starbucks",
+      "reason": "missing_legacy_user"
+    },
+    {
+      "businessId": "cmsxgca1o009wvdnob8d929u5",
+      "name": "Starbucks",
+      "reason": "missing_legacy_user"
+    },
+    {
+      "businessId": "cmsxgzlaw0000vd04tlhje387",
+      "name": "Starbucks",
+      "reason": "missing_legacy_user"
+    },
+    {
+      "businessId": "cmsxkr4nb0000vdh0pkmtlosp",
+      "name": "Starbucks",
+      "reason": "missing_legacy_user"
+    },
+    {
+      "businessId": "cmsxl3ums0066vdh0x2grx16f",
+      "name": "Starbucks",
+      "reason": "missing_legacy_user"
+    },
+    {
+      "businessId": "cmsxlgl5p00b8vdh0r8e4kgx6",
+      "name": "Starbucks",
+      "reason": "missing_legacy_user"
+    },
+    {
+      "businessId": "cmsxrhyd00000vdp0k2dk4u3p",
+      "name": "Starbucks",
+      "reason": "missing_legacy_user"
+    },
+    {
+      "businessId": "cmsxrkh2u0008vdp0vj0lwdc7",
+      "name": "starbucks ",
+      "reason": "missing_legacy_user"
+    }
+  ]
+}

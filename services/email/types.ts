@@ -1,0 +1,3 @@
+export interface EmailMessage{to:string;subject:string;text:string;html:string}
+export interface EmailProvider{readonly key:string;send(message:EmailMessage):Promise<{messageId:string}>}
+export interface AccountEmailService{sendVerification(input:{to:string;name?:string|null;url:string}):Promise<void>;sendPasswordReset(input:{to:string;name?:string|null;url:string}):Promise<void>;sendOrganizationInvitation(input:{to:string;organizationName:string;inviterName?:string|null;url:string}):Promise<void>;sendAccountAlert(input:{to:string;title:string;message:string}):Promise<void>;sendBillingNotification(input:{to:string;title:string;message:string}):Promise<void>}

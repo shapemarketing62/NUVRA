@@ -1,0 +1,32 @@
+name: CI
+on: [push, pull_request]
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      APP_ENV: test
+      DATABASE_URL: file:./ci.db
+      EMAIL_PROVIDER: development
+      BILLING_PROVIDER: mock
+      INTEGRATION_MASTER_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm }
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npx prisma db push
+      - run: npx tsc --noEmit
+      - run: npm run test:security
+      - run: npm run test:production
+      - run: npm run test:integrations
+      - run: npm run test:billing
+      - run: npm run test:infrastructure
+      - run: npm run test:staging
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npm run start &
+      - run: node scripts/wait-health.js http://127.0.0.1:3000/api/health/ready
+      - run: npm run test:e2e
+        env: { E2E_BASE_URL: "http://127.0.0.1:3000" }

@@ -1,0 +1,57 @@
+{
+  "name": "nuvra",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "db:generate": "prisma generate",
+    "db:push": "prisma db push",
+    "db:studio": "prisma studio",
+    "postinstall": "prisma generate"
+    ,"test:security": "node --test tests/security.test.js",
+    "test:production": "node --test tests/production-readiness.test.js",
+    "test:e2e": "node --test tests/e2e/production-flows.js",
+    "test:integrations": "node --test tests/integrations.test.js",
+    "test:billing": "node --test tests/billing.test.js",
+    "test:infrastructure": "node --test tests/infrastructure.test.js",
+    "test:staging": "node --test tests/staging-readiness.test.js",
+    "db:migrate-legacy": "node scripts/migrate-legacy-businesses.js"
+    ,"jobs:run": "node scripts/run-job.js all",
+    "jobs:cleanup-auth": "node scripts/run-job.js cleanup-auth",
+    "jobs:expire-trials": "node scripts/run-job.js expire-trials",
+    "jobs:billing-reconcile": "node scripts/run-job.js billing-reconcile",
+    "jobs:sync-integrations": "node scripts/run-job.js sync-integrations",
+    "jobs:retry-sources": "node scripts/run-job.js retry-sources",
+    "jobs:cleanup-temporary": "node scripts/run-job.js cleanup-temporary"
+    ,"db:postgres:prepare": "node scripts/prepare-postgres.js",
+    "db:backup": "node scripts/db-backup.js",
+    "db:export": "node scripts/db-transfer.js export",
+    "db:import:postgres": "node scripts/db-transfer.js import",
+    "db:validate:postgres": "node scripts/validate-migration.js",
+    "db:test-restore": "node scripts/test-backup-restore.js"
+    ,"staging:init": "node scripts/init-staging.js",
+    "staging:seed-demo": "node scripts/seed-staging-demo.js --confirm-demo",
+    "smoke:test": "node scripts/smoke-test.js",
+    "release:check": "node scripts/release-check.js",
+    "release:check:local": "node scripts/release-check.js --local"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.2.1",
+    "cheerio": "^1.0.0",
+    "next": "^14.2.22",
+    "playwright": "^1.49.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "prisma": "^6.2.1",
+    "typescript": "^5.7.3"
+  }
+}

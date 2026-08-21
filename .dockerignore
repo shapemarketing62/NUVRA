@@ -1,0 +1,15 @@
+.git
+.github
+.next
+node_modules
+generated
+backups
+storage/screenshots
+*.db
+*.db-journal
+.env
+.env.*
+!.env.example
+!.env.staging.example
+*.log
+tests

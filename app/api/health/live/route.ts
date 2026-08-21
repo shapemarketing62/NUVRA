@@ -1,0 +1,1 @@
+export const dynamic="force-dynamic";export async function GET(){return Response.json({status:"live",version:process.env.APP_VERSION||"0.1.0",commit:process.env.COMMIT_SHA?.slice(0,12)||"unknown",buildDate:process.env.BUILD_DATE||"unknown"},{headers:{"cache-control":"no-store"}})}
