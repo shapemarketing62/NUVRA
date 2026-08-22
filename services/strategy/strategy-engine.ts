@@ -4,6 +4,7 @@ import type { RawFinding } from "@/services/website-analyzer/types";
 import type { FrameworkSelection } from "@/services/frameworks/strategic-framework-engine";
 import { createAIService, strategySchema, type StrategyOutput } from "@/services/ai/ai-service";
 import { selectStrategicFrameworks, FRAMEWORKS } from "@/services/frameworks/strategic-framework-engine";
+import { getPrimaryBusinessStep, hasConstrainedExecution, isRetentionObjective, getLocalMarketLabel, isSpecificBusinessAction } from "@/services/strategy/business-action-language";
 
 // Force recompilation: 2025-01-17T20:25:00Z
 
@@ -14,6 +15,11 @@ export interface StrategyContext {
   plazoDias: number;
   plazoLabel: string;
   magnitud?: number | null;
+  ubicacion?: string | null;
+  tipoCliente?: string | null;
+  presupuesto?: number | null;
+  capacidad?: string | null;
+  canales?: string | null;
 }
 
 export interface StrategyResult extends StrategyOutput {
@@ -61,6 +67,10 @@ function buildDeterministicStrategy(
   const seoProblems = findings.filter((f) => f.category === "seo" && f.type === "problem");
   const trustProblems = findings.filter((f) => f.category === "trust" && f.type === "problem");
   const proposalProblems = findings.filter((f) => f.category === "propuesta" && f.type === "problem");
+  const primaryStep = getPrimaryBusinessStep(context);
+  const constrainedExecution = hasConstrainedExecution(context);
+  const retentionObjective = isRetentionObjective(context);
+  const competitorFindings = findings.filter(f => /competidor|competencia/i.test(`${f.title} ${f.evidence}`));
 
   const evidenceForAction = (slug: string) => findings.filter((f) => {
     const text = `${f.title} ${f.evidence}`;
@@ -122,23 +132,42 @@ function buildDeterministicStrategy(
     });
   };
 
+  if (retentionObjective && findings.length > 0) {
+    const observed = findings[0];
+    addAction({
+      title: "Crear un seguimiento concreto después de cada compra o atención",
+      description: `Contactar a cada cliente después de la experiencia con un próximo paso útil y una invitación clara para volver. ${constrainedExecution ? "Empezar con una lista simple y un único mensaje de seguimiento." : "Separar el seguimiento según servicio o compra realizada."}`,
+      dimension: "retencion",
+      framework: "Retention",
+      findingIds: [`${observed.category}:${observed.title}`],
+      evidence: observed.evidence,
+      inference: `El objetivo es aumentar la recompra; el seguimiento debe conectar la experiencia actual con una razón concreta para volver, sin asumir que hoy existe ese hábito.`,
+      problem: "El objetivo depende de que clientes actuales vuelvan, no solamente de conseguir nuevas consultas",
+      impact: "alto",
+      effort: constrainedExecution ? "baja" : "media",
+      timeframe: context.plazoDias <= 60 ? "30 días" : "60 días",
+      kpi: "clientes que vuelven y tiempo entre compras o atenciones",
+      confidence: "MEDIA",
+    });
+  }
+
   if (weakest?.slug === "conversion" || conversionProblems.length > 0) {
     const relatedEvidence = evidenceForAction("conversion");
     const evidence = relatedEvidence[0]?.evidence || conversionProblems[0]?.evidence || "La dimensión de conversión es la más débil.";
     const problem = conversionProblems[0]?.title || weakest?.name || "Conversión";
     addAction({
-      title: "Mover la acción principal al primer bloque y reducir la competencia entre CTAs",
-      description: "Definir un único CTA principal por página, situarlo en el primer viewport y eliminar o atenuar acciones secundarias que compitan por la atención.",
+      title: `Hacer visible “${primaryStep.action}” desde la primera pantalla`,
+      description: `Usar una única acción principal —“${primaryStep.action}”— al comienzo de la página y reducir enlaces que distraigan. ${constrainedExecution ? "Empezar por la página más visitada para mantener el trabajo acotado." : "Aplicar el mismo recorrido en las páginas de mayor intención."}`,
       dimension: "conversion",
       framework: "CRO",
       findingIds: relatedEvidence.map((f) => `${f.category}:${f.title}`),
       evidence,
-      inference: "Los usuarios llegan al sitio sin encontrar una acción principal clara en el primer bloque; la fricción inicial reduce la probabilidad de conversión.",
+      inference: `Una persona interesada puede recorrer el sitio sin encontrar cómo “${primaryStep.action}”; cada paso adicional puede reducir ${primaryStep.result}.`,
       problem,
       impact: "alto",
       effort: "media",
       timeframe: shortTerm ? "30 días" : "60 días",
-      kpi: "Tasa de conversión / leads",
+      kpi: primaryStep.result,
       confidence: weakest?.confidence || "MEDIA",
     });
   }
@@ -167,8 +196,8 @@ function buildDeterministicStrategy(
     const evidence = seoProblems[0].evidence;
     const problem = seoProblems[0].title;
     addAction({
-      title: "Corregir SEO técnico básico que afecta descubrimiento e indexación",
-      description: "Completar title, meta description, H1 y estructura semántica para mejorar la captación orgánica.",
+      title: `Facilitar que personas de ${getLocalMarketLabel(context)} encuentren el servicio correcto`,
+      description: `Ajustar el título principal, la descripción para Google y la información de ubicación en las páginas del servicio que más aporta al objetivo “${context.objetivo}”.`,
       dimension: "adquisicion",
       framework: "Adquisición",
       findingIds: seoProblems.map((f) => `${f.category}:${f.title}`),
@@ -178,7 +207,7 @@ function buildDeterministicStrategy(
       impact: "medio",
       effort: "baja",
       timeframe: shortTerm ? "30 días" : "90 días",
-      kpi: "Tráfico orgánico / consultas",
+      kpi: `visitas desde búsquedas de ${getLocalMarketLabel(context)} y ${primaryStep.result}`,
       confidence: scoreResult.dimensions.find((d) => d.slug === "adquisicion")?.confidence || "MEDIA",
     });
   }
@@ -203,31 +232,46 @@ function buildDeterministicStrategy(
     });
   }
 
+  if (competitorFindings.length > 0) {
+    const observed = competitorFindings[0];
+    addAction({
+      title: `Explicar por qué elegir ${context.nombre} frente a alternativas de ${getLocalMarketLabel(context)}`,
+      description: `Elegir una diferencia comprobable —especialización, modalidad, atención o resultado— y mostrarla junto a “${primaryStep.action}”.`,
+      dimension: "posicionamiento",
+      framework: "Positioning",
+      findingIds: competitorFindings.map(f => `${f.category}:${f.title}`),
+      evidence: observed.evidence,
+      inference: "Cuando existen alternativas visibles para el mismo cliente, una diferencia concreta facilita la decisión y evita competir solamente por precio.",
+      problem: "El cliente puede comparar varias alternativas sin encontrar una razón clara para elegir este negocio",
+      impact: "medio",
+      effort: constrainedExecution ? "baja" : "media",
+      timeframe: "30 días",
+      kpi: primaryStep.result,
+      confidence: observed.confidence || "MEDIA",
+    });
+  }
+
   if (actions.length === 0) {
     addAction({
-      title: "Monitorear métricas y re-analizar en 30 días",
-      description: "No hay evidencia suficiente para justificar un cambio estructural; conviene medir y volver a evaluar.",
+      title: "Registrar durante 30 días cómo llegan y avanzan las nuevas consultas",
+      description: "Anotar cuántas consultas llegan, desde qué canal y cuántas terminan en una reserva o venta. Conectar el sitio, las redes o las reseñas permitirá afinar el próximo paso.",
       dimension: weakest?.slug || "diagnostico",
       framework: "STP",
       findingIds: [],
-      evidence: "Sin evidencia suficiente para una acción específica.",
-      inference: "El diagnóstico actual no permite identificar un problema con la confianza necesaria; se requiere más información antes de actuar.",
-      problem: "Información insuficiente",
+      evidence: `El negocio busca ${context.objetivo.toLowerCase()} en ${context.plazoLabel}, pero todavía no registra el recorrido completo de cada consulta.`,
+      inference: "Medir el recorrido real permite decidir dónde actuar sin atribuir resultados a un canal por intuición.",
+      problem: "No está claro en qué paso se pierden hoy las personas interesadas",
       impact: "medio",
       effort: "baja",
       timeframe: "30 días",
-      kpi: "Nuvra Score total",
+      kpi: "Consultas recibidas, reservas o ventas y canal de origen",
       confidence: "BAJA",
     });
   }
 
-  const coverageText = scoreResult.coverage >= 75
-    ? "cobertura sólida"
-    : scoreResult.coverage >= 50
-      ? "cobertura moderada"
-      : "cobertura limitada";
-
-  const situacionActual = `Nuvra Score ${scoreResult.total ?? "N/A"}/100 con ${coverageText} (${scoreResult.coverage || 0}% de cobertura). ${weakest ? `Dimensión más débil: ${weakest.name} (${weakest.points ?? "No evaluado"}/100).` : "No hay evidencia suficiente para priorizar una dimensión con alta confianza."} ${diagnosis.summary.split(".")[0]}.`;
+  const situacionActual = scoreResult.total !== null
+    ? `${context.nombre} tiene un Nuvra Score de ${scoreResult.total}/100. Para avanzar hacia ${context.objetivo.toLowerCase()}, el primer foco debería estar en ${weakest?.name.toLowerCase() || "hacer más claro el recorrido hacia la consulta o compra"}.`
+    : `${context.nombre} busca ${context.objetivo.toLowerCase()}. El primer paso es observar cómo llegan las consultas y en qué momento dejan de avanzar, para decidir sobre datos reales.`;
 
   const frameworksOut = frameworkSelection.secondary.map((s) => ({
     id: s,
@@ -250,6 +294,6 @@ function buildDeterministicStrategy(
     principalProblema: diagnosis.bottleneck.explanation,
     prioridades: diagnosis.priorities.map((p) => p.title),
     frameworks: [{ id: frameworkSelection.primary, title: FRAMEWORKS[frameworkSelection.primary]?.name || frameworkSelection.primary, rationale: frameworkSelection.rationale, useCase: FRAMEWORKS[frameworkSelection.primary]?.description || "", dimension: weakest?.slug, priority: 1 }, ...frameworksOut],
-    actions: actions.slice(0, 6),
+    actions: actions.filter(isSpecificBusinessAction).slice(0, 6),
   };
 }

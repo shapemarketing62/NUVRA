@@ -103,6 +103,7 @@ export interface DashboardData {
     framework?: string;
     confidence?: string;
     problem?: string;
+    indicatorToImprove?: string;
   }>;
   history: Array<{ nuvraScoreTotal: number | null; createdAt: string }>;
   loading: boolean;
@@ -221,7 +222,7 @@ export function useDashboardData(): DashboardData {
                 engineType: strategy.engineType,
               }
             : null,
-          actions: (strategy?.actions || []).map((a: { id: string; title: string; description?: string; impact: string; difficulty: string; estimatedTime: string; rationale: string; done: boolean; order: number; findingIds?: string; evidence?: string; inference?: string; dimension?: string; framework?: string; confidence?: string; problem?: string }) => ({
+          actions: (strategy?.actions || []).map((a: { id: string; title: string; description?: string; impact: string; difficulty: string; estimatedTime: string; indicatorToImprove: string; rationale: string; done: boolean; order: number; findingIds?: string; evidence?: string; inference?: string; dimension?: string; framework?: string; confidence?: string; problem?: string }) => ({
             id: a.id,
             title: a.title,
             description: a.description,
@@ -238,6 +239,7 @@ export function useDashboardData(): DashboardData {
             framework: a.framework,
             confidence: a.confidence,
             problem: a.problem,
+            indicatorToImprove: a.indicatorToImprove,
           })),
           history: (data.analysisHistory || []).map((h: { nuvraScoreTotal: number | null; createdAt: string }) => ({
             nuvraScoreTotal: h.nuvraScoreTotal,

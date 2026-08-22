@@ -291,7 +291,7 @@ export async function runFullAnalysis(businessId: string): Promise<RunAnalysisRe
     const diagnosisResult = await runDiagnosticEngine(
       businessContext,
       scoreResult,
-      analysisResult.findings
+      legacyFindings
     );
     stageLog("7_diagnostic_engine", { businessId, total: scoreResult.total, coverage: scoreResult.coverage, summary: diagnosisResult.summary, bottleneck: diagnosisResult.bottleneck, priorities: diagnosisResult.priorities }, { startedAt: diagnosisStarted, endedAt: Date.now(), durationMs: Date.now() - diagnosisStarted });
 
@@ -361,12 +361,17 @@ export async function runFullAnalysis(businessId: string): Promise<RunAnalysisRe
       plazoDias: goal.plazoDias,
       plazoLabel: goal.plazoLabel,
       magnitud: goal.magnitud,
+      ubicacion: business.ubicacion || business.ciudad,
+      tipoCliente: business.tipoCliente,
+      presupuesto: business.inversionMarketing,
+      capacidad: business.empleados || business.tamano,
+      canales: business.canales || business.otrosCanales,
     };
     const strategyResult = await runStrategyEngine(
       strategyContext,
       diagnosisResult,
       scoreResult,
-      analysisResult.findings
+      legacyFindings
     );
     stageLog("9_strategy_engine", { businessId, objective: strategyContext.objetivo, plazoDias: strategyContext.plazoDias, total: scoreResult.total, frameworks: strategyResult.frameworks, priorities: strategyResult.prioridades, principalProblema: strategyResult.principalProblema, siteType: siteTypeResult.siteType }, { startedAt: frameworksStarted, endedAt: Date.now(), durationMs: Date.now() - frameworksStarted });
 

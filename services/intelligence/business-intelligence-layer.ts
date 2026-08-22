@@ -81,7 +81,8 @@ export class BusinessIntelligenceLayer {
     const digitalScore = DigitalScoreCalculator.calculate(webEvidence);
 
     // 5. Calcular Nuvra Score (basado en evidence agregada)
-    const nuvraScore = NuvraScoreCalculator.calculate(aggregatedEvidence, coverage);
+    const objective = (targetBusiness as Business & { goals?: Array<{ objetivo?: string }> }).goals?.[0]?.objetivo;
+    const nuvraScore = NuvraScoreCalculator.calculate(aggregatedEvidence, coverage, { objective });
     console.log("[BI_LAYER] Nuvra Score calculated:", {
       total: nuvraScore.total,
       confidence: nuvraScore.confidence,

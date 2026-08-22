@@ -3,6 +3,7 @@
 import { useDashboardData } from "@/lib/use-dashboard-data";
 import { COLORS } from "@/lib/design-tokens";
 import { DemoBadge, ErrorState, PageSkeleton } from "@/components/ui";
+import { simplifyTechnicalText, getFriendlyDimensionName } from "@/lib/simple-language-presenter";
 
 export default function EstrategiaPage() {
   const { strategy, diagnosis, score, loading, error, isDemo } = useDashboardData();
@@ -64,7 +65,7 @@ export default function EstrategiaPage() {
           border: `1px solid ${COLORS.line}`
         }}>
           <div style={{ fontSize: 13, color: COLORS.inkSoft, marginBottom: 8 }}>Situación actual</div>
-          <div style={{ fontSize: 15, lineHeight: 1.6 }}>{strategy.situacionActual}</div>
+          <div style={{ fontSize: 15, lineHeight: 1.6 }}>{simplifyTechnicalText(strategy.situacionActual)}</div>
         </div>
 
         <div style={{ 
@@ -74,7 +75,7 @@ export default function EstrategiaPage() {
           border: `1px solid ${COLORS.line}`
         }}>
           <div style={{ fontSize: 13, color: COLORS.inkSoft, marginBottom: 8 }}>Distancia al objetivo</div>
-          <div style={{ fontSize: 15, lineHeight: 1.6 }}>{strategy.distanciaObjetivo}</div>
+          <div style={{ fontSize: 15, lineHeight: 1.6 }}>{simplifyTechnicalText(strategy.distanciaObjetivo)}</div>
         </div>
 
         <div style={{ 
@@ -84,7 +85,7 @@ export default function EstrategiaPage() {
           border: `1px solid ${COLORS.line}`
         }}>
           <div style={{ fontSize: 13, color: COLORS.inkSoft, marginBottom: 8 }}>Problema principal</div>
-          <div style={{ fontSize: 15, lineHeight: 1.6 }}>{strategy.principalProblema}</div>
+          <div style={{ fontSize: 15, lineHeight: 1.6 }}>{simplifyTechnicalText(strategy.principalProblema)}</div>
         </div>
       </div>
 
@@ -120,7 +121,7 @@ export default function EstrategiaPage() {
                 }}>
                   {i + 1}
                 </div>
-                <div style={{ fontSize: 14, fontWeight: 500 }}>{p}</div>
+                <div style={{ fontSize: 14, fontWeight: 500 }}>{simplifyTechnicalText(p)}</div>
               </div>
             ))}
           </div>
@@ -139,7 +140,7 @@ export default function EstrategiaPage() {
             Enfoque principal
           </h3>
           <p style={{ fontSize: 14, lineHeight: 1.6 }}>
-            Para alcanzar tu objetivo, priorizá resolver: <strong>{diagnosis.bottleneck.dimension}</strong> — {diagnosis.bottleneck.title}
+            Para alcanzar tu objetivo, priorizá resolver: <strong>{getFriendlyDimensionName(diagnosis.bottleneck.dimension, diagnosis.bottleneck.dimension)}</strong> — {simplifyTechnicalText(diagnosis.bottleneck.title)}
           </p>
         </div>
       )}

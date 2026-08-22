@@ -52,23 +52,23 @@ function buildDeterministicDiagnosis(
   const strategicDimension = weakest && weakest.slug ? weakest : null;
   const strategicProblem = strategicDimension
     ? strategicDimension.problems.find((problem) => !/title|meta description|SEO|seo|index/i.test(problem)) || strategicDimension.problems[0] || "Falta claridad en la dimensión prioritaria."
-    : "No hay evidencia suficiente para identificar una dimensión prioritaria con confianza.";
+    : `Todavía no se pudo observar con claridad qué parte del recorrido está frenando ${business.objetivo.toLowerCase()}.`;
 
   // Build bottleneck from the strategic dimension's actual problems, not from random websiteFindings
   const bottleneckTitle = strategicProblem;
   const bottleneckExplanation = strategicDimension
-    ? `La dimensión más débil es ${strategicDimension.name} (${strategicDimension.points ?? "No evaluado"}/100). ${strategicProblem}`
-    : "No hay evidencia suficiente para identificar un único cuello de botella con confianza.";
+    ? `${strategicProblem} Esto puede hacer que menos personas avancen hacia ${business.objetivo.toLowerCase()} dentro de ${business.plazoLabel}.`
+    : `Conocemos el negocio y su objetivo, pero todavía falta observar el recorrido real de una persona hasta la consulta o compra.`;
 
-  const coverage = scoreResult.coverage ?? Math.round((evaluable.length / scoreResult.dimensions.length) * 100);
-
-  const summary = `${business.nombre} tiene un Nuvra Score de ${scoreResult.total ?? "N/A"}/100 orientado a "${business.objetivo}" en ${business.plazoLabel}. Cobertura del diagnóstico: ${coverage}%. ${
+  const summary = scoreResult.total !== null
+    ? `${business.nombre} obtiene un Nuvra Score de ${scoreResult.total}/100. Para avanzar hacia ${business.objetivo.toLowerCase()} en ${business.plazoLabel}, conviene concentrar primero el esfuerzo en ${strategicDimension?.name.toLowerCase() || "hacer más claro el camino hacia la consulta o compra"}. ${
     scoreResult.total !== null && scoreResult.total >= 70
-      ? "La base digital es sólida con áreas puntuales de mejora."
+      ? "La base actual acompaña el objetivo, aunque todavía hay mejoras concretas que pueden ayudar a conseguir más resultados."
       : scoreResult.total !== null && scoreResult.total >= 50
-        ? "Hay oportunidades claras de mejora para acercarse al objetivo."
-        : "Existen limitaciones importantes que pueden estar frenando el objetivo comercial."
-  } Análisis basado en datos reales del sitio web (${websiteFindings.length} hallazgos detectados).`;
+        ? "Hay una base aprovechable, pero algunos obstáculos hacen que parte del interés no llegue a convertirse en consultas o ventas."
+        : "Hoy existen obstáculos concretos que pueden estar frenando el objetivo comercial."
+  }`
+    : `${business.nombre} busca ${business.objetivo.toLowerCase()} en ${business.plazoLabel}. Para recomendar cambios responsables necesitamos observar al menos un punto real del recorrido de sus clientes; conectar el sitio, redes o reseñas permitirá identificar qué conviene hacer primero.`;
 
   const strengths = scoreResult.dimensions
     .filter((d) => d.points !== null && d.points >= 65)
@@ -84,7 +84,7 @@ function buildDeterministicDiagnosis(
   if (strengths.length === 0 && strongest) {
     strengths.push({
       title: strongest.name,
-      evidence: `Puntuación relativa más alta: ${strongest.points}/100. ${strongest.strengths[0] || "Sin evidencia adicional."}`,
+      evidence: strongest.strengths[0] || "Es el área que hoy ofrece la mejor base para apoyar el objetivo.",
       findingId: undefined,
     });
   }
@@ -98,7 +98,7 @@ function buildDeterministicDiagnosis(
   if (weaknesses.length === 0 && weakest) {
     weaknesses.push({
       title: weakest.name,
-      evidence: `Dimensión más débil (${weakest.points ?? "No evaluado"}/100): ${weakest.problems[0] || "Sin problemas específicos detectados."}`,
+      evidence: weakest.problems[0] || "Es el área que hoy necesita atención antes que el resto.",
       findingId: undefined,
     });
   }
@@ -127,18 +127,18 @@ function buildDeterministicDiagnosis(
 function buildOpportunities(weakest: DimensionResult | null, all: DimensionResult[]): string[] {
   const opps: string[] = [];
   if (weakest) {
-    opps.push(`Mejorar ${weakest.name} (${weakest.points ?? "No evaluado"}/100) tendría el mayor impacto inmediato en tu Nuvra Score.`);
+    opps.push(`Mejorar ${weakest.name.toLowerCase()} es la oportunidad más directa para acercarse al objetivo actual.`);
   } else {
-    opps.push("Se necesita más información para priorizar una dimensión con impacto claro.");
+    opps.push("Conectar el sitio, las redes o las reseñas permitirá detectar el primer cambio con impacto comercial concreto.");
   }
 
   const conversion = all.find((d) => d.slug === "conversion");
   if (conversion && conversion.points !== null && conversion.points < 60) {
-    opps.push("Optimizar CTA, formularios y señales de confianza puede reducir la fricción real de contacto o compra.");
+    opps.push("Hacer más visible el botón principal, simplificar los formularios y mostrar señales de confianza puede generar más consultas o compras.");
   }
   const posicionamiento = all.find((d) => d.slug === "posicionamiento");
   if (posicionamiento && posicionamiento.points !== null && posicionamiento.points < 60) {
-    opps.push("Definir propuesta de valor y diferenciación puede mejorar la claridad de marca y la autoridad.");
+    opps.push("Explicar con claridad qué ofrece el negocio, para quién y por qué elegirlo puede facilitar la decisión de nuevos clientes.");
   }
   return opps.slice(0, 4);
 }
@@ -147,13 +147,13 @@ function buildRisks(business: BusinessContext, score: NuvraScoreResult, weakest:
   const risks: string[] = [];
   const conversion = score.dimensions.find((d) => d.slug === "conversion");
   if (business.plazoDias <= 60 && weakest && weakest.slug !== "conversion" && conversion && conversion.points !== null && conversion.points < 50) {
-    risks.push("Con un plazo corto, la baja conversión puede impedir resultados aunque aumente el tráfico.");
+    risks.push("Con un plazo corto, recibir más visitas no alcanzará si esas personas no encuentran un camino claro para consultar o comprar.");
   }
   if (score.total !== null && score.total < 45) {
-    risks.push("El score general bajo indica múltiples frentes abiertos — dispersar esfuerzos puede retrasar el objetivo.");
+    risks.push("Hay varios frentes posibles; intentar resolverlos todos al mismo tiempo puede retrasar el objetivo.");
   }
   if (weakest && weakest.slug === "redes" && weakest.points !== null && weakest.points < 40) {
-    risks.push("Sin presencia social conectada, es difícil evaluar si Instagram ayuda o limita el objetivo.");
+    risks.push("Conectar Instagram permitiría entender mejor si hoy esa cuenta ayuda a generar interés y consultas.");
   }
   return risks.slice(0, 3);
 }
@@ -166,7 +166,8 @@ function buildPriorities(
   const sorted = [...dimensions].sort((a, b) => (a.points ?? 100) - (b.points ?? 100));
 
   for (const dim of sorted.slice(0, 3)) {
-    const reason = dim.problems[0] || "Sin evidencia suficiente para describir el problema con precisión.";
+    if (dim.points === null) continue;
+    const reason = dim.problems[0] || "Esta área ofrece una oportunidad concreta para acercarse al objetivo.";
     items.push({
       title: dim.name,
       reason,

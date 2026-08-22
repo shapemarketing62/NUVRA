@@ -1,5 +1,5 @@
-import { AggregatedEvidence, CoverageResult } from "./evidence-aggregator";
-import { EvidenceFinding, SourceType } from "./source-analyzer";
+import type { AggregatedEvidence, CoverageResult } from "./evidence-aggregator";
+import type { EvidenceFinding, SourceType } from "./source-analyzer";
 
 export type NuvraScoreStatus = "pending" | "preliminary" | "complete";
 
@@ -13,6 +13,14 @@ export interface NuvraScoreResult {
   requiresMoreSources: boolean;
   reason: string;
   evaluatedAt: Date;
+  methodology: {
+    evaluableDimensions: number;
+    effectiveDimensionDiversity: number;
+    objectiveRelevanceCovered: number;
+    evidenceQuality: number;
+    readiness: number;
+    dimensionWeights: Record<string, { objectiveRelevance: number; evidenceQuality: number; combinedWeight: number }>;
+  };
 }
 
 export interface NuvraDimension {
@@ -28,43 +36,72 @@ export interface NuvraDimension {
 export class NuvraScoreCalculator {
   static calculate(
     aggregatedEvidence: AggregatedEvidence,
-    coverage: CoverageResult
+    coverage: CoverageResult,
+    context: { objective?: string } = {}
   ): NuvraScoreResult {
-    // Si coverage es insuficiente (<30%), marcar como PENDIENTE
-    if (!coverage.canCalculateNuvraScore || coverage.total < 30) {
+    const findings = aggregatedEvidence.findings;
+    const byDimension = aggregatedEvidence.byDimension;
+
+    // Las dimensiones mantienen sus propias reglas de evidencia. La cobertura
+    // general no debe descartar dimensiones que sí pudieron evaluarse.
+    const dimensions = this.calculateDimensions(byDimension, aggregatedEvidence.sources);
+    const evaluableDimensions = dimensions.filter(d => d.points !== null);
+    const objectiveWeights = this.getObjectiveWeights(context.objective || "");
+    const dimensionWeights = Object.fromEntries(dimensions.map(d => {
+      const objectiveRelevance = objectiveWeights[d.slug] ?? 0;
+      const evidenceQuality = this.calculateEvidenceQuality(d);
+      return [d.slug, { objectiveRelevance, evidenceQuality, combinedWeight: objectiveRelevance * evidenceQuality }];
+    }));
+    const objectiveRelevanceCovered = evaluableDimensions.reduce((sum, d) => sum + (objectiveWeights[d.slug] ?? 0), 0);
+    const evidenceQuality = objectiveRelevanceCovered > 0
+      ? evaluableDimensions.reduce((sum, d) => sum + (objectiveWeights[d.slug] ?? 0) * dimensionWeights[d.slug].evidenceQuality, 0) / objectiveRelevanceCovered
+      : 0;
+    const relevanceShares = evaluableDimensions.map(d => objectiveWeights[d.slug] ?? 0).filter(Boolean);
+    const relevanceTotal = relevanceShares.reduce((sum, value) => sum + value, 0);
+    const effectiveDimensionDiversity = relevanceTotal > 0
+      ? 1 / relevanceShares.reduce((sum, value) => sum + Math.pow(value / relevanceTotal, 2), 0)
+      : 0;
+    const diversityFactor = Math.min(1, effectiveDimensionDiversity / 3);
+    const readiness = objectiveRelevanceCovered * evidenceQuality * diversityFactor;
+    const methodology = {
+      evaluableDimensions: evaluableDimensions.length,
+      effectiveDimensionDiversity: Math.round(effectiveDimensionDiversity * 100) / 100,
+      objectiveRelevanceCovered: Math.round(objectiveRelevanceCovered * 100) / 100,
+      evidenceQuality: Math.round(evidenceQuality * 100) / 100,
+      readiness: Math.round(readiness * 100) / 100,
+      dimensionWeights,
+    };
+
+    // Un score general requiere evidencia distribuida y relevante. Las lecturas
+    // parciales siguen disponibles para diagnóstico, pero no representan el todo.
+    if (evaluableDimensions.length < 2 || objectiveRelevanceCovered < 0.45 || effectiveDimensionDiversity < 1.6 || readiness < 0.2) {
       return {
         total: null,
-        dimensions: [],
+        dimensions,
         confidence: "INSUFICIENTE",
         coverage: coverage.total,
         scoreStatus: "pending",
         statusLabel: "PENDIENTE",
         requiresMoreSources: true,
-        reason: "Cobertura insuficiente para calcular un score representativo. Se requieren más fuentes.",
+        reason: evaluableDimensions.length === 0
+          ? "No se pudo evaluar ninguna dimensión con datos observables."
+          : "Las señales observadas todavía están demasiado concentradas para representar el marketing general.",
         evaluatedAt: new Date(),
+        methodology,
       };
     }
 
-    const findings = aggregatedEvidence.findings;
-    const byDimension = aggregatedEvidence.byDimension;
-
-    // Calcular dimensiones del Nuvra Score
-    const dimensions = this.calculateDimensions(byDimension, aggregatedEvidence.sources);
-
     // Calcular total (solo dimensiones evaluables)
-    const evaluableDimensions = dimensions.filter(d => d.points !== null);
     let total: number | null = null;
 
     if (evaluableDimensions.length > 0) {
-      // Ponderar por confianza
+      // Ponderar por relevancia para el objetivo y calidad de la evidencia.
       const weightedSum = evaluableDimensions.reduce((acc, d) => {
-        const confidenceWeight = d.confidence === "ALTA" ? 1 : d.confidence === "MEDIA" ? 0.8 : 0.6;
-        return acc + (d.points || 0) * confidenceWeight;
+        return acc + (d.points || 0) * dimensionWeights[d.slug].combinedWeight;
       }, 0);
       
       const totalWeight = evaluableDimensions.reduce((acc, d) => {
-        const confidenceWeight = d.confidence === "ALTA" ? 1 : d.confidence === "MEDIA" ? 0.8 : 0.6;
-        return acc + confidenceWeight;
+        return acc + dimensionWeights[d.slug].combinedWeight;
       }, 0);
 
       total = Math.round(weightedSum / totalWeight);
@@ -114,7 +151,31 @@ export class NuvraScoreCalculator {
       requiresMoreSources: scoreStatus !== "complete",
       reason,
       evaluatedAt: new Date(),
+      methodology,
     };
+  }
+
+  private static calculateEvidenceQuality(dimension: NuvraDimension): number {
+    if (!dimension.findings.length || !dimension.sources.length) return 0;
+    const confidenceValue = { ALTA: 1, MEDIA: 0.75, BAJA: 0.45, INSUFICIENTE: 0 } as const;
+    const averageConfidence = dimension.findings.reduce((sum, finding) => sum + confidenceValue[finding.confidence], 0) / dimension.findings.length;
+    const depth = Math.min(1, dimension.findings.length / 3);
+    const sourceDiversity = Math.min(1, dimension.sources.length / 2);
+    return Math.round((averageConfidence * 0.5 + depth * 0.3 + sourceDiversity * 0.2) * 100) / 100;
+  }
+
+  private static getObjectiveWeights(objective: string): Record<string, number> {
+    const text = objective.toLowerCase();
+    if (/consult|reserv|turno|lead|venta|compr/.test(text)) {
+      return { presencia: 0.1, conversion: 0.3, posicionamiento: 0.1, propuesta: 0.15, redes: 0.1, adquisicion: 0.25 };
+    }
+    if (/marca|reconoc|posicion|autoridad/.test(text)) {
+      return { presencia: 0.1, conversion: 0.1, posicionamiento: 0.3, propuesta: 0.2, redes: 0.2, adquisicion: 0.1 };
+    }
+    if (/redes|instagram|comunidad|interacci/.test(text)) {
+      return { presencia: 0.1, conversion: 0.15, posicionamiento: 0.15, propuesta: 0.1, redes: 0.35, adquisicion: 0.15 };
+    }
+    return { presencia: 0.16, conversion: 0.18, posicionamiento: 0.16, propuesta: 0.16, redes: 0.16, adquisicion: 0.18 };
   }
 
   private static calculateDimensions(
@@ -138,6 +199,7 @@ export class NuvraScoreCalculator {
     sources: Record<string, any>
   ): NuvraDimension {
     const sourceTypes = this.getSourceTypes(findings, sources);
+    findings = this.deduplicateSemanticFindings(findings);
     const confidence = this.calculateDimensionConfidence(findings, sourceTypes);
 
     if (findings.length === 0) {
@@ -178,6 +240,7 @@ export class NuvraScoreCalculator {
     sources: Record<string, any>
   ): NuvraDimension {
     const sourceTypes = this.getSourceTypes(findings, sources);
+    findings = this.deduplicateSemanticFindings(findings);
     const confidence = this.calculateDimensionConfidence(findings, sourceTypes);
 
     if (findings.length === 0) {
@@ -218,6 +281,7 @@ export class NuvraScoreCalculator {
     sources: Record<string, any>
   ): NuvraDimension {
     const sourceTypes = this.getSourceTypes(findings, sources);
+    findings = this.deduplicateSemanticFindings(findings);
     const confidence = this.calculateDimensionConfidence(findings, sourceTypes);
 
     // Posicionamiento requiere fuentes externas
@@ -271,6 +335,7 @@ export class NuvraScoreCalculator {
     sources: Record<string, any>
   ): NuvraDimension {
     const sourceTypes = this.getSourceTypes(findings, sources);
+    findings = this.deduplicateSemanticFindings(findings);
     const confidence = this.calculateDimensionConfidence(findings, sourceTypes);
 
     if (findings.length === 0) {
@@ -311,6 +376,7 @@ export class NuvraScoreCalculator {
     sources: Record<string, any>
   ): NuvraDimension {
     const sourceTypes = this.getSourceTypes(findings, sources);
+    findings = this.deduplicateSemanticFindings(findings);
     const confidence = this.calculateDimensionConfidence(findings, sourceTypes);
 
     // Redes requiere fuente de redes
@@ -364,6 +430,7 @@ export class NuvraScoreCalculator {
     sources: Record<string, any>
   ): NuvraDimension {
     const sourceTypes = this.getSourceTypes(findings, sources);
+    findings = this.deduplicateSemanticFindings(findings);
     const confidence = this.calculateDimensionConfidence(findings, sourceTypes);
 
     if (findings.length === 0) {
@@ -405,6 +472,32 @@ export class NuvraScoreCalculator {
       types.add(f.source);
     }
     return Array.from(types);
+  }
+
+  private static deduplicateSemanticFindings(findings: EvidenceFinding[]): EvidenceFinding[] {
+    const impactRank = { low: 1, medium: 2, high: 3 } as const;
+    const grouped = new Map<string, EvidenceFinding>();
+    for (const finding of findings) {
+      const text = finding.evidence.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      const polarity = finding.type === "negative" ? "negative" : finding.type === "positive" ? "positive" : "neutral";
+      let issue = text.replace(/[^a-z0-9]+/g, " ").trim();
+      if (polarity === "negative") {
+        if (finding.category === "conversion" && /cta|boton|accion principal|contact|consulta|turno|reserv|formulario|whatsapp|avanzar/.test(text)) issue = "contact-path";
+        else if (finding.category === "conversion" && /checkout|carrito|pago|compra|envio/.test(text)) issue = "purchase-path";
+        else if (/confianza|testimonio|resena|garantia|caso/.test(text)) issue = "trust-signal";
+        else if (/title|meta description|canonical|robots|indexa/.test(text)) issue = "search-metadata";
+        else if (/h1|titulo principal|diferenci|mensaje principal/.test(text)) issue = "offer-clarity";
+        else if (/mobile|movil|responsive/.test(text)) issue = "mobile-experience";
+        else if (/performance|velocidad|carga|lento/.test(text)) issue = "page-speed";
+        else if (/naveg|menu|header|estructura/.test(text)) issue = "navigation";
+      }
+      const key = `${finding.category}:${polarity}:${issue}`;
+      const current = grouped.get(key);
+      if (!current || impactRank[finding.impact] > impactRank[current.impact] || (impactRank[finding.impact] === impactRank[current.impact] && finding.confidence === "ALTA" && current.confidence !== "ALTA")) {
+        grouped.set(key, finding);
+      }
+    }
+    return Array.from(grouped.values());
   }
 
   private static calculateDimensionConfidence(

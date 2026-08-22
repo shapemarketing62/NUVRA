@@ -53,7 +53,7 @@ export default function ResultadosPage() {
           Actualmente Nuvra se enfoca en el diagnóstico y la estrategia. Las métricas de resultados estarán disponibles próximamente.
         </p>
         <p style={{ fontSize: 13, color: COLORS.inkFaint }}>
-          Para medir resultados reales (ventas, leads, tráfico), necesitamos integración con tus sistemas o seguimiento manual.
+          Para medir resultados reales —ventas, consultas y visitas— podés conectar tus sistemas o llevar un seguimiento manual.
         </p>
       </div>
 
@@ -124,15 +124,15 @@ export default function ResultadosPage() {
           <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px", background: COLORS.paperDim, borderRadius: 8 }}>
             <div style={{ width: 12, height: 12, borderRadius: 999, background: COLORS.olive }} />
             <div>
-              <div style={{ fontWeight: 500, fontSize: 14 }}>Leads / Consultas</div>
-              <div style={{ fontSize: 12, color: COLORS.inkSoft }}>Captación y conversión de prospectos</div>
+              <div style={{ fontWeight: 500, fontSize: 14 }}>Consultas recibidas</div>
+              <div style={{ fontSize: 12, color: COLORS.inkSoft }}>Personas interesadas que avanzan hacia una reserva o compra</div>
             </div>
           </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px", background: COLORS.paperDim, borderRadius: 8 }}>
             <div style={{ width: 12, height: 12, borderRadius: 999, background: COLORS.amber }} />
             <div>
-              <div style={{ fontWeight: 500, fontSize: 14 }}>Tráfico web</div>
+              <div style={{ fontWeight: 500, fontSize: 14 }}>Visitas al sitio</div>
               <div style={{ fontSize: 12, color: COLORS.inkSoft }}>Visitantes y comportamiento en el sitio</div>
             </div>
           </div>
@@ -140,8 +140,8 @@ export default function ResultadosPage() {
           <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px", background: COLORS.paperDim, borderRadius: 8 }}>
             <div style={{ width: 12, height: 12, borderRadius: 999, background: COLORS.red }} />
             <div>
-              <div style={{ fontWeight: 500, fontSize: 14 }}>Engagement redes</div>
-              <div style={{ fontSize: 12, color: COLORS.inkSoft }}>Interacción y crecimiento en Instagram</div>
+              <div style={{ fontWeight: 500, fontSize: 14 }}>Interacción en redes</div>
+              <div style={{ fontSize: 12, color: COLORS.inkSoft }}>Personas que reaccionan, comentan o escriben desde Instagram</div>
             </div>
           </div>
         </div>

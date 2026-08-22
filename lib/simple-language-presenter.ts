@@ -22,6 +22,13 @@ const TECHNICAL_GLOSSARY: Array<[RegExp, string]> = [
   [/\bleads\b/gi, "consultas de potenciales clientes"],
   [/\blead\b/gi, "consulta de un potencial cliente"],
   [/\bCRO\b/g, "optimización de ventas y consultas"],
+  [/\bfunnel\b/gi, "recorrido desde el primer contacto hasta la consulta o compra"],
+  [/\bcustomer journey\b/gi, "recorrido de las personas antes de consultar o comprar"],
+  [/\bengagement\b/gi, "nivel de interacción de las personas"],
+  [/\bframeworks?\b/gi, "método de trabajo"],
+  [/\bconversión\b/gi, "personas que avanzan, consultan o compran"],
+  [/\btráfico\b/gi, "visitas"],
+  [/\bprospectos?\b/gi, "personas interesadas"],
   [/\bnav\/header\b/gi, "menú superior de la página"],
   [/\balt text\b/gi, "descripciones de texto en imágenes"],
   [/\borgánica\b/gi, "de forma natural y sin pagar publicidad"],
@@ -50,15 +57,15 @@ export function getFriendlyDimensionName(slug: string, fallbackName?: string): s
     case "presencia":
       return "Presencia Digital y Sitio Web";
     case "conversion":
-      return "Conversión (Ventas y Contactos)";
+      return "Consultas, reservas y ventas";
     case "posicionamiento":
-      return "Posicionamiento y Marca";
+      return "Claridad y diferenciación de la marca";
     case "propuesta":
-      return "Propuesta de Valor y Claridad";
+      return "Claridad de la oferta";
     case "redes":
       return "Redes Sociales";
     case "adquisicion":
-      return "Atracción de Clientes";
+      return "Cómo llegan nuevos clientes";
     default:
       return fallbackName || slug;
   }
@@ -116,7 +123,7 @@ export function formatActionForBusiness(action: {
 
   // 4. Qué resultado podría mejorar
   const expectedResult = simplifiedKpi
-    ? `Mejora esperada en: ${simplifiedKpi}`
+    ? simplifiedKpi
     : action.impact === "alto"
     ? "Alto impacto esperado en consultas y ventas directas"
     : action.impact === "medio"
