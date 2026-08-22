@@ -32,4 +32,4 @@ COPY --from=builder --chown=pwuser:pwuser /app/tsconfig.json ./tsconfig.json
 USER pwuser
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 CMD node -e "fetch('http://127.0.0.1:3000/api/health/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
-CMD ["npm","run","start"]
+CMD ["sh","-c","npx prisma migrate deploy --schema prisma/postgresql/schema.prisma && npm run start"]
