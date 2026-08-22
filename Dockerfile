@@ -22,7 +22,7 @@ ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=3000 HOSTNAME=0.0.0.0 PLA
 COPY --from=builder --chown=pwuser:pwuser /app/package.json /app/package-lock.json ./
 COPY --from=builder --chown=pwuser:pwuser /app/node_modules ./node_modules
 COPY --from=builder --chown=pwuser:pwuser /app/.next/standalone ./.next/standalone
-COPY --from=builder --chown=pwuser:pwuser /app/.next/static ./.next/static
+COPY --from=builder --chown=pwuser:pwuser /app/.next/static ./.next/standalone/.next/static
 COPY --from=builder --chown=pwuser:pwuser /app/next.config.js ./next.config.js
 COPY --from=builder --chown=pwuser:pwuser /app/prisma ./prisma
 COPY --from=builder --chown=pwuser:pwuser /app/scripts ./scripts
