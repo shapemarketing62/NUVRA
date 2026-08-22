@@ -29,10 +29,12 @@ export function Sidebar({
   businessName,
   isDemo,
   planTier,
+  internalAccess,
 }: {
   businessName: string;
   isDemo: boolean;
   planTier: PlanTier;
+  internalAccess: boolean;
 }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -42,9 +44,9 @@ export function Sidebar({
     const active = pathname === item.id || (item.id === "/dashboard" && pathname === "/dashboard/");
     const locked =
       item.id === "/dashboard/competencia"
-        ? !hasEntitlement(plan, "analysis.competitors")
+        ? !hasEntitlement(plan, "analysis.competitors", internalAccess)
         : item.id === "/dashboard/nuvra-ai"
-        ? !hasEntitlement(plan, "ai.nuvra")
+        ? !hasEntitlement(plan, "ai.nuvra", internalAccess)
         : false;
 
     return (
@@ -93,6 +95,7 @@ export function Sidebar({
         <div className="shp-mono" style={{ fontSize: 11, color: COLORS.inkFaint, marginBottom: 12 }}>
           Plan {plan.label}
           {isDemo && " · DEMO"}
+          {internalAccess && " · acceso interno"}
         </div>
         <div style={{ fontSize: 12, lineHeight: 1.5, color: COLORS.inkSoft }}>
           {plan.summary}

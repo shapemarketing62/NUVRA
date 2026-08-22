@@ -18,7 +18,9 @@
     "test:billing": "node --test tests/billing.test.js",
     "test:infrastructure": "node --test tests/infrastructure.test.js",
     "test:staging": "node --test tests/staging-readiness.test.js",
-    "db:migrate-legacy": "node scripts/migrate-legacy-businesses.js"
+    "db:migrate-legacy": "node scripts/migrate-legacy-businesses.js",
+    "users:set-internal": "node scripts/set-internal-user.js",
+    "test:internal-access": "node --test tests/internal-access.test.js"
     ,"jobs:run": "node scripts/run-job.js all",
     "jobs:cleanup-auth": "node scripts/run-job.js cleanup-auth",
     "jobs:expire-trials": "node scripts/run-job.js expire-trials",

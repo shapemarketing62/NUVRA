@@ -8,6 +8,7 @@ import { getApiErrorMessage } from "@/lib/api-client";
 
 export interface DashboardData {
   isDemo: boolean;
+  internalAccess: boolean;
   planTier: "FREE" | "PRO" | "PARTNER";
   business: {
     id?: string;
@@ -113,6 +114,7 @@ export interface DashboardData {
 export function useDashboardData(): DashboardData {
   const [state, setState] = useState<DashboardData>({
     isDemo: false,
+    internalAccess: false,
     planTier: "FREE",
     business: { nombre: "", rubro: "" },
     intelligence: null,
@@ -129,6 +131,7 @@ export function useDashboardData(): DashboardData {
     if (isDemoMode()) {
       setState({
         isDemo: true,
+        internalAccess: false,
         planTier: "FREE",
         business: {
           nombre: DEMO_BUSINESS.nombre,
@@ -168,6 +171,7 @@ export function useDashboardData(): DashboardData {
 
         setState({
           isDemo: false,
+          internalAccess: data.internalAccess === true,
           planTier: data.planTier || "FREE",
           business: {
             id: data.id,

@@ -8,89 +8,92 @@ datasource db {
 }
 
 model User {
-  id        String     @id @default(cuid())
-  email     String     @unique
-  name      String?
-  passwordHash String
-  emailVerifiedAt DateTime?
-  disabledAt DateTime?
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
-  businesses Business[]
-  plan      Plan?
-  memberships Membership[]
-  sessions AuthSession[]
-  passwordResetTokens PasswordResetToken[]
+  id                      String                   @id @default(cuid())
+  email                   String                   @unique
+  name                    String?
+  passwordHash            String
+  emailVerifiedAt         DateTime?
+  disabledAt              DateTime?
+  internalRole            String?
+  createdAt               DateTime                 @default(now())
+  updatedAt               DateTime                 @updatedAt
+  businesses              Business[]
+  plan                    Plan?
+  memberships             Membership[]
+  sessions                AuthSession[]
+  passwordResetTokens     PasswordResetToken[]
   emailVerificationTokens EmailVerificationToken[]
-  auditEvents AuditLog[] @relation("AuditActor")
+  auditEvents             AuditLog[]               @relation("AuditActor")
 }
 
 model PasswordResetToken {
-  id        String   @id @default(cuid())
-  tokenHash String   @unique
+  id        String    @id @default(cuid())
+  tokenHash String    @unique
   userId    String
   expiresAt DateTime
   usedAt    DateTime?
-  createdAt DateTime @default(now())
-  user      User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   @@index([userId, expiresAt])
 }
 
 model EmailVerificationToken {
-  id        String   @id @default(cuid())
-  tokenHash String   @unique
+  id        String    @id @default(cuid())
+  tokenHash String    @unique
   userId    String
   expiresAt DateTime
   usedAt    DateTime?
-  createdAt DateTime @default(now())
-  user      User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   @@index([userId, expiresAt])
 }
 
 model Organization {
-  id        String   @id @default(cuid())
-  name      String
-  slug      String   @unique
-  planTier  String   @default("FREE")
-  subscriptionStatus String @default("inactive")
-  subscriptionProvider String?
+  id                     String                @id @default(cuid())
+  name                   String
+  slug                   String                @unique
+  planTier               String                @default("FREE")
+  subscriptionStatus     String                @default("inactive")
+  subscriptionProvider   String?
   subscriptionCustomerId String?
-  subscriptionId String?
-  currentPeriodEnd DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  memberships Membership[]
-  businesses Business[]
-  usageEvents UsageEvent[]
-  auditEvents AuditLog[]
-  integrationSecrets IntegrationSecret[]
-  integrations Integration[]
-  subscription Subscription?
-  billingWebhookEvents BillingWebhookEvent[]
-  analysisRuns AnalysisRun[]
+  subscriptionId         String?
+  currentPeriodEnd       DateTime?
+  createdAt              DateTime              @default(now())
+  updatedAt              DateTime              @updatedAt
+  memberships            Membership[]
+  businesses             Business[]
+  usageEvents            UsageEvent[]
+  auditEvents            AuditLog[]
+  integrationSecrets     IntegrationSecret[]
+  integrations           Integration[]
+  subscription           Subscription?
+  billingWebhookEvents   BillingWebhookEvent[]
+  analysisRuns           AnalysisRun[]
 
   @@index([planTier])
 }
 
 model Subscription {
-  id                     String   @id @default(cuid())
-  organizationId         String   @unique
-  plan                   String   @default("FREE")
-  status                 String   @default("free")
+  id                     String       @id @default(cuid())
+  organizationId         String       @unique
+  plan                   String       @default("FREE")
+  status                 String       @default("free")
   billingInterval        String?
   trialStartedAt         DateTime?
   trialEndsAt            DateTime?
   currentPeriodStart     DateTime?
   currentPeriodEnd       DateTime?
-  cancelAtPeriodEnd      Boolean  @default(false)
+  cancelAtPeriodEnd      Boolean      @default(false)
   canceledAt             DateTime?
   externalCustomerId     String?
   externalSubscriptionId String?
   billingProvider        String?
   lastProviderEventAt    DateTime?
-  limitState            String?
-  createdAt              DateTime @default(now())
-  updatedAt              DateTime @updatedAt
+  limitState             String?
+  createdAt              DateTime     @default(now())
+  updatedAt              DateTime     @updatedAt
   organization           Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   @@index([status, currentPeriodEnd])
@@ -98,7 +101,7 @@ model Subscription {
 }
 
 model BillingWebhookEvent {
-  id             String   @id @default(cuid())
+  id             String        @id @default(cuid())
   provider       String
   eventId        String
   eventType      String
@@ -106,8 +109,8 @@ model BillingWebhookEvent {
   occurredAt     DateTime
   processedAt    DateTime?
   payloadHash    String
-  status         String   @default("received")
-  createdAt      DateTime @default(now())
+  status         String        @default("received")
+  createdAt      DateTime      @default(now())
   organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
 
   @@unique([provider, eventId])
@@ -116,20 +119,20 @@ model BillingWebhookEvent {
 }
 
 model AnalysisRun {
-  id             String   @id @default(cuid())
+  id             String       @id @default(cuid())
   organizationId String
   businessId     String
   idempotencyKey String
   requestId      String
-  status         String   @default("queued")
+  status         String       @default("queued")
   result         String?
   errorCode      String?
-  queuedAt       DateTime @default(now())
+  queuedAt       DateTime     @default(now())
   startedAt      DateTime?
   completedAt    DateTime?
-  updatedAt      DateTime @updatedAt
+  updatedAt      DateTime     @updatedAt
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  business       Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  business       Business     @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
   @@unique([organizationId, idempotencyKey])
   @@index([businessId, status, queuedAt])
@@ -143,11 +146,11 @@ model JobLock {
 }
 
 model JobExecution {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   jobName     String
   ownerId     String
   status      String
-  startedAt   DateTime @default(now())
+  startedAt   DateTime  @default(now())
   completedAt DateTime?
   result      String?
   errorCode   String?
@@ -156,53 +159,55 @@ model JobExecution {
 }
 
 model AuditLog {
-  id             String   @id @default(cuid())
+  id             String        @id @default(cuid())
   actorUserId    String?
   organizationId String?
   action         String
   targetType     String
   targetId       String?
   metadata       String?
-  createdAt      DateTime @default(now())
-  actor          User? @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  createdAt      DateTime      @default(now())
+  actor          User?         @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
   organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+
   @@index([organizationId, createdAt])
   @@index([actorUserId, createdAt])
   @@index([action, createdAt])
 }
 
 model IntegrationSecret {
-  id             String   @id @default(cuid())
+  id             String       @id @default(cuid())
   organizationId String
   businessId     String?
   provider       String
   encryptedData  String
-  keyVersion     String   @default("v1")
-  status         String   @default("disconnected")
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  keyVersion     String       @default("v1")
+  status         String       @default("disconnected")
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  business       Business? @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  business       Business?    @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
   @@unique([organizationId, businessId, provider])
   @@index([organizationId, provider])
 }
 
 model Integration {
-  id             String   @id @default(cuid())
+  id             String       @id @default(cuid())
   organizationId String
   businessId     String?
   provider       String
-  status         String   @default("disconnected")
+  status         String       @default("disconnected")
   connectedAt    DateTime?
   lastSyncAt     DateTime?
   expiresAt      DateTime?
   scopes         String?
   metadata       String?
   lastErrorCode  String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  business       Business? @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  business       Business?    @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
   @@index([organizationId, provider])
   @@index([businessId, provider])
@@ -210,13 +215,13 @@ model Integration {
 }
 
 model Membership {
-  id             String   @id @default(cuid())
+  id             String       @id @default(cuid())
   userId         String
   organizationId String
-  role           String   @default("member")
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-  user           User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role           String       @default("member")
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   @@unique([userId, organizationId])
@@ -232,19 +237,19 @@ model AuthSession {
   lastSeenAt DateTime @default(now())
   userAgent  String?
   ipHash     String?
-  user       User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, expiresAt])
 }
 
 model UsageEvent {
-  id             String   @id @default(cuid())
+  id             String       @id @default(cuid())
   organizationId String
   kind           String
-  quantity       Int      @default(1)
+  quantity       Int          @default(1)
   resourceId     String?
   periodKey      String
-  createdAt      DateTime @default(now())
+  createdAt      DateTime     @default(now())
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   @@index([organizationId, kind, periodKey])
@@ -261,59 +266,59 @@ model Plan {
 }
 
 model Business {
-  id                  String   @id @default(cuid())
-  userId              String?
-  user                User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
-  organizationId      String?
-  organization        Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  nombre              String
-  rubro               String
-  descripcion         String?
-  ubicacion           String?
-  ciudad              String?
-  pais                String?
-  tamano              String?
-  tipoCliente         String?
-  publicoObjetivo     String?
-  productosServicios  String?
-  ticketPromedio      Float?
-  empleados           String?
-  webUrl              String?
-  instagramHandle     String?
-  otrosCanales        String?
-  canales             String?
-  facturacion         Float?
-  clientesMensuales   Int?
-  inversionMarketing  Float?
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  id                 String        @id @default(cuid())
+  userId             String?
+  user               User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  organizationId     String?
+  organization       Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  nombre             String
+  rubro              String
+  descripcion        String?
+  ubicacion          String?
+  ciudad             String?
+  pais               String?
+  tamano             String?
+  tipoCliente        String?
+  publicoObjetivo    String?
+  productosServicios String?
+  ticketPromedio     Float?
+  empleados          String?
+  webUrl             String?
+  instagramHandle    String?
+  otrosCanales       String?
+  canales            String?
+  facturacion        Float?
+  clientesMensuales  Int?
+  inversionMarketing Float?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
 
-  goals               BusinessGoal[]
-  websites            Website[]
-  instagramConnection InstagramConnection?
-  scores              NuvraScore[]
-  diagnoses           Diagnosis[]
-  strategies          Strategy[]
+  goals                  BusinessGoal[]
+  websites               Website[]
+  instagramConnection    InstagramConnection?
+  scores                 NuvraScore[]
+  diagnoses              Diagnosis[]
+  strategies             Strategy[]
   clarificationQuestions ClarificationQuestion[]
-  analysisHistory     AnalysisHistory[]
-  analysisRuns        AnalysisRun[]
-  integrationSecrets  IntegrationSecret[]
-  integrations        Integration[]
+  analysisHistory        AnalysisHistory[]
+  analysisRuns           AnalysisRun[]
+  integrationSecrets     IntegrationSecret[]
+  integrations           Integration[]
 
   @@index([organizationId])
 }
 
 model BusinessGoal {
-  id           String   @id @default(cuid())
-  businessId   String
-  business     Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  objetivo     String
+  id             String   @id @default(cuid())
+  businessId     String
+  business       Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  objetivo       String
   objetivoCustom String?
-  magnitud     Float?
-  plazoDias    Int
-  plazoLabel   String
-  isActive     Boolean  @default(true)
-  createdAt    DateTime @default(now())
+  magnitud       Float?
+  plazoDias      Int
+  plazoLabel     String
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
 }
 
 model Website {
@@ -326,33 +331,33 @@ model Website {
 }
 
 model WebsiteAnalysis {
-  id              String   @id @default(cuid())
+  id              String    @id @default(cuid())
   websiteId       String
-  website         Website  @relation(fields: [websiteId], references: [id], onDelete: Cascade)
-  status          String   @default("pending")
-  pagesAnalyzed   Int      @default(0)
+  website         Website   @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  status          String    @default("pending")
+  pagesAnalyzed   Int       @default(0)
   rawData         String?
   screenshots     String?
   performanceData String?
   errorMessage    String?
-  createdAt       DateTime @default(now())
+  createdAt       DateTime  @default(now())
   completedAt     DateTime?
   findings        Finding[]
 }
 
 model InstagramConnection {
-  id           String    @id @default(cuid())
-  businessId   String    @unique
-  business     Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  status       String    @default("not_configured")
-  igUserId     String?
-  igUsername   String?
-  accessToken  String?
-  tokenExpiry  DateTime?
-  scopes       String?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-  analyses     InstagramAnalysis[]
+  id          String              @id @default(cuid())
+  businessId  String              @unique
+  business    Business            @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  status      String              @default("not_configured")
+  igUserId    String?
+  igUsername  String?
+  accessToken String?
+  tokenExpiry DateTime?
+  scopes      String?
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+  analyses    InstagramAnalysis[]
 }
 
 model InstagramAnalysis {
@@ -378,132 +383,132 @@ model NuvraScore {
 }
 
 model ScoreDimension {
-  id          String     @id @default(cuid())
-  scoreId     String
-  nuvraScore  NuvraScore @relation(fields: [scoreId], references: [id], onDelete: Cascade)
-  name        String
-  slug        String
-  points      Int
-  weight      Float
-  criteria    String?
-  strengths   String?
-  problems    String?
-  source      String?
-  confidence  String?
-  findings    Finding[]
+  id         String     @id @default(cuid())
+  scoreId    String
+  nuvraScore NuvraScore @relation(fields: [scoreId], references: [id], onDelete: Cascade)
+  name       String
+  slug       String
+  points     Int
+  weight     Float
+  criteria   String?
+  strengths  String?
+  problems   String?
+  source     String?
+  confidence String?
+  findings   Finding[]
 }
 
 model Finding {
-  id               String          @id @default(cuid())
-  dimensionId      String?
-  dimension        ScoreDimension? @relation(fields: [dimensionId], references: [id], onDelete: SetNull)
+  id                String           @id @default(cuid())
+  dimensionId       String?
+  dimension         ScoreDimension?  @relation(fields: [dimensionId], references: [id], onDelete: SetNull)
   websiteAnalysisId String?
-  websiteAnalysis  WebsiteAnalysis? @relation(fields: [websiteAnalysisId], references: [id], onDelete: SetNull)
-  type             String
-  category         String
-  severity         String
-  title            String
-  description      String
-  evidence         String
-  pageUrl          String?
-  source           String
-  confidence       String
-  impact           String?
-  createdAt        DateTime        @default(now())
+  websiteAnalysis   WebsiteAnalysis? @relation(fields: [websiteAnalysisId], references: [id], onDelete: SetNull)
+  type              String
+  category          String
+  severity          String
+  title             String
+  description       String
+  evidence          String
+  pageUrl           String?
+  source            String
+  confidence        String
+  impact            String?
+  createdAt         DateTime         @default(now())
 }
 
 model Diagnosis {
-  id          String   @id @default(cuid())
-  businessId  String
-  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  summary     String
-  bottleneck  String
-  strengths   String
-  weaknesses  String
+  id            String     @id @default(cuid())
+  businessId    String
+  business      Business   @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  summary       String
+  bottleneck    String
+  strengths     String
+  weaknesses    String
   opportunities String
-  risks       String
-  priorities  String
-  engineType  String   @default("deterministic")
-  createdAt   DateTime @default(now())
-  strategies  Strategy[]
+  risks         String
+  priorities    String
+  engineType    String     @default("deterministic")
+  createdAt     DateTime   @default(now())
+  strategies    Strategy[]
 }
 
 model Strategy {
-  id                String            @id @default(cuid())
-  businessId        String
-  business          Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  diagnosisId       String
-  diagnosis         Diagnosis         @relation(fields: [diagnosisId], references: [id], onDelete: Cascade)
-  objetivo          String
-  situacionActual   String
-  distanciaObjetivo String
-  principalProblema String
-  prioridades       String
-  frameworks        String?
+  id                  String            @id @default(cuid())
+  businessId          String
+  business            Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  diagnosisId         String
+  diagnosis           Diagnosis         @relation(fields: [diagnosisId], references: [id], onDelete: Cascade)
+  objetivo            String
+  situacionActual     String
+  distanciaObjetivo   String
+  principalProblema   String
+  prioridades         String
+  frameworks          String?
   frameworksRationale String?
-  engineType        String            @default("deterministic")
-  createdAt         DateTime          @default(now())
-  actions           StrategicAction[]
+  engineType          String            @default("deterministic")
+  createdAt           DateTime          @default(now())
+  actions             StrategicAction[]
 }
 
 model ClarificationQuestion {
-  id          String   @id @default(cuid())
-  businessId  String
-  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  analysisId  String?
-  question    String
-  reason      String
-  dimension   String
-  affects     String
-  impact      String
-  responses   ClarificationResponse[]
-  createdAt   DateTime @default(now())
+  id         String                  @id @default(cuid())
+  businessId String
+  business   Business                @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  analysisId String?
+  question   String
+  reason     String
+  dimension  String
+  affects    String
+  impact     String
+  responses  ClarificationResponse[]
+  createdAt  DateTime                @default(now())
 }
 
 model ClarificationResponse {
-  id          String   @id @default(cuid())
-  questionId  String
-  question    ClarificationQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
-  businessId  String
-  answer      String
-  source      String   @default("user")
-  answeredAt  DateTime @default(now())
+  id         String                @id @default(cuid())
+  questionId String
+  question   ClarificationQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  businessId String
+  answer     String
+  source     String                @default("user")
+  answeredAt DateTime              @default(now())
 }
 
 model StrategicAction {
-  id                  String   @id @default(cuid())
-  strategyId          String
-  strategy            Strategy @relation(fields: [strategyId], references: [id], onDelete: Cascade)
-  title               String
-  description         String?
-  order               Int
-  impact              String
-  difficulty          String
-  estimatedTime       String
-  dependencies        String?
-  indicatorToImprove  String
-  rationale           String
-  relatedFindingIds   String?
-  findingIds          String?
-  evidence            String?
-  inference           String?
-  dimension           String?
-  framework           String?
-  confidence          String?
-  problem             String?
-  unlocksContent      Boolean  @default(false)
-  done                Boolean  @default(false)
+  id                 String   @id @default(cuid())
+  strategyId         String
+  strategy           Strategy @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+  title              String
+  description        String?
+  order              Int
+  impact             String
+  difficulty         String
+  estimatedTime      String
+  dependencies       String?
+  indicatorToImprove String
+  rationale          String
+  relatedFindingIds  String?
+  findingIds         String?
+  evidence           String?
+  inference          String?
+  dimension          String?
+  framework          String?
+  confidence         String?
+  problem            String?
+  unlocksContent     Boolean  @default(false)
+  done               Boolean  @default(false)
 }
 
 model AnalysisHistory {
-  id              String   @id @default(cuid())
-  businessId      String
-  business        Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  scoreId         String?
-  diagnosisId     String?
-  strategyId      String?
+  id                String   @id @default(cuid())
+  businessId        String
+  business          Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  scoreId           String?
+  diagnosisId       String?
+  strategyId        String?
   websiteAnalysisId String?
-  nuvraScoreTotal Int?
-  snapshot        String?
-  createdAt       DateTime @default(now())
+  nuvraScoreTotal   Int?
+  snapshot          String?
+  createdAt         DateTime @default(now())
 }

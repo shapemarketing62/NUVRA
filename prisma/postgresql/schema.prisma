@@ -15,6 +15,7 @@ model User {
   passwordHash            String
   emailVerifiedAt         DateTime?
   disabledAt              DateTime?
+  internalRole            String?
   createdAt               DateTime                 @default(now())
   updatedAt               DateTime                 @updatedAt
   businesses              Business[]

@@ -224,8 +224,10 @@ export function getPlanSnapshot(tier?: string | null): PlanSnapshot {
 
 export function hasEntitlement(
   plan: PlanTier | PlanSnapshot | string | null | undefined,
-  entitlement: EntitlementKey
+  entitlement: EntitlementKey,
+  internalAccess = false
 ): boolean {
+  if (internalAccess) return true;
   const snapshot = typeof plan === "object" && plan !== null && "entitlements" in plan ? plan : getPlanSnapshot(plan);
   return snapshot.entitlements[entitlement];
 }
@@ -244,6 +246,7 @@ export function getPlanFeatures(tier: PlanTier): FeatureDefinition[] {
   return Object.values(FEATURES).filter((feature) => plan.entitlements[feature.key]);
 }
 
-export function applyUsageLimit<T>(items: T[], plan: PlanTier | PlanSnapshot | string | null | undefined, limit: UsageLimitKey): T[] {
+export function applyUsageLimit<T>(items: T[], plan: PlanTier | PlanSnapshot | string | null | undefined, limit: UsageLimitKey, internalAccess = false): T[] {
+  if (internalAccess) return items;
   return items.slice(0, getUsageLimit(plan, limit));
 }

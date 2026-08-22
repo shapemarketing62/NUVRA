@@ -8,7 +8,7 @@ import { applyUsageLimit } from "@/lib/plans";
 import { useState } from "react";
 
 export default function AccionesPage() {
-  const { actions, loading, error, isDemo, planTier } = useDashboardData();
+  const { actions, loading, error, isDemo, planTier, internalAccess } = useDashboardData();
   const [filter, setFilter] = useState<"all" | "pending" | "in_progress" | "completed">("all");
 
   if (loading) return <PageSkeleton />;
@@ -30,7 +30,7 @@ export default function AccionesPage() {
     );
   }
 
-  const availableActions = applyUsageLimit(actions, planTier, "activeActions");
+  const availableActions = applyUsageLimit(actions, planTier, "activeActions", internalAccess);
   const filteredActions = availableActions.filter((a) => {
     if (filter === "all") return true;
     if (filter === "pending") return !a.done;

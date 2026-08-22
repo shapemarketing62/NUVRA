@@ -7,6 +7,7 @@ import { authorizeBusiness, requireUser, roleCan } from "@/lib/server/authorizat
 import { canConsume } from "@/lib/server/usage";
 import { getUsageLimit } from "@/lib/plans";
 import { writeAuditEvent } from "@/lib/server/audit";
+import { hasInternalAccess } from "@/lib/server/internal-access";
 
 const businessSchema = z.object({
   nombre: z.string().trim().min(1).max(120),
@@ -41,7 +42,7 @@ export async function POST(req: NextRequest) {
     if (!auth.ok) return apiError("unauthorized", 401);
     const membership = auth.user.memberships.find((item) => roleCan(item.role, "business.create"));
     if (!membership) return apiError("forbidden", 403);
-    if (!(await canConsume(membership.organizationId, "businesses"))) return apiError("usage_limit_reached", 403);
+    if (!(await canConsume(membership.organizationId, "businesses", 1, auth.user.id))) return apiError("usage_limit_reached", 403);
     const body = await readJsonBody(req, 32_000);
     const data = businessSchema.parse(body);
 
@@ -113,9 +114,10 @@ export async function GET(req: NextRequest) {
   const access = await authorizeBusiness(id, "business.read");
   if (!access.ok) return apiError(access.reason, access.reason === "unauthorized" ? 401 : 403);
 
-  const actionLimit = getUsageLimit(access.organization.planTier, "activeActions");
-  const competitorLimit = getUsageLimit(access.organization.planTier, "visibleCompetitors");
-  const historyLimit = Math.max(1, getUsageLimit(access.organization.planTier, "historicalMonths"));
+  const internalAccess = hasInternalAccess(access.user);
+  const actionLimit = internalAccess ? undefined : getUsageLimit(access.organization.planTier, "activeActions");
+  const competitorLimit = internalAccess ? undefined : getUsageLimit(access.organization.planTier, "visibleCompetitors");
+  const historyLimit = internalAccess ? undefined : Math.max(1, getUsageLimit(access.organization.planTier, "historicalMonths"));
   const business = await prisma.business.findUnique({
     where: { id },
     include: {
@@ -127,9 +129,9 @@ export async function GET(req: NextRequest) {
       strategies: {
         orderBy: { createdAt: "desc" },
         take: 1,
-        include: { actions: { orderBy: { order: "asc" }, take: actionLimit } },
+        include: { actions: { orderBy: { order: "asc" }, ...(actionLimit === undefined ? {} : { take: actionLimit }) } },
       },
-      analysisHistory: { orderBy: { createdAt: "desc" }, take: historyLimit },
+      analysisHistory: { orderBy: { createdAt: "desc" }, ...(historyLimit === undefined ? {} : { take: historyLimit }) },
     },
   });
 
@@ -141,7 +143,7 @@ export async function GET(req: NextRequest) {
     try {
       const snapshot = JSON.parse(item.snapshot);
       const competitors = snapshot?.intelligence?.competitorSummary?.competitors;
-      if (Array.isArray(competitors)) snapshot.intelligence.competitorSummary.competitors = competitors.slice(0, competitorLimit);
+      if (Array.isArray(competitors) && competitorLimit !== undefined) snapshot.intelligence.competitorSummary.competitors = competitors.slice(0, competitorLimit);
       return { ...item, snapshot: JSON.stringify(snapshot) };
     } catch { return { ...item, snapshot: null }; }
   });
@@ -150,6 +152,7 @@ export async function GET(req: NextRequest) {
     ...rest,
     analysisHistory: safeHistory,
     planTier: organization?.planTier || "FREE",
+    internalAccess,
   });
 }
 

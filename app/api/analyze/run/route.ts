@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
     if (!access.ok) return apiError(access.reason, access.reason === "unauthorized" ? 401 : 403);
     if (requiresVerifiedEmail("analysis.run") && !access.user.emailVerifiedAt) return apiError("forbidden", 403);
     if (!(await checkRateLimit(`analysis:${access.user.id}`, 5, 60_000)).allowed) return apiError("rate_limited", 429);
-    if (!(await canConsume(access.organization.id, "monthlyAnalyses"))) return apiError("usage_limit_reached", 403);
+    if (!(await canConsume(access.organization.id, "monthlyAnalyses", 1, access.user.id))) return apiError("usage_limit_reached", 403);
 
     const correlationId=requestId(req.headers);const supplied=req.headers.get("idempotency-key");const idempotencyKey=supplied&&/^[A-Za-z0-9._:-]{8,128}$/.test(supplied)?supplied:automaticIdempotencyKey({organizationId:access.organization.id,businessId,userId:access.user.id});
     const execution=await new AnalysisExecutionService().run({organizationId:access.organization.id,businessId,userId:access.user.id,requestId:correlationId,idempotencyKey,signal:req.signal});
@@ -29,7 +29,7 @@ export async function POST(req: NextRequest) {
     if (!execution.result?.success) {
       return apiError("source_unavailable", 422);
     }
-    await recordUsage(access.organization.id, "analysis", businessId);
+    await recordUsage(access.organization.id, "analysis", businessId, 1, access.user.id);
     return NextResponse.json({...execution.result,status:execution.run.status,analysisRunId:execution.run.id},{headers:{"x-request-id":correlationId}});
   } catch (err) {
     return handleApiError(err);

@@ -6,11 +6,11 @@ import { DemoBadge, ProBadge, ErrorState, PageSkeleton, UpgradePanel } from "@/c
 import { hasEntitlement } from "@/lib/plans";
 
 export default function EvolucionPage() {
-  const { history, score, loading, error, isDemo, planTier } = useDashboardData();
+  const { history, score, loading, error, isDemo, planTier, internalAccess } = useDashboardData();
 
   if (loading) return <PageSkeleton />;
   if (error) return <ErrorState message={error} />;
-  if (!hasEntitlement(planTier, "history.trend")) return <div className="page-container"><div className="page-eyebrow">Evolución</div><h1 className="page-title" style={{ marginBottom: 28 }}>Tu progreso en el tiempo</h1><UpgradePanel feature="history.trend" /></div>;
+  if (!hasEntitlement(planTier, "history.trend", internalAccess)) return <div className="page-container"><div className="page-eyebrow">Evolución</div><h1 className="page-title" style={{ marginBottom: 28 }}>Tu progreso en el tiempo</h1><UpgradePanel feature="history.trend" /></div>;
 
   if (!history || history.length === 0) {
     return (

@@ -12,6 +12,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const router = useRouter();
   const [businessName, setBusinessName] = useState("...");
   const [isDemo, setIsDemo] = useState(false);
+  const [internalAccess, setInternalAccess] = useState(false);
   const [planTier, setPlanTier] = useState<PlanTier>("FREE");
   const [ready, setReady] = useState(false);
 
@@ -25,6 +26,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     if (demo) {
       setBusinessName(DEMO_BUSINESS.nombre);
       setPlanTier("FREE");
+      setInternalAccess(false);
       setReady(true);
       return;
     }
@@ -40,6 +42,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         else {
           setBusinessName(data.nombre);
           setPlanTier(normalizePlanTier(data.planTier));
+          setInternalAccess(data.internalAccess === true);
         }
         if (!cancelled) setReady(true);
       })
@@ -59,6 +62,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         businessName={businessName}
         isDemo={isDemo}
         planTier={planTier}
+        internalAccess={internalAccess}
       />
       <main className="app-main shp-scrollbar">
         {children}
