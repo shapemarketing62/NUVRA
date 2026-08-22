@@ -2,6 +2,7 @@
 FROM mcr.microsoft.com/playwright:v1.62.1-noble AS dependencies
 WORKDIR /app
 COPY package.json package-lock.json ./
+COPY prisma ./prisma
 RUN npm ci
 
 FROM dependencies AS builder
