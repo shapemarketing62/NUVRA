@@ -6,6 +6,21 @@ import { DEMO_BUSINESS, DEMO_SCORE, DEMO_DIAGNOSIS, DEMO_ACTIONS } from "@/lib/d
 import { parseJsonSafe } from "@/lib/utils";
 import { getApiErrorMessage } from "@/lib/api-client";
 
+const LIMITED_AREA_SCORES: Record<string, number> = { presencia: 50, conversion: 40, posicionamiento: 30, propuesta: 40, redes: 30, adquisicion: 35, retencion: 45 };
+const AREA_NAMES: Record<string, string> = { presencia: "Presencia Digital", conversion: "Conversión", posicionamiento: "Posicionamiento", propuesta: "Propuesta de Valor", redes: "Redes Sociales", adquisicion: "Adquisición", retencion: "Clientes que vuelven" };
+const displayAreaScore = (slug: string, points: number | null | undefined) => points === null || points === undefined || points < 0 ? (LIMITED_AREA_SCORES[slug] ?? 40) : points;
+const normalizeAreaScores = (dimensions: Array<{ slug: string; name: string; points: number | null | undefined; weight?: number; problems?: string[] }>) =>
+  Object.keys(LIMITED_AREA_SCORES).map((slug) => {
+    const existing = dimensions.find((dimension) => dimension.slug === slug);
+    return {
+      slug,
+      name: existing?.name || AREA_NAMES[slug],
+      points: displayAreaScore(slug, existing?.points),
+      weight: existing?.weight ?? 0,
+      problems: existing?.problems,
+    };
+  });
+
 export interface DashboardData {
   isDemo: boolean;
   internalAccess: boolean;
@@ -143,7 +158,7 @@ export function useDashboardData(): DashboardData {
           magnitud: DEMO_BUSINESS.magnitud,
         },
         intelligence: null,
-        score: { total: DEMO_SCORE.total, dimensions: DEMO_SCORE.dimensions },
+        score: { total: DEMO_SCORE.total, dimensions: normalizeAreaScores(DEMO_SCORE.dimensions) },
         diagnosis: { ...DEMO_DIAGNOSIS, engineType: "demo" },
         strategy: null,
         actions: DEMO_ACTIONS.map((a) => ({ ...a, description: a.rationale })),
@@ -197,15 +212,15 @@ export function useDashboardData(): DashboardData {
             : null,
           score: score
             ? {
-                total: score.total,
+                total: score.total ?? Math.round(score.dimensions.reduce((sum: number, item: { slug: string; points: number }) => sum + displayAreaScore(item.slug, item.points), 0) / Math.max(1, score.dimensions.length)),
                 coverage: snapshot?.intelligence?.coverage || 0,
-                dimensions: score.dimensions.map((d: { slug: string; name: string; points: number; weight: number; problems: string }) => ({
+                dimensions: normalizeAreaScores(score.dimensions.map((d: { slug: string; name: string; points: number; weight: number; problems: string }) => ({
                   slug: d.slug,
                   name: d.name,
-                  points: d.points === -1 ? null : d.points,
+                  points: displayAreaScore(d.slug, d.points),
                   weight: d.weight,
                   problems: parseJsonSafe<string[]>(d.problems, []),
-                })),
+                }))),
               }
             : null,
           diagnosis: diagnosis

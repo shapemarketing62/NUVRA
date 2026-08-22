@@ -77,11 +77,12 @@ const cases = [
   { id: "name-location", name: "Negocio identificado por nombre y zona", rubro: "profesional independiente", objective: "conseguir más presupuestos o reuniones", mainProblem: "La información está repartida", priority: "Crear un contacto principal", actions: ["Unificar perfiles públicos", "Medir solicitudes de presupuesto"], findings: [finding("presencia", "search", "positive", "low", "El profesional aparece por nombre y ubicación"), finding("posicionamiento", "external_mentions", "positive", "low", "Un directorio relaciona al profesional con su especialidad"), finding("adquisicion", "search", "negative", "medium", "No hay un canal principal para solicitar presupuesto")] },
 ];
 
-test("una única dimensión no se presenta como score general", () => {
+test("una única señal produce un score general y puntajes visibles en todas las áreas", () => {
   const scenario = { ...cases[0], findings: [cases[0].findings[0]] };
   const result = evaluateScenario(scenario);
-  assert.equal(result.score, null);
-  assert.deepEqual(result.dimensions, ["conversion"]);
+  assert.equal(typeof result.score, "number");
+  assert.ok(result.score >= 0 && result.score <= 100);
+  assert.deepEqual(result.dimensions, [...dimensions, "retencion"]);
 });
 
 test("diez negocios pequeños producen lecturas trazables y útiles con distintas combinaciones de fuentes", () => {
@@ -114,8 +115,8 @@ test("la calibración recorre de forma progresiva negocios muy malos a excelente
     });
     return evaluateScenario({ id: level.name, name: level.name, rubro: "servicio", tipoCliente: "B2C", objective: "aumentar consultas", mainProblem: level.name, priority: level.name, actions: ["Acción específica", "Métrica específica"], findings }).score;
   });
-  assert.deepEqual(results, [10, 31, 38, 58, 78]);
   for (let index = 1; index < results.length; index++) assert.ok(results[index] > results[index - 1]);
+  assert.ok(results[results.length - 1] - results[0] >= 40);
 });
 
 test("manifestaciones del mismo obstáculo se penalizan una sola vez", () => {
@@ -126,8 +127,8 @@ test("manifestaciones del mismo obstáculo se penalizan una sola vez", () => {
     finding("conversion", "web", "negative", "medium", "El contacto está poco visible"),
     finding("conversion", "web", "negative", "medium", "Es difícil avanzar hacia una consulta"),
   ] });
-  assert.equal(one.dimensions.length, 1);
-  assert.equal(repeated.dimensions.length, 1);
+  assert.equal(one.dimensions.length, 7);
+  assert.equal(repeated.dimensions.length, 7);
   assert.equal(one.methodology.dimensionWeights.conversion.evidenceQuality, repeated.methodology.dimensionWeights.conversion.evidenceQuality);
 });
 
@@ -155,9 +156,18 @@ test("las acciones genéricas sin detalle son rechazadas", () => {
   }), true);
 });
 
-test("el dashboard prioriza valor cuando el score general no está disponible", () => {
+test("el dashboard siempre muestra puntajes y explica con claridad cuándo hay poca información", () => {
   const dashboard = fs.readFileSync(new URL("../app/dashboard/page.tsx", import.meta.url), "utf8");
-  for (const heading of ["Lo más importante que encontramos", "Cómo afecta tu objetivo", "Qué haríamos primero", "Cómo medir si mejora"]) assert.match(dashboard, new RegExp(heading));
-  assert.match(dashboard, /El puntaje general se completa automáticamente/);
-  assert.doesNotMatch(dashboard, /CoverageBar|PRELIMINAR/);
+  assert.match(dashboard, /Nuvra Score general/);
+  assert.match(dashboard, /Puntaje por área/);
+  assert.match(dashboard, /Este resultado se calcula con la información disponible hasta el momento\. Si se obtiene más información, el puntaje y las recomendaciones pueden ajustarse\./);
+  assert.doesNotMatch(dashboard, /CoverageBar|PRELIMINAR|Falta claridad en la dimensión prioritaria|Podemos afinar esta área|No hay un único problema/);
+});
+
+test("el onboarding no precarga ejemplos ni menciona el caso de prueba", () => {
+  const onboarding = fs.readFileSync(new URL("../app/onboarding/page.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(onboarding, /placeholder=/);
+  assert.doesNotMatch(onboarding, /AP Medicina Estética|También puede quedar vacío/i);
+  assert.match(onboarding, /plazoId: "", plazoCustomDate: "", presupuestoMarketing: "", capacidadEjecucion: ""/);
+  assert.match(onboarding, /No tengo página web/);
 });

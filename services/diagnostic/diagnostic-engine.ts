@@ -51,8 +51,8 @@ function buildDeterministicDiagnosis(
 
   const strategicDimension = weakest && weakest.slug ? weakest : null;
   const strategicProblem = strategicDimension
-    ? strategicDimension.problems.find((problem) => !/title|meta description|SEO|seo|index/i.test(problem)) || strategicDimension.problems[0] || "Hoy no hay un único problema que explique el resultado. Hay varias mejoras concretas que conviene ordenar."
-    : `Todavía no se pudo observar con claridad qué parte del recorrido está frenando ${business.objetivo.toLowerCase()}.`;
+    ? strategicDimension.problems.find((problem) => !/title|meta description|SEO|seo|index/i.test(problem)) || strategicDimension.problems[0] || "Hay varias mejoras posibles. Conviene empezar por la que tenga más relación con el objetivo."
+    : `Conviene empezar por ordenar el camino que una persona sigue hasta consultar, reservar o comprar.`;
 
   // Build bottleneck from the strategic dimension's actual problems, not from random websiteFindings
   const bottleneckTitle = strategicProblem;

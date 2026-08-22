@@ -31,6 +31,7 @@ export interface NuvraDimension {
   sources: SourceType[]; // Qué fuentes sustentan esta dimensión
   findings: EvidenceFinding[];
   message?: string;
+  estimatedFromLimitedEvidence?: boolean;
 }
 
 export class NuvraScoreCalculator {
@@ -46,17 +47,18 @@ export class NuvraScoreCalculator {
     // general no debe descartar dimensiones que sí pudieron evaluarse.
     const dimensions = this.calculateDimensions(byDimension, aggregatedEvidence.sources, context.objective || "");
     const evaluableDimensions = dimensions.filter(d => d.points !== null);
+    const evidenceBackedDimensions = dimensions.filter(d => d.findings.length > 0 && !d.estimatedFromLimitedEvidence);
     const objectiveWeights = this.getObjectiveWeights(context.objective || "");
     const dimensionWeights = Object.fromEntries(dimensions.map(d => {
       const objectiveRelevance = objectiveWeights[d.slug] ?? 0;
       const evidenceQuality = this.calculateEvidenceQuality(d);
       return [d.slug, { objectiveRelevance, evidenceQuality, combinedWeight: objectiveRelevance * evidenceQuality }];
     }));
-    const objectiveRelevanceCovered = evaluableDimensions.reduce((sum, d) => sum + (objectiveWeights[d.slug] ?? 0), 0);
+    const objectiveRelevanceCovered = evidenceBackedDimensions.reduce((sum, d) => sum + (objectiveWeights[d.slug] ?? 0), 0);
     const evidenceQuality = objectiveRelevanceCovered > 0
-      ? evaluableDimensions.reduce((sum, d) => sum + (objectiveWeights[d.slug] ?? 0) * dimensionWeights[d.slug].evidenceQuality, 0) / objectiveRelevanceCovered
+      ? evidenceBackedDimensions.reduce((sum, d) => sum + (objectiveWeights[d.slug] ?? 0) * dimensionWeights[d.slug].evidenceQuality, 0) / objectiveRelevanceCovered
       : 0;
-    const relevanceShares = evaluableDimensions.map(d => objectiveWeights[d.slug] ?? 0).filter(Boolean);
+    const relevanceShares = evidenceBackedDimensions.map(d => objectiveWeights[d.slug] ?? 0).filter(Boolean);
     const relevanceTotal = relevanceShares.reduce((sum, value) => sum + value, 0);
     const effectiveDimensionDiversity = relevanceTotal > 0
       ? 1 / relevanceShares.reduce((sum, value) => sum + Math.pow(value / relevanceTotal, 2), 0)
@@ -64,7 +66,7 @@ export class NuvraScoreCalculator {
     const diversityFactor = Math.min(1, effectiveDimensionDiversity / 3);
     const readiness = objectiveRelevanceCovered * evidenceQuality * diversityFactor;
     const methodology = {
-      evaluableDimensions: evaluableDimensions.length,
+      evaluableDimensions: evidenceBackedDimensions.length,
       effectiveDimensionDiversity: Math.round(effectiveDimensionDiversity * 100) / 100,
       objectiveRelevanceCovered: Math.round(objectiveRelevanceCovered * 100) / 100,
       evidenceQuality: Math.round(evidenceQuality * 100) / 100,
@@ -72,39 +74,22 @@ export class NuvraScoreCalculator {
       dimensionWeights,
     };
 
-    // Un score general requiere evidencia distribuida y relevante. Las lecturas
-    // parciales siguen disponibles para diagnóstico, pero no representan el todo.
-    if (evaluableDimensions.length < 2 || objectiveRelevanceCovered < 0.45 || effectiveDimensionDiversity < 1.6 || readiness < 0.2) {
-      return {
-        total: null,
-        dimensions,
-        confidence: "INSUFICIENTE",
-        coverage: coverage.total,
-        scoreStatus: "pending",
-        statusLabel: "PENDIENTE",
-        requiresMoreSources: true,
-        reason: evaluableDimensions.length === 0
-          ? "No se pudo evaluar ninguna dimensión con datos observables."
-          : "Las señales observadas todavía están demasiado concentradas para representar el marketing general.",
-        evaluatedAt: new Date(),
-        methodology,
-      };
-    }
-
-    // Calcular total (solo dimensiones evaluables)
+    // El resultado comercial siempre existe. La calidad de evidencia sigue
+    // modulando internamente cuánto pesa cada área, sin convertir ausencia en cero.
     let total: number | null = null;
 
     if (evaluableDimensions.length > 0) {
       // Ponderar por relevancia para el objetivo y calidad de la evidencia.
       const weightedSum = evaluableDimensions.reduce((acc, d) => {
-        return acc + (d.points || 0) * dimensionWeights[d.slug].combinedWeight;
+        const qualityAdjustedWeight = (objectiveWeights[d.slug] ?? 0) * (0.25 + 0.75 * dimensionWeights[d.slug].evidenceQuality);
+        return acc + (d.points || 0) * qualityAdjustedWeight;
       }, 0);
       
       const totalWeight = evaluableDimensions.reduce((acc, d) => {
-        return acc + dimensionWeights[d.slug].combinedWeight;
+        return acc + (objectiveWeights[d.slug] ?? 0) * (0.25 + 0.75 * dimensionWeights[d.slug].evidenceQuality);
       }, 0);
 
-      total = Math.round(weightedSum / totalWeight);
+      total = totalWeight > 0 ? Math.round(weightedSum / totalWeight) : 40;
     }
 
     // Determinar Estado del Score (Requisito 2: Distinguir Pendiente / Preliminar / Completo)
@@ -112,7 +97,7 @@ export class NuvraScoreCalculator {
     let statusLabel = "PRELIMINAR";
     let reason = "Score preliminar basado en evidencia disponible. Faltan fuentes para completar la evaluación.";
 
-    if (coverage.total >= 70 && coverage.evaluatedSources.length >= 3) {
+    if (coverage.total >= 70 && coverage.evaluatedSources.length >= 3 && readiness >= 0.2) {
       scoreStatus = "complete";
       statusLabel = "COMPLETO";
       reason = "Diagnóstico completo sustentado por múltiples fuentes de evidencia.";
@@ -195,9 +180,7 @@ export class NuvraScoreCalculator {
       this.calculateAdquisicionDimension(byDimension.adquisicion || [], sources),
     ];
 
-    if (/volver|recompra|recurren|fideliza|clientes actuales/i.test(objective) || (byDimension.retencion || []).length > 0) {
-      dimensions.push(this.calculateRetentionDimension(byDimension.retencion || []));
-    }
+    dimensions.push(this.calculateRetentionDimension(byDimension.retencion || []));
 
     return dimensions;
   }
@@ -205,7 +188,7 @@ export class NuvraScoreCalculator {
   private static calculateRetentionDimension(findings: EvidenceFinding[]): NuvraDimension {
     findings = this.deduplicateSemanticFindings(findings);
     const sources = Array.from(new Set(findings.map((finding) => finding.source)));
-    if (!findings.length) return { name: "Qué hacés para que los clientes vuelvan", slug: "retencion", points: null, confidence: "INSUFICIENTE", sources, findings: [], message: "Todavía no hay información comprobable sobre seguimiento, recordatorios o recompra." };
+    if (!findings.length) return { name: "Qué hacés para que los clientes vuelvan", slug: "retencion", points: 45, confidence: "INSUFICIENTE", sources, findings: [], message: "Resultado estimado con la información disponible.", estimatedFromLimitedEvidence: true };
     let score = 45;
     for (const finding of findings) score += finding.type === "positive" ? 10 : finding.type === "negative" ? (finding.impact === "high" ? -15 : -8) : 0;
     return { name: "Qué hacés para que los clientes vuelvan", slug: "retencion", points: Math.max(0, Math.min(100, score)), confidence: this.calculateDimensionConfidence(findings, sources), sources, findings };
@@ -223,11 +206,12 @@ export class NuvraScoreCalculator {
       return {
         name: "Qué tan fácil es encontrarte",
         slug: "presencia",
-        points: null,
+        points: 50,
         confidence: "INSUFICIENTE",
         sources: sourceTypes,
         findings: [],
-        message: "Todavía no encontramos información pública suficiente para saber qué tan fácil es encontrar el negocio.",
+        message: "Resultado estimado con la información disponible.",
+        estimatedFromLimitedEvidence: true,
       };
     }
 
@@ -264,11 +248,12 @@ export class NuvraScoreCalculator {
       return {
         name: "Qué tan fácil es consultar, reservar o comprar",
         slug: "conversion",
-        points: null,
+        points: 40,
         confidence: "INSUFICIENTE",
         sources: sourceTypes,
         findings: [],
-        message: "Todavía no pudimos comprobar con claridad cómo una persona consulta, reserva o compra.",
+        message: "Resultado estimado con la información disponible.",
+        estimatedFromLimitedEvidence: true,
       };
     }
 
@@ -301,28 +286,16 @@ export class NuvraScoreCalculator {
     findings = this.deduplicateSemanticFindings(findings);
     const confidence = this.calculateDimensionConfidence(findings, sourceTypes);
 
-    // Posicionamiento requiere fuentes externas
-    if (sourceTypes.length === 1 && sourceTypes[0] === "web") {
-      return {
-        name: "Qué tanta confianza y diferenciación generás",
-        slug: "posicionamiento",
-        points: null,
-        confidence: "INSUFICIENTE",
-        sources: sourceTypes,
-        findings,
-        message: "Para evaluar confianza y diferenciación necesitamos contrastar el negocio con reseñas, búsquedas u otros canales públicos.",
-      };
-    }
-
     if (findings.length === 0) {
       return {
         name: "Qué tanta confianza y diferenciación generás",
         slug: "posicionamiento",
-        points: null,
+        points: 30,
         confidence: "INSUFICIENTE",
         sources: sourceTypes,
         findings: [],
-        message: "Todavía no encontramos señales públicas suficientes de confianza o diferenciación.",
+        message: "Resultado estimado con la información disponible.",
+        estimatedFromLimitedEvidence: true,
       };
     }
 
@@ -359,11 +332,12 @@ export class NuvraScoreCalculator {
       return {
         name: "Qué tan claro queda lo que ofrecés",
         slug: "propuesta",
-        points: null,
+        points: 40,
         confidence: "INSUFICIENTE",
         sources: sourceTypes,
         findings: [],
-        message: "Todavía no pudimos comprobar si una persona entiende con claridad qué ofrecés y por qué elegirte.",
+        message: "Resultado estimado con la información disponible.",
+        estimatedFromLimitedEvidence: true,
       };
     }
 
@@ -401,11 +375,12 @@ export class NuvraScoreCalculator {
       return {
         name: "Qué tan útiles están siendo tus redes",
         slug: "redes",
-        points: null,
+        points: 30,
         confidence: "INSUFICIENTE",
         sources: sourceTypes,
         findings,
-        message: "No encontramos un perfil social público que sea relevante para este negocio.",
+        message: "Resultado estimado con la información disponible.",
+        estimatedFromLimitedEvidence: true,
       };
     }
 
@@ -413,11 +388,12 @@ export class NuvraScoreCalculator {
       return {
         name: "Qué tan útiles están siendo tus redes",
         slug: "redes",
-        points: null,
+        points: 30,
         confidence: "INSUFICIENTE",
         sources: sourceTypes,
         findings: [],
-        message: "Identificamos el perfil, pero todavía no hay suficiente información pública para evaluar su utilidad.",
+        message: "Resultado estimado con la información disponible.",
+        estimatedFromLimitedEvidence: true,
       };
     }
 
@@ -454,11 +430,12 @@ export class NuvraScoreCalculator {
       return {
         name: "Qué capacidad tenés para atraer demanda",
         slug: "adquisicion",
-        points: null,
+        points: 35,
         confidence: "INSUFICIENTE",
         sources: sourceTypes,
         findings: [],
-        message: "Todavía no encontramos evidencia suficiente sobre cómo llegan personas interesadas al negocio.",
+        message: "Resultado estimado con la información disponible.",
+        estimatedFromLimitedEvidence: true,
       };
     }
 
