@@ -1,4 +1,4 @@
-import { SourceAnalyzer, SourceEvidence } from "./source-analyzer";
+import { SourceAnalyzer, SourceEvidence, type EvidenceFinding } from "./source-analyzer";
 import { WebSourceAnalyzer } from "./web-source-analyzer";
 import { SearchSourceAnalyzer } from "./search-source-analyzer";
 import { ReviewsSourceAnalyzer } from "./reviews-source-analyzer";
@@ -59,6 +59,7 @@ export class BusinessIntelligenceLayer {
     if (discoveryResult) {
       this.enrichEvidenceWithDiscovery(aggregatedEvidence, discoveryResult);
     }
+    this.enrichEvidenceWithDeclaredContext(aggregatedEvidence, targetBusiness, objectiveFromBusiness(targetBusiness));
 
     console.log("[BI_LAYER] Evidence aggregated:", {
       sourcesEvaluated: Object.values(aggregatedEvidence.sources).filter((s) => s.status === "evaluated").length,
@@ -100,6 +101,27 @@ export class BusinessIntelligenceLayer {
     };
   }
 
+  private enrichEvidenceWithDeclaredContext(aggregated: AggregatedEvidence, business: Business, objective?: string): void {
+    if (!/volver|recompra|recurren|fideliza|clientes actuales/i.test(objective || "")) return;
+    const declared = business.otrosCanales?.trim();
+    if (!declared || !/lista|cliente|whatsapp|recordatorio|seguimiento|recomendaci|post.?venta/i.test(declared)) return;
+    const finding: EvidenceFinding = {
+      id: `declared-retention-${business.id}`,
+      category: "retencion",
+      type: "positive",
+      impact: "medium",
+      evidence: `El negocio informó una base para volver a contactar clientes: ${declared}`,
+      source: "other",
+      attribution: "Información aportada por el negocio",
+      weight: 0.55,
+      confidence: "MEDIA",
+    };
+    aggregated.findings.push(finding);
+    aggregated.deduplicated.push(finding);
+    (aggregated.byCategory.retencion ||= []).push(finding);
+    (aggregated.byDimension.retencion ||= []).push(finding);
+  }
+
   /**
    * Enriquece la evidencia agregada con el resultado del Discovery Engine:
    * - Aplica ajuste de peso/confianza a candidatos 'probable' (Requisito 2).
@@ -109,22 +131,41 @@ export class BusinessIntelligenceLayer {
     aggregated: AggregatedEvidence,
     discovery: DiscoveryResult
   ): void {
-    // Si Instagram fue descubierto pero no hay OAuth conectado, marcar como requires_auth (sin penalización)
+    // Un perfil público confirmado aporta evidencia aunque las métricas privadas requieran OAuth.
     if (discovery.primaryInstagram && (!aggregated.sources.instagram || aggregated.sources.instagram.status !== "evaluated")) {
+      const candidate = discovery.allCandidates.find((item) => item.type === "instagram" && item.url === discovery.primaryInstagram);
+      const declared = Boolean(discovery.target.declaredInstagram);
+      const confidence: "ALTA" | "MEDIA" = declared || candidate?.status === "confirmed" ? "ALTA" : "MEDIA";
+      const publicFinding: EvidenceFinding = {
+        id: `instagram-public-${Buffer.from(discovery.primaryInstagram).toString("base64url").slice(0, 20)}`,
+        category: "redes",
+        type: "positive" as const,
+        impact: "medium" as const,
+        evidence: `Se identificó el perfil público oficial de Instagram: ${discovery.primaryInstagram}.`,
+        source: "instagram" as const,
+        attribution: candidate?.title || "Perfil aportado o descubierto públicamente",
+        weight: 0.55,
+        confidence,
+      };
       aggregated.sources.instagram = {
         source: "instagram",
-        status: "requires_auth",
-        data: { handle: discovery.primaryInstagram },
-        findings: [],
-        confidence: "INSUFICIENTE",
-        coverage: 0,
+        status: "evaluated",
+        data: { url: discovery.primaryInstagram, title: candidate?.title, publicDescription: candidate?.snippet || null, publicOnly: true },
+        findings: [publicFinding],
+        confidence,
+        coverage: candidate?.snippet ? 45 : 30,
         evaluatedAt: new Date(),
         requiresAuth: true,
         metadata: {
-          reason: "Perfil de Instagram descubierto. Se requieren credenciales Meta Graph API para evaluar interacción real.",
+          reason: "Perfil público identificado; las métricas privadas requieren autorización.",
           discoveredUrl: discovery.primaryInstagram,
+          privateMetricsAvailable: false,
         },
       };
+      aggregated.findings.push(publicFinding);
+      aggregated.deduplicated.push(publicFinding);
+      (aggregated.byCategory.redes ||= []).push(publicFinding);
+      (aggregated.byDimension.redes ||= []).push(publicFinding);
     }
 
     // Si X / Twitter fue descubierto, marcar como requires_auth si no hay API
@@ -225,7 +266,12 @@ export class BusinessIntelligenceLayer {
       redes: "redes",
       adquisicion: "adquisicion",
       seo: "adquisicion",
+      retencion: "retencion",
     };
     return mapping[category] || "presencia";
   }
+}
+
+function objectiveFromBusiness(business: Business): string | undefined {
+  return (business as Business & { goals?: Array<{ objetivo?: string }> }).goals?.[0]?.objetivo;
 }

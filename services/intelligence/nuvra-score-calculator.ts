@@ -44,7 +44,7 @@ export class NuvraScoreCalculator {
 
     // Las dimensiones mantienen sus propias reglas de evidencia. La cobertura
     // general no debe descartar dimensiones que sí pudieron evaluarse.
-    const dimensions = this.calculateDimensions(byDimension, aggregatedEvidence.sources);
+    const dimensions = this.calculateDimensions(byDimension, aggregatedEvidence.sources, context.objective || "");
     const evaluableDimensions = dimensions.filter(d => d.points !== null);
     const objectiveWeights = this.getObjectiveWeights(context.objective || "");
     const dimensionWeights = Object.fromEntries(dimensions.map(d => {
@@ -118,11 +118,11 @@ export class NuvraScoreCalculator {
       reason = "Diagnóstico completo sustentado por múltiples fuentes de evidencia.";
     } else {
       const sourceNameMap: Record<string, string> = {
-        web: "análisis del sitio web",
-        instagram: "redes sociales",
-        search: "posicionamiento en buscadores",
-        reviews: "reseñas de clientes",
-        competitor: "comparación con competidores",
+        web: "la información pública del negocio",
+        instagram: "el perfil público de Instagram",
+        search: "las búsquedas relacionadas con el negocio",
+        reviews: "las opiniones de clientes",
+        competitor: "otros negocios parecidos",
         x: "presencia en X",
       };
 
@@ -166,21 +166,25 @@ export class NuvraScoreCalculator {
 
   private static getObjectiveWeights(objective: string): Record<string, number> {
     const text = objective.toLowerCase();
+    if (/volver|recompra|recurren|fideliza|clientes actuales/.test(text)) {
+      return { presencia: 0.08, conversion: 0.16, posicionamiento: 0.1, propuesta: 0.1, redes: 0.08, adquisicion: 0.08, retencion: 0.4 };
+    }
     if (/consult|reserv|turno|lead|venta|compr/.test(text)) {
-      return { presencia: 0.1, conversion: 0.3, posicionamiento: 0.1, propuesta: 0.15, redes: 0.1, adquisicion: 0.25 };
+      return { presencia: 0.14, conversion: 0.28, posicionamiento: 0.12, propuesta: 0.16, redes: 0.08, adquisicion: 0.22, retencion: 0 };
     }
     if (/marca|reconoc|posicion|autoridad/.test(text)) {
-      return { presencia: 0.1, conversion: 0.1, posicionamiento: 0.3, propuesta: 0.2, redes: 0.2, adquisicion: 0.1 };
+      return { presencia: 0.1, conversion: 0.1, posicionamiento: 0.3, propuesta: 0.2, redes: 0.2, adquisicion: 0.1, retencion: 0 };
     }
     if (/redes|instagram|comunidad|interacci/.test(text)) {
-      return { presencia: 0.1, conversion: 0.15, posicionamiento: 0.15, propuesta: 0.1, redes: 0.35, adquisicion: 0.15 };
+      return { presencia: 0.1, conversion: 0.15, posicionamiento: 0.15, propuesta: 0.1, redes: 0.35, adquisicion: 0.15, retencion: 0 };
     }
-    return { presencia: 0.16, conversion: 0.18, posicionamiento: 0.16, propuesta: 0.16, redes: 0.16, adquisicion: 0.18 };
+    return { presencia: 0.16, conversion: 0.18, posicionamiento: 0.16, propuesta: 0.16, redes: 0.16, adquisicion: 0.18, retencion: 0 };
   }
 
   private static calculateDimensions(
     byDimension: Record<string, EvidenceFinding[]>,
-    sources: Record<string, any>
+    sources: Record<string, any>,
+    objective: string
   ): NuvraDimension[] {
     const dimensions: NuvraDimension[] = [
       this.calculatePresenciaDimension(byDimension.presencia || [], sources),
@@ -191,7 +195,20 @@ export class NuvraScoreCalculator {
       this.calculateAdquisicionDimension(byDimension.adquisicion || [], sources),
     ];
 
+    if (/volver|recompra|recurren|fideliza|clientes actuales/i.test(objective) || (byDimension.retencion || []).length > 0) {
+      dimensions.push(this.calculateRetentionDimension(byDimension.retencion || []));
+    }
+
     return dimensions;
+  }
+
+  private static calculateRetentionDimension(findings: EvidenceFinding[]): NuvraDimension {
+    findings = this.deduplicateSemanticFindings(findings);
+    const sources = Array.from(new Set(findings.map((finding) => finding.source)));
+    if (!findings.length) return { name: "Qué hacés para que los clientes vuelvan", slug: "retencion", points: null, confidence: "INSUFICIENTE", sources, findings: [], message: "Todavía no hay información comprobable sobre seguimiento, recordatorios o recompra." };
+    let score = 45;
+    for (const finding of findings) score += finding.type === "positive" ? 10 : finding.type === "negative" ? (finding.impact === "high" ? -15 : -8) : 0;
+    return { name: "Qué hacés para que los clientes vuelvan", slug: "retencion", points: Math.max(0, Math.min(100, score)), confidence: this.calculateDimensionConfidence(findings, sources), sources, findings };
   }
 
   private static calculatePresenciaDimension(
@@ -204,13 +221,13 @@ export class NuvraScoreCalculator {
 
     if (findings.length === 0) {
       return {
-        name: "Presencia Digital",
+        name: "Qué tan fácil es encontrarte",
         slug: "presencia",
         points: null,
         confidence: "INSUFICIENTE",
         sources: sourceTypes,
         findings: [],
-        message: "No hay evidencia suficiente para evaluar presencia digital.",
+        message: "Todavía no encontramos información pública suficiente para saber qué tan fácil es encontrar el negocio.",
       };
     }
 
@@ -226,7 +243,7 @@ export class NuvraScoreCalculator {
     }
 
     return {
-      name: "Presencia Digital",
+      name: "Qué tan fácil es encontrarte",
       slug: "presencia",
       points: Math.max(0, Math.min(100, score)),
       confidence,
@@ -245,13 +262,13 @@ export class NuvraScoreCalculator {
 
     if (findings.length === 0) {
       return {
-        name: "Conversión",
+        name: "Qué tan fácil es consultar, reservar o comprar",
         slug: "conversion",
         points: null,
         confidence: "INSUFICIENTE",
         sources: sourceTypes,
         findings: [],
-        message: "No hay evidencia suficiente para evaluar conversión.",
+        message: "Todavía no pudimos comprobar con claridad cómo una persona consulta, reserva o compra.",
       };
     }
 
@@ -267,7 +284,7 @@ export class NuvraScoreCalculator {
     }
 
     return {
-      name: "Conversión",
+      name: "Qué tan fácil es consultar, reservar o comprar",
       slug: "conversion",
       points: Math.max(0, Math.min(100, score)),
       confidence,
@@ -287,25 +304,25 @@ export class NuvraScoreCalculator {
     // Posicionamiento requiere fuentes externas
     if (sourceTypes.length === 1 && sourceTypes[0] === "web") {
       return {
-        name: "Posicionamiento",
+        name: "Qué tanta confianza y diferenciación generás",
         slug: "posicionamiento",
         points: null,
         confidence: "INSUFICIENTE",
         sources: sourceTypes,
         findings,
-        message: "Posicionamiento requiere información externa (Instagram, Search, Reviews) - solo hay evidencia web.",
+        message: "Para evaluar confianza y diferenciación necesitamos contrastar el negocio con reseñas, búsquedas u otros canales públicos.",
       };
     }
 
     if (findings.length === 0) {
       return {
-        name: "Posicionamiento",
+        name: "Qué tanta confianza y diferenciación generás",
         slug: "posicionamiento",
         points: null,
         confidence: "INSUFICIENTE",
         sources: sourceTypes,
         findings: [],
-        message: "No hay evidencia suficiente para evaluar posicionamiento.",
+        message: "Todavía no encontramos señales públicas suficientes de confianza o diferenciación.",
       };
     }
 
@@ -321,7 +338,7 @@ export class NuvraScoreCalculator {
     }
 
     return {
-      name: "Posicionamiento",
+      name: "Qué tanta confianza y diferenciación generás",
       slug: "posicionamiento",
       points: Math.max(0, Math.min(100, score)),
       confidence,
@@ -340,13 +357,13 @@ export class NuvraScoreCalculator {
 
     if (findings.length === 0) {
       return {
-        name: "Propuesta de Valor",
+        name: "Qué tan claro queda lo que ofrecés",
         slug: "propuesta",
         points: null,
         confidence: "INSUFICIENTE",
         sources: sourceTypes,
         findings: [],
-        message: "No hay evidencia suficiente para evaluar propuesta de valor.",
+        message: "Todavía no pudimos comprobar si una persona entiende con claridad qué ofrecés y por qué elegirte.",
       };
     }
 
@@ -362,7 +379,7 @@ export class NuvraScoreCalculator {
     }
 
     return {
-      name: "Propuesta de Valor",
+      name: "Qué tan claro queda lo que ofrecés",
       slug: "propuesta",
       points: Math.max(0, Math.min(100, score)),
       confidence,
@@ -382,25 +399,25 @@ export class NuvraScoreCalculator {
     // Redes requiere fuente de redes
     if (!sourceTypes.includes("instagram") && !sourceTypes.includes("x")) {
       return {
-        name: "Redes Sociales",
+        name: "Qué tan útiles están siendo tus redes",
         slug: "redes",
         points: null,
         confidence: "INSUFICIENTE",
         sources: sourceTypes,
         findings,
-        message: "Redes sociales requiere análisis de Instagram u otras plataformas - no hay evidencia de redes.",
+        message: "No encontramos un perfil social público que sea relevante para este negocio.",
       };
     }
 
     if (findings.length === 0) {
       return {
-        name: "Redes Sociales",
+        name: "Qué tan útiles están siendo tus redes",
         slug: "redes",
         points: null,
         confidence: "INSUFICIENTE",
         sources: sourceTypes,
         findings: [],
-        message: "No hay evidencia suficiente para evaluar redes sociales.",
+        message: "Identificamos el perfil, pero todavía no hay suficiente información pública para evaluar su utilidad.",
       };
     }
 
@@ -416,7 +433,7 @@ export class NuvraScoreCalculator {
     }
 
     return {
-      name: "Redes Sociales",
+      name: "Qué tan útiles están siendo tus redes",
       slug: "redes",
       points: Math.max(0, Math.min(100, score)),
       confidence,
@@ -435,13 +452,13 @@ export class NuvraScoreCalculator {
 
     if (findings.length === 0) {
       return {
-        name: "Adquisición",
+        name: "Qué capacidad tenés para atraer demanda",
         slug: "adquisicion",
         points: null,
         confidence: "INSUFICIENTE",
         sources: sourceTypes,
         findings: [],
-        message: "No hay evidencia suficiente para evaluar adquisición.",
+        message: "Todavía no encontramos evidencia suficiente sobre cómo llegan personas interesadas al negocio.",
       };
     }
 
@@ -457,7 +474,7 @@ export class NuvraScoreCalculator {
     }
 
     return {
-      name: "Adquisición",
+      name: "Qué capacidad tenés para atraer demanda",
       slug: "adquisicion",
       points: Math.max(0, Math.min(100, score)),
       confidence,

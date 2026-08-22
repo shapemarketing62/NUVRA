@@ -24,17 +24,13 @@ export function parseJsonSafe<T>(json: string | null | undefined, fallback: T): 
 }
 
 export const OBJETIVOS = [
-  "Aumentar ventas",
-  "Generar más consultas",
-  "Conseguir leads",
-  "Aumentar reservas",
-  "Aumentar reconocimiento",
-  "Mejorar posicionamiento",
-  "Aumentar tráfico a la web",
-  "Aumentar conversión",
-  "Crecer en redes",
-  "Fidelizar clientes",
-  "Lanzar un producto",
+  "Conseguir más consultas",
+  "Conseguir más ventas",
+  "Conseguir más reservas",
+  "Conseguir más clientes en el local",
+  "Hacer que más clientes vuelvan",
+  "Dar a conocer más el negocio",
+  "Conseguir más presupuestos o reuniones",
   "Otro",
 ] as const;
 
@@ -81,12 +77,12 @@ export const CANALES = [
 ] as const;
 
 export const SCORE_DIMENSIONS = [
-  { slug: "presencia", name: "Presencia Digital" },
-  { slug: "conversion", name: "Conversión" },
-  { slug: "posicionamiento", name: "Posicionamiento" },
-  { slug: "propuesta", name: "Propuesta de Valor" },
-  { slug: "redes", name: "Redes Sociales" },
-  { slug: "adquisicion", name: "Adquisición" },
+  { slug: "presencia", name: "Qué tan fácil es encontrarte" },
+  { slug: "conversion", name: "Qué tan fácil es consultar, reservar o comprar" },
+  { slug: "posicionamiento", name: "Qué tanta confianza y diferenciación generás" },
+  { slug: "propuesta", name: "Qué tan claro queda lo que ofrecés" },
+  { slug: "redes", name: "Qué tan útiles están siendo tus redes" },
+  { slug: "adquisicion", name: "Qué capacidad tenés para atraer demanda" },
 ] as const;
 
 export type ScoreDimensionSlug = (typeof SCORE_DIMENSIONS)[number]["slug"];

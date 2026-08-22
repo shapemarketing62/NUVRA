@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { NuvraScoreCalculator } from "../services/intelligence/nuvra-score-calculator.ts";
-import { getPrimaryBusinessStep, isRetentionObjective, isSpecificBusinessAction } from "../services/strategy/business-action-language.ts";
+import { getPrimaryBusinessStep, getBudgetFocus, isRetentionObjective, isSpecificBusinessAction } from "../services/strategy/business-action-language.ts";
 import fs from "node:fs";
 
 const dimensions = ["presencia", "conversion", "posicionamiento", "propuesta", "redes", "adquisicion"];
@@ -72,6 +72,9 @@ const cases = [
   { id: "b2b", name: "Servicio profesional B2B", rubro: "consultoría profesional B2B", tipoCliente: "B2B", objective: "generar reuniones comerciales", mainProblem: "La propuesta no conduce a una reunión", priority: "Conseguir conversaciones calificadas", actions: ["Mostrar casos del sector", "Medir reuniones solicitadas"], findings: [finding("conversion", "web", "negative", "high", "No hay una invitación clara a conversar"), finding("propuesta", "web", "negative", "medium", "La oferta no especifica para qué empresas es"), finding("adquisicion", "external_mentions", "positive", "medium", "Hay menciones en medios del sector")] },
   { id: "no-web", name: "Negocio sin web propia", rubro: "servicio local", tipoCliente: "B2C", objective: "recibir más consultas", mainProblem: "La información está dispersa entre perfiles externos", priority: "Unificar el punto de contacto", actions: ["Completar perfiles públicos", "Medir consultas por perfil"], findings: [finding("adquisicion", "search", "positive", "medium", "El negocio aparece en búsquedas locales"), finding("posicionamiento", "reviews", "positive", "medium", "Las reseñas identifican el servicio"), finding("propuesta", "external_mentions", "negative", "medium", "La descripción del servicio cambia entre perfiles")] },
   { id: "web-no-social", name: "Negocio con web sin redes", rubro: "servicio profesional", tipoCliente: "B2C", objective: "aumentar consultas", mainProblem: "El sitio recibe interés pero no facilita el contacto", priority: "Mejorar el contacto desde la web", actions: ["Aclarar el servicio principal", "Medir consultas desde la web"], findings: [finding("presencia", "web", "positive", "medium", "El sitio es accesible y legible"), finding("conversion", "web", "negative", "medium", "El contacto no aparece al comienzo"), finding("propuesta", "web", "negative", "low", "El título principal es genérico")] },
+  { id: "instagram-only", name: "Negocio con solo Instagram", rubro: "comercio de indumentaria", objective: "conseguir más ventas", mainProblem: "La compra no tiene un paso único", priority: "Ordenar pedidos desde Instagram", actions: ["Aclarar cómo comprar", "Medir pedidos recibidos"], findings: [finding("redes", "instagram", "positive", "medium", "El perfil público está identificado"), finding("conversion", "instagram", "negative", "medium", "La forma de comprar no aparece con claridad"), finding("propuesta", "instagram", "positive", "low", "Los productos principales son visibles")] },
+  { id: "physical", name: "Comercio físico local", rubro: "comercio local", objective: "conseguir más clientes en el local", mainProblem: "La ubicación cambia entre perfiles", priority: "Unificar datos locales", actions: ["Corregir horarios y ubicación", "Medir visitas que llegan desde Google"], findings: [finding("presencia", "search", "negative", "medium", "Los horarios cambian entre directorios"), finding("posicionamiento", "reviews", "positive", "medium", "Las opiniones confirman la atención en el local"), finding("adquisicion", "search", "positive", "medium", "Existe demanda para el rubro en la zona")] },
+  { id: "name-location", name: "Negocio identificado por nombre y zona", rubro: "profesional independiente", objective: "conseguir más presupuestos o reuniones", mainProblem: "La información está repartida", priority: "Crear un contacto principal", actions: ["Unificar perfiles públicos", "Medir solicitudes de presupuesto"], findings: [finding("presencia", "search", "positive", "low", "El profesional aparece por nombre y ubicación"), finding("posicionamiento", "external_mentions", "positive", "low", "Un directorio relaciona al profesional con su especialidad"), finding("adquisicion", "search", "negative", "medium", "No hay un canal principal para solicitar presupuesto")] },
 ];
 
 test("una única dimensión no se presenta como score general", () => {
@@ -81,7 +84,7 @@ test("una única dimensión no se presenta como score general", () => {
   assert.deepEqual(result.dimensions, ["conversion"]);
 });
 
-test("siete negocios producen lecturas trazables y materialmente diferentes", () => {
+test("diez negocios pequeños producen lecturas trazables y útiles con distintas combinaciones de fuentes", () => {
   const results = cases.map(evaluateScenario);
   for (const result of results) {
     assert.ok(result.dimensions.length >= 2, result.name);
@@ -132,6 +135,7 @@ test("dos clínicas y dos objetivos generan enfoques diferentes", () => {
   assert.equal(getPrimaryBusinessStep({ rubro: "clínica estética", tipoCliente: "B2C" }).action, "Pedir turno");
   assert.equal(isRetentionObjective({ rubro: "clínica estética", objetivo: "aumentar recompra de tratamientos" }), true);
   assert.equal(isRetentionObjective({ rubro: "clínica estética", objetivo: "aumentar consultas" }), false);
+  assert.match(getBudgetFocus({ rubro: "clínica estética", ubicacion: "Palermo", presupuesto: 250 }), /USD 250.*búsquedas locales.*Palermo/);
   const strategySource = fs.readFileSync(new URL("../services/strategy/strategy-engine.ts", import.meta.url), "utf8");
   assert.match(strategySource, /clientes que vuelven y tiempo entre compras o atenciones/);
   assert.match(strategySource, /alternativas de \$\{getLocalMarketLabel\(context\)\}/);

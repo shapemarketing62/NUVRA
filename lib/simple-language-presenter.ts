@@ -13,7 +13,7 @@ const TECHNICAL_GLOSSARY: Array<[RegExp, string]> = [
   [/\bfricción de conversión\b/gi, "dificultades para convertir visitantes en clientes"],
   [/\bfricción inicial\b/gi, "dificultad inicial del visitante"],
   [/\bfricción real\b/gi, "dificultad concreta"],
-  [/\badquisición\b/gi, "atracción de visitantes"],
+  [/\badquisición\b/gi, "forma de conseguir nuevos clientes"],
   [/\bSEO técnico\b/gi, "optimización técnica para Google"],
   [/\bSEO\b/g, "visibilidad en Google"],
   [/\bmeta description\b/gi, "descripción visible en Google"],
@@ -26,7 +26,14 @@ const TECHNICAL_GLOSSARY: Array<[RegExp, string]> = [
   [/\bcustomer journey\b/gi, "recorrido de las personas antes de consultar o comprar"],
   [/\bengagement\b/gi, "nivel de interacción de las personas"],
   [/\bframeworks?\b/gi, "método de trabajo"],
-  [/\bconversión\b/gi, "personas que avanzan, consultan o compran"],
+  [/\bconversión\b/gi, "capacidad de lograr consultas, reservas o compras"],
+  [/\bpropuesta de valor\b/gi, "claridad de lo que ofrecés y por qué elegirte"],
+  [/\bposicionamiento\b/gi, "diferencia frente a negocios parecidos"],
+  [/\bdimensión prioritaria\b/gi, "área que más conviene mejorar"],
+  [/\bdimensión estratégica\b/gi, "área principal del negocio"],
+  [/\bdimensiones\b/gi, "áreas analizadas"],
+  [/\bdimensión\b/gi, "área analizada"],
+  [/\bcuello de botella\b/gi, "principal obstáculo"],
   [/\btráfico\b/gi, "visitas"],
   [/\bprospectos?\b/gi, "personas interesadas"],
   [/\bnav\/header\b/gi, "menú superior de la página"],
@@ -55,17 +62,19 @@ export function simplifyTechnicalText(text: string | null | undefined): string {
 export function getFriendlyDimensionName(slug: string, fallbackName?: string): string {
   switch (slug.toLowerCase()) {
     case "presencia":
-      return "Presencia Digital y Sitio Web";
+      return "Qué tan fácil es encontrarte";
     case "conversion":
-      return "Consultas, reservas y ventas";
+      return "Qué tan fácil es consultar, reservar o comprar";
     case "posicionamiento":
-      return "Claridad y diferenciación de la marca";
+      return "Qué tanta confianza y diferenciación generás";
     case "propuesta":
-      return "Claridad de la oferta";
+      return "Qué tan claro queda lo que ofrecés";
     case "redes":
-      return "Redes Sociales";
+      return "Qué tan útiles están siendo tus redes";
     case "adquisicion":
-      return "Cómo llegan nuevos clientes";
+      return "Qué capacidad tenés para atraer demanda";
+    case "retencion":
+      return "Qué hacés para que los clientes vuelvan";
     default:
       return fallbackName || slug;
   }

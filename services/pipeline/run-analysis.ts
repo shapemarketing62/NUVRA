@@ -12,6 +12,7 @@ import { BusinessDiscoveryService } from "@/services/discovery/business-discover
 import { normalizeUrl } from "@/lib/utils";
 import { REBUILD_TIMESTAMP } from "@/lib/rebuild-trigger";
 import { currentLogContext } from "@/lib/server/logger";
+import { inferCustomerType } from "@/lib/business-context";
 
 // Force recompilation with timestamp: REBUILD_TIMESTAMP
 
@@ -79,11 +80,12 @@ export async function runFullAnalysis(businessId: string): Promise<RunAnalysisRe
   // 1.5 Ejecutar BusinessDiscoveryService para fuentes públicas automáticas
   const discoveryStarted = Date.now();
   const discoveryService = new BusinessDiscoveryService();
+  const inferredCustomerType = business.tipoCliente || inferCustomerType(business);
   const discoveryResult = await discoveryService.discover({
     name: business.nombre,
     category: business.rubro,
     location: business.ubicacion || undefined,
-    tipoCliente: business.tipoCliente || undefined,
+    tipoCliente: inferredCustomerType,
     declaredWebUrl: business.webUrl || business.websites[0]?.url || undefined,
     declaredInstagram: business.instagramHandle || undefined,
   });
@@ -127,13 +129,10 @@ export async function runFullAnalysis(businessId: string): Promise<RunAnalysisRe
     stageLog("2_website_persist", { businessId, normalizedUrl, websiteId: website.id }, { startedAt: createStarted, endedAt: Date.now(), durationMs: Date.now() - createStarted, id: website.id });
   }
 
-  const websiteId = website?.id || randomUUID();
+  const websiteId = website?.id;
   const createWebsiteAnalysisStarted = Date.now();
-  const websiteAnalysis = await prisma.websiteAnalysis.create({
-    data: { websiteId, status: "running" },
-  });
-  stageLog("2_website_analysis_create", { websiteId, status: "running" }, { startedAt: createWebsiteAnalysisStarted, endedAt: Date.now(), durationMs: Date.now() - createWebsiteAnalysisStarted, id: websiteAnalysis.id });
-  console.log("[ANALYSIS] Website analysis record created:", websiteAnalysis.id);
+  const websiteAnalysis = websiteId ? await prisma.websiteAnalysis.create({ data: { websiteId, status: "running" } }) : null;
+  stageLog("2_website_analysis_create", { websiteId: websiteId || null, status: websiteAnalysis ? "running" : "not_applicable" }, { startedAt: createWebsiteAnalysisStarted, endedAt: Date.now(), durationMs: Date.now() - createWebsiteAnalysisStarted, id: websiteAnalysis?.id });
 
   let analysisResult = {
     status: "completed",
@@ -157,7 +156,7 @@ export async function runFullAnalysis(businessId: string): Promise<RunAnalysisRe
         performanceSummary: webResult.performanceSummary as any,
         errorMessage: webResult.errorMessage,
       };
-      stageLog("3_website_analyzer", { normalizedUrl, pagesAnalyzed: analysisResult.pagesAnalyzed, findingsCount: analysisResult.findings.length, status: analysisResult.status, errorMessage: analysisResult.errorMessage }, { startedAt: analyzerStarted, endedAt: Date.now(), durationMs: Date.now() - analyzerStarted, id: websiteAnalysis.id });
+      stageLog("3_website_analyzer", { normalizedUrl, pagesAnalyzed: analysisResult.pagesAnalyzed, findingsCount: analysisResult.findings.length, status: analysisResult.status, errorMessage: analysisResult.errorMessage }, { startedAt: analyzerStarted, endedAt: Date.now(), durationMs: Date.now() - analyzerStarted, id: websiteAnalysis?.id });
       console.log("[ANALYSIS] Website analysis completed:", { 
         status: analysisResult.status, 
         pagesAnalyzed: analysisResult.pagesAnalyzed,
@@ -166,7 +165,7 @@ export async function runFullAnalysis(businessId: string): Promise<RunAnalysisRe
     }
 
     const updateWebsiteAnalysisStarted = Date.now();
-    await prisma.websiteAnalysis.update({
+    if (websiteAnalysis) await prisma.websiteAnalysis.update({
       where: { id: websiteAnalysis.id },
       data: {
         status: analysisResult.status,
@@ -178,7 +177,7 @@ export async function runFullAnalysis(businessId: string): Promise<RunAnalysisRe
         completedAt: new Date(),
       },
     });
-    stageLog("3_website_analyzer_persist", { websiteAnalysisId: websiteAnalysis.id, status: analysisResult.status, pagesAnalyzed: analysisResult.pagesAnalyzed }, { startedAt: updateWebsiteAnalysisStarted, endedAt: Date.now(), durationMs: Date.now() - updateWebsiteAnalysisStarted, id: websiteAnalysis.id });
+    stageLog("3_website_analyzer_persist", { websiteAnalysisId: websiteAnalysis?.id || null, status: analysisResult.status, pagesAnalyzed: analysisResult.pagesAnalyzed }, { startedAt: updateWebsiteAnalysisStarted, endedAt: Date.now(), durationMs: Date.now() - updateWebsiteAnalysisStarted, id: websiteAnalysis?.id });
 
     // Si falló el análisis web pero tenemos un sitio web explícito, registrar advertencia pero continuar si hay otras fuentes
     if (normalizedUrl && (analysisResult.status === "failed" || analysisResult.pagesAnalyzed === 0)) {
@@ -191,7 +190,7 @@ export async function runFullAnalysis(businessId: string): Promise<RunAnalysisRe
     for (const finding of analysisResult.findings) {
       const created = await prisma.finding.create({
         data: {
-          websiteAnalysisId: websiteAnalysis.id,
+          websiteAnalysisId: websiteAnalysis?.id,
           type: finding.type,
           category: finding.category,
           severity: finding.severity,
@@ -206,7 +205,7 @@ export async function runFullAnalysis(businessId: string): Promise<RunAnalysisRe
       });
       findingIds.push(created.id);
     }
-    stageLog("4_findings_persist", { websiteAnalysisId: websiteAnalysis.id, findingsCount: analysisResult.findings.length, firstFindingId: findingIds[0], lastFindingId: findingIds[findingIds.length - 1] }, { startedAt: findingsPersistStarted, endedAt: Date.now(), durationMs: Date.now() - findingsPersistStarted, id: websiteAnalysis.id });
+    stageLog("4_findings_persist", { websiteAnalysisId: websiteAnalysis?.id || null, findingsCount: analysisResult.findings.length, firstFindingId: findingIds[0], lastFindingId: findingIds[findingIds.length - 1] }, { startedAt: findingsPersistStarted, endedAt: Date.now(), durationMs: Date.now() - findingsPersistStarted, id: websiteAnalysis?.id });
 
     // NUEVO: Usar BusinessIntelligenceLayer
     const biLayerStarted = Date.now();
@@ -334,7 +333,7 @@ export async function runFullAnalysis(businessId: string): Promise<RunAnalysisRe
       try {
         await (prisma as any).$executeRaw`
           INSERT INTO "ClarificationQuestion" ("id", "businessId", "analysisId", "question", "reason", "affects", "dimension", "impact", "createdAt")
-          VALUES (${randomUUID()}, ${businessId}, ${websiteAnalysis.id}, ${question.question}, ${question.reason}, ${question.dimension}, ${question.dimension}, ${question.impact}, ${new Date()})
+          VALUES (${randomUUID()}, ${businessId}, ${websiteAnalysis?.id || null}, ${question.question}, ${question.reason}, ${question.dimension}, ${question.dimension}, ${question.impact}, ${new Date()})
         `;
       } catch (e) {
         console.warn("[ANALYSIS] Warning: ClarificationQuestion insertion failed, continuing:", e instanceof Error ? e.message : String(e));
@@ -362,7 +361,7 @@ export async function runFullAnalysis(businessId: string): Promise<RunAnalysisRe
       plazoLabel: goal.plazoLabel,
       magnitud: goal.magnitud,
       ubicacion: business.ubicacion || business.ciudad,
-      tipoCliente: business.tipoCliente,
+      tipoCliente: inferredCustomerType,
       presupuesto: business.inversionMarketing,
       capacidad: business.empleados || business.tamano,
       canales: business.canales || business.otrosCanales,
@@ -409,10 +408,17 @@ export async function runFullAnalysis(businessId: string): Promise<RunAnalysisRe
     try {
       await (prisma as any).$executeRaw`
         INSERT INTO "AnalysisHistory" ("id", "businessId", "scoreId", "diagnosisId", "strategyId", "websiteAnalysisId", "nuvraScoreTotal", "snapshot", "createdAt")
-        VALUES (${historyId}, ${businessId}, ${scoreId}, ${diagnosis.id}, ${strategyId}, ${websiteAnalysis.id}, ${scoreResult.total ?? null}, ${JSON.stringify({
+        VALUES (${historyId}, ${businessId}, ${scoreId}, ${diagnosis.id}, ${strategyId}, ${websiteAnalysis?.id || null}, ${scoreResult.total ?? null}, ${JSON.stringify({
           score: scoreResult.total,
           dimensions: scoreResult.dimensions.map((d) => ({ slug: d.slug, points: d.points })),
           pagesAnalyzed: analysisResult.pagesAnalyzed,
+          intelligence: {
+            coverage: biResult.coverage.total,
+            sourceStatuses: Object.fromEntries(Object.entries(biResult.aggregatedEvidence.sources).map(([key, value]) => [key, value.status])),
+            discoveredInstagram: discoveryResult.primaryInstagram,
+            competitorSummary: biResult.aggregatedEvidence.sources.competitor?.data || null,
+            externalMentionsSummary: biResult.aggregatedEvidence.sources.external_mentions?.data || null,
+          },
           engineTypes: {
             diagnosis: diagnosisResult.engineType,
             strategy: strategyResult.engineType,
@@ -422,15 +428,15 @@ export async function runFullAnalysis(businessId: string): Promise<RunAnalysisRe
     } catch (e) {
       console.warn("[ANALYSIS] Warning: AnalysisHistory insertion failed, continuing:", e instanceof Error ? e.message : String(e));
     }
-    stageLog("11_history_snapshot", { businessId, historyId, scoreId, diagnosisId: diagnosis.id, strategyId, websiteAnalysisId: websiteAnalysis.id, score: scoreResult.total }, { startedAt: historyStarted, endedAt: Date.now(), durationMs: Date.now() - historyStarted, id: historyId });
+    stageLog("11_history_snapshot", { businessId, historyId, scoreId, diagnosisId: diagnosis.id, strategyId, websiteAnalysisId: websiteAnalysis?.id || null, score: scoreResult.total }, { startedAt: historyStarted, endedAt: Date.now(), durationMs: Date.now() - historyStarted, id: historyId });
 
     const finalDurationMs = Date.now() - startedAt;
-    stageLog("12_finalizacion", { businessId, websiteAnalysisId: websiteAnalysis.id, scoreId, diagnosisId: diagnosis.id, strategyId, historyId, success: true, finalDurationMs }, { startedAt, endedAt: Date.now(), durationMs: finalDurationMs, id: historyId });
+    stageLog("12_finalizacion", { businessId, websiteAnalysisId: websiteAnalysis?.id || null, scoreId, diagnosisId: diagnosis.id, strategyId, historyId, success: true, finalDurationMs }, { startedAt, endedAt: Date.now(), durationMs: finalDurationMs, id: historyId });
 
     return {
       success: true,
       businessId,
-      analysisId: websiteAnalysis.id,
+      analysisId: websiteAnalysis?.id,
       scoreTotal: scoreResult.total ?? undefined,
       analysisStatus: biResult.coverage.evaluatedSources.length > 0 && (biResult.coverage.missingSources.length > 0 || biResult.coverage.requiresAuthSources.length > 0) ? "partial" : "completed",
     };
@@ -438,8 +444,8 @@ export async function runFullAnalysis(businessId: string): Promise<RunAnalysisRe
     const error = err instanceof Error ? err : new Error(String(err));
     const stage = "ERROR_CATCH";
     console.error("[ANALYSIS] Error during analysis:", error);
-    stageLog(stage, { businessId, websiteAnalysisId: websiteAnalysis.id, error: error.message, stack: error.stack }, { startedAt, endedAt: Date.now(), durationMs: Date.now() - startedAt, error: error.message });
-    await prisma.websiteAnalysis.update({
+    stageLog(stage, { businessId, websiteAnalysisId: websiteAnalysis?.id || null, error: error.message, stack: error.stack }, { startedAt, endedAt: Date.now(), durationMs: Date.now() - startedAt, error: error.message });
+    if (websiteAnalysis) await prisma.websiteAnalysis.update({
       where: { id: websiteAnalysis.id },
       data: {
         status: "failed",

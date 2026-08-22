@@ -8,6 +8,7 @@ import { canConsume } from "@/lib/server/usage";
 import { getUsageLimit } from "@/lib/plans";
 import { writeAuditEvent } from "@/lib/server/audit";
 import { hasInternalAccess } from "@/lib/server/internal-access";
+import { parseInstagramProfile } from "@/lib/instagram-profile";
 
 const businessSchema = z.object({
   nombre: z.string().trim().min(1).max(120),
@@ -22,7 +23,7 @@ const businessSchema = z.object({
   productosServicios: z.string().optional(),
   ticketPromedio: z.number().optional().nullable(),
   empleados: z.string().optional(),
-  webUrl: z.string().trim().min(1).max(2048),
+  webUrl: z.string().trim().max(2048).optional(),
   instagramHandle: z.string().optional(),
   otrosCanales: z.string().optional(),
   canales: z.array(z.string()).optional(),
@@ -46,12 +47,13 @@ export async function POST(req: NextRequest) {
     const body = await readJsonBody(req, 32_000);
     const data = businessSchema.parse(body);
 
-    let webUrl = data.webUrl;
-    try {
-      webUrl = normalizeUrl(data.webUrl);
-    } catch {
-      return NextResponse.json({ error: "URL de sitio web inválida" }, { status: 400 });
+    let webUrl: string | undefined;
+    if (data.webUrl) {
+      try { webUrl = normalizeUrl(data.webUrl); }
+      catch { return NextResponse.json({ error: "URL de sitio web inválida" }, { status: 400 }); }
     }
+    const instagram = data.instagramHandle ? parseInstagramProfile(data.instagramHandle) : null;
+    if (data.instagramHandle && !instagram) return NextResponse.json({ error: "Perfil de Instagram inválido" }, { status: 400 });
 
     const business = await prisma.business.create({
       data: {
@@ -69,13 +71,13 @@ export async function POST(req: NextRequest) {
         ticketPromedio: data.ticketPromedio ?? undefined,
         empleados: data.empleados,
         webUrl,
-        instagramHandle: data.instagramHandle,
+        instagramHandle: instagram?.url,
         otrosCanales: data.otrosCanales,
         canales: JSON.stringify(data.canales || []),
         facturacion: data.facturacion ?? undefined,
         clientesMensuales: data.clientesMensuales ?? undefined,
         inversionMarketing: data.inversionMarketing ?? undefined,
-        websites: { create: { url: webUrl } },
+        ...(webUrl ? { websites: { create: { url: webUrl } } } : {}),
         goals: {
           create: {
             objetivo: data.objetivo,
@@ -88,7 +90,7 @@ export async function POST(req: NextRequest) {
         instagramConnection: {
           create: {
             status: process.env.META_APP_ID ? "disconnected" : "not_configured",
-            igUsername: data.instagramHandle?.replace("@", ""),
+            igUsername: instagram?.handle,
           },
         },
       },

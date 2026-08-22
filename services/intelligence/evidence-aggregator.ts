@@ -192,6 +192,7 @@ export class EvidenceAggregator {
       propuesta: [],
       redes: [],
       adquisicion: [],
+      retencion: [],
     };
 
     for (const f of findings) {
@@ -207,6 +208,8 @@ export class EvidenceAggregator {
         dimensions.redes.push(f);
       } else if (f.category === "adquisicion" || f.category === "seo") {
         dimensions.adquisicion.push(f);
+      } else if (f.category === "retencion") {
+        dimensions.retencion.push(f);
       }
     }
 

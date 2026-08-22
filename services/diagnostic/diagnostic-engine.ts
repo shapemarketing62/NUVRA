@@ -51,7 +51,7 @@ function buildDeterministicDiagnosis(
 
   const strategicDimension = weakest && weakest.slug ? weakest : null;
   const strategicProblem = strategicDimension
-    ? strategicDimension.problems.find((problem) => !/title|meta description|SEO|seo|index/i.test(problem)) || strategicDimension.problems[0] || "Falta claridad en la dimensión prioritaria."
+    ? strategicDimension.problems.find((problem) => !/title|meta description|SEO|seo|index/i.test(problem)) || strategicDimension.problems[0] || "Hoy no hay un único problema que explique el resultado. Hay varias mejoras concretas que conviene ordenar."
     : `Todavía no se pudo observar con claridad qué parte del recorrido está frenando ${business.objetivo.toLowerCase()}.`;
 
   // Build bottleneck from the strategic dimension's actual problems, not from random websiteFindings
@@ -68,7 +68,7 @@ function buildDeterministicDiagnosis(
         ? "Hay una base aprovechable, pero algunos obstáculos hacen que parte del interés no llegue a convertirse en consultas o ventas."
         : "Hoy existen obstáculos concretos que pueden estar frenando el objetivo comercial."
   }`
-    : `${business.nombre} busca ${business.objetivo.toLowerCase()} en ${business.plazoLabel}. Para recomendar cambios responsables necesitamos observar al menos un punto real del recorrido de sus clientes; conectar el sitio, redes o reseñas permitirá identificar qué conviene hacer primero.`;
+    : `${business.nombre} busca ${business.objetivo.toLowerCase()} en ${business.plazoLabel}. Ya encontramos señales útiles para orientar los primeros cambios, aunque el puntaje general se completará cuando podamos contrastar más partes del negocio.`;
 
   const strengths = scoreResult.dimensions
     .filter((d) => d.points !== null && d.points >= 65)
@@ -105,7 +105,7 @@ function buildDeterministicDiagnosis(
 
   const opportunities = buildOpportunities(strategicDimension, scoreResult.dimensions);
   const risks = buildRisks(business, scoreResult, strategicDimension);
-  const priorities = buildPriorities(scoreResult.dimensions, `La dimensión prioritaria es ${strategicDimension?.name ?? "diagnóstico"}.`);
+  const priorities = buildPriorities(scoreResult.dimensions, `Esta es el área que más puede acercar el negocio a su objetivo: ${strategicDimension?.name ?? "la información disponible"}.`);
 
   return {
     engineType: "deterministic",
@@ -140,7 +140,7 @@ function buildOpportunities(weakest: DimensionResult | null, all: DimensionResul
   if (posicionamiento && posicionamiento.points !== null && posicionamiento.points < 60) {
     opps.push("Explicar con claridad qué ofrece el negocio, para quién y por qué elegirlo puede facilitar la decisión de nuevos clientes.");
   }
-  return opps.slice(0, 4);
+  return opps.slice(0, 3);
 }
 
 function buildRisks(business: BusinessContext, score: NuvraScoreResult, weakest: DimensionResult | null): string[] {

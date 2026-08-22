@@ -46,7 +46,7 @@ export default function EstrategiaPage() {
         border: `1px solid ${COLORS.line}`,
         marginBottom: 24
       }}>
-        <h3 style={{ fontSize: 18, fontWeight: 600, marginBottom: 16 }}>Objetivo estratégico</h3>
+        <h3 style={{ fontSize: 18, fontWeight: 600, marginBottom: 16 }}>El objetivo que estamos trabajando</h3>
         <div className="shp-display" style={{ fontSize: 24, fontWeight: 700, color: COLORS.blue, marginBottom: 12 }}>
           {strategy.objetivo}
         </div>
@@ -74,7 +74,7 @@ export default function EstrategiaPage() {
           padding: 24, 
           border: `1px solid ${COLORS.line}`
         }}>
-          <div style={{ fontSize: 13, color: COLORS.inkSoft, marginBottom: 8 }}>Distancia al objetivo</div>
+          <div style={{ fontSize: 13, color: COLORS.inkSoft, marginBottom: 8 }}>Qué falta para llegar</div>
           <div style={{ fontSize: 15, lineHeight: 1.6 }}>{simplifyTechnicalText(strategy.distanciaObjetivo)}</div>
         </div>
 
@@ -97,7 +97,7 @@ export default function EstrategiaPage() {
           border: `1px solid ${COLORS.line}`,
           marginBottom: 24
         }}>
-          <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>Prioridades estratégicas</h3>
+          <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>En qué conviene concentrarse</h3>
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             {strategy.prioridades.map((p, i) => (
               <div key={i} style={{ 
@@ -152,7 +152,7 @@ export default function EstrategiaPage() {
           padding: 24, 
           border: `1px solid ${COLORS.line}`
         }}>
-          <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>Contexto del score</h3>
+          <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>Estado general</h3>
           <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
             <div className="shp-display" style={{ fontSize: 36, fontWeight: 700, color: COLORS.blue }}>
               {score.total}
@@ -160,7 +160,7 @@ export default function EstrategiaPage() {
             <div>
               <div style={{ fontSize: 13, color: COLORS.inkSoft }}>Nuvra Score actual</div>
               <div style={{ fontSize: 12, color: COLORS.inkFaint }}>
-                Basado en análisis real de {score.dimensions.length} dimensiones
+                Basado en {score.dimensions.filter((item) => item.points !== null && item.points >= 0).length} áreas con información comprobable
               </div>
             </div>
           </div>
