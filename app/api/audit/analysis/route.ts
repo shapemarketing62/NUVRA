@@ -9,7 +9,7 @@ export async function GET(req: NextRequest) {
   if (!id || id.length > 100) return apiError("validation_error", 400);
   const access = await authorizeBusiness(id, "business.read");
   if (!access.ok) return apiError(access.reason, access.reason === "unauthorized" ? 401 : 403);
-  if (process.env.NODE_ENV === "production" && !hasInternalAccess(access.user)) return apiError("forbidden", 403);
+  if (!hasInternalAccess(access.user)) return apiError("forbidden", 403);
 
   try {
     const business = await prisma.business.findUnique({
@@ -35,6 +35,7 @@ export async function GET(req: NextRequest) {
       objective: business.goals?.[0]?.objetivo,
       businessProfile: snapshot?.businessProfile || null,
       pipelineAudit: snapshot?.analysisAudit || null,
+      analysisTrace: snapshot?.analysisTrace || null,
       scoreTotal: score?.total,
       scoreDimensions: score?.dimensions.map((d) => ({
         name: d.name,

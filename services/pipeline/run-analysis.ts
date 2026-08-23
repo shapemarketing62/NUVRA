@@ -9,6 +9,7 @@ import { classifySiteType } from "@/services/scoring/site-type-classifier";
 import { BusinessIntelligenceLayer } from "@/services/intelligence/business-intelligence-layer";
 import { BusinessDiscoveryService, type DiscoveryResult } from "@/services/discovery/business-discovery-service";
 import { executeSource } from "@/services/intelligence/source-execution";
+import { buildAnalysisTrace } from "@/services/intelligence/analysis-trace";
 import { normalizeUrl } from "@/lib/utils";
 import { REBUILD_TIMESTAMP } from "@/lib/rebuild-trigger";
 import { currentLogContext } from "@/lib/server/logger";
@@ -425,6 +426,7 @@ export async function runFullAnalysis(businessId: string, options: { signal?: Ab
 
     const historyStarted = Date.now();
     const historyId = randomUUID();
+    const analysisTrace = buildAnalysisTrace({ discovery: discoveryResult, aggregated: biResult.aggregatedEvidence, profile: biResult.businessProfile, diagnosis: diagnosisResult, strategy: strategyResult, score: biResult.nuvraScore });
     try {
       await (prisma as any).$executeRaw`
         INSERT INTO "AnalysisHistory" ("id", "businessId", "scoreId", "diagnosisId", "strategyId", "websiteAnalysisId", "nuvraScoreTotal", "snapshot", "createdAt")
@@ -441,6 +443,7 @@ export async function runFullAnalysis(businessId: string, options: { signal?: Ab
             externalMentionsSummary: biResult.aggregatedEvidence.sources.external_mentions?.data || null,
           },
           businessProfile: biResult.businessProfile,
+          analysisTrace,
           analysisAudit: {
             discovery: discoveryExecution.audit,
             sources: Object.fromEntries(Object.entries(biResult.aggregatedEvidence.sources).map(([source, evidence]) => [source, {

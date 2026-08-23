@@ -121,6 +121,11 @@ export async function GET(req: NextRequest) {
       const snapshot = JSON.parse(item.snapshot);
       const competitors = snapshot?.intelligence?.competitorSummary?.competitors;
       if (Array.isArray(competitors) && competitorLimit !== undefined) snapshot.intelligence.competitorSummary.competitors = competitors.slice(0, competitorLimit);
+      if (!internalAccess) {
+        delete snapshot.businessProfile;
+        delete snapshot.analysisAudit;
+        delete snapshot.analysisTrace;
+      }
       return { ...item, snapshot: JSON.stringify(snapshot) };
     } catch { return { ...item, snapshot: null }; }
   });

@@ -2,6 +2,9 @@ import type { Business } from "@prisma/client";
 import type { AggregatedEvidence } from "./evidence-aggregator";
 import type { EvidenceFinding, SourceType } from "./source-analyzer";
 import { getGoalAdjustedAction, getGoalAreaRelevance, selectBusinessPlaybook, type CommercialModel } from "../strategy/business-playbook.ts";
+import { buildCommercialEvidence, type CommercialEvidence } from "./commercial-evidence.ts";
+import { CommercialJourneyEngine, type CommercialJourney } from "./commercial-journey-engine.ts";
+import { buildProblemCandidates, buildStrengthCandidates, type ProblemCandidate, type StrengthCandidate } from "./commercial-candidates.ts";
 
 type GoalInput = { objetivo?: string; magnitud?: number | null; plazoDias?: number; plazoLabel?: string };
 type BusinessWithGoal = Business & { goals?: GoalInput[] };
@@ -40,11 +43,16 @@ export interface BusinessProfile {
   location: string | null;
   customerType: string | null;
   offerings: string[];
+  offeringType: "product" | "service" | "both" | "unknown";
   audienceSignals: string[];
   primaryCustomerAction: string;
   primaryResult: string;
   recurrence: "frequent" | "periodic" | "membership" | "occasional" | "unknown";
+  requiresAppointmentOrReservation: boolean;
+  purchasePattern: "single" | "repeated" | "continuous" | "unknown";
+  geographicArea: string | null;
   activeChannels: SourceType[];
+  primaryChannel: SourceType | null;
   unavailableChannels: SourceType[];
   channelDeclarations: { web: "present" | "absent" | "unknown"; instagram: "present" | "absent" | "unknown" };
   contactMethods: string[];
@@ -57,8 +65,13 @@ export interface BusinessProfile {
   goal: { text: string; magnitude: number | null; timeframeDays: number | null; timeframeLabel: string | null };
   resources: { monthlyBudget: number | null; executionCapacity: string | null };
   additionalInformation: string | null;
+  decisionFactors: { trust: number; price: number; reviews: number; proximity: number };
   areaRelevance: Record<string, { goalRelevance: number; businessRelevance: number }>;
   inferenceTrace: Array<{ field: string; value: string; evidence: string; source: "declared" | "observed" | "inferred" }>;
+  commercialEvidence: CommercialEvidence[];
+  commercialJourney: CommercialJourney;
+  problemCandidates: ProblemCandidate[];
+  strengthCandidates: StrengthCandidate[];
 }
 
 const categoryToArea = (category: string): string => {
@@ -171,7 +184,28 @@ export function buildBusinessProfile(business: BusinessWithGoal, aggregated: Agg
     ...(business.instagramHandle ? [{ field: "instagram", value: business.instagramHandle, evidence: business.instagramHandle, source: "declared" as const }] : noInstagramDeclared ? [{ field: "instagram", value: "absent", evidence: "El usuario declaró que no tiene Instagram.", source: "declared" as const }] : []),
   ];
 
-  return {
+  const normalizedContext = contextText.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const productSignal = /producto|tienda|e.?commerce|compr|venta|catalogo|envio/.test(normalizedContext);
+  const serviceSignal = /servicio|turno|consulta|reserva|reunion|tratamiento|clase|atencion|profesional/.test(normalizedContext);
+  const offeringType: BusinessProfile["offeringType"] = productSignal && serviceSignal ? "both" : productSignal ? "product" : serviceSignal ? "service" : "unknown";
+  const requiresAppointmentOrReservation = ["appointments", "reservations"].includes(playbook.model) || /turno|reserv|cita|reunion/.test(normalizedContext);
+  const purchasePattern: BusinessProfile["purchasePattern"] = playbook.recurrence === "membership" ? "continuous" : ["frequent", "periodic"].includes(playbook.recurrence) ? "repeated" : playbook.recurrence === "occasional" ? "single" : "unknown";
+  const primaryChannel = (["web", "instagram", "search", "reviews"] as SourceType[]).find((source) => activeChannels.includes(source)) || activeChannels[0] || null;
+  const decisionFactors = {
+    trust: playbook.model === "professional" || playbook.model === "appointments" ? 1 : .75,
+    price: playbook.model === "commerce" || playbook.model === "reservations" ? .9 : .65,
+    reviews: localDependency === "high" || ["appointments", "reservations"].includes(playbook.model) ? .95 : .65,
+    proximity: localDependency === "high" ? 1 : operatingModeValue(hasPhysical, hasOnline) === "mixed" ? .65 : .25,
+  };
+  inferenceTrace.push(
+    { field: "offeringType", value: offeringType, evidence: contextText, source: "inferred" },
+    { field: "operatingMode", value: operatingModeValue(hasPhysical, hasOnline), evidence: [business.ubicacion, business.webUrl, business.instagramHandle, contextText].filter(Boolean).join(" · "), source: "inferred" },
+    { field: "requiresAppointmentOrReservation", value: String(requiresAppointmentOrReservation), evidence: `${playbook.model} · ${contextText}`, source: "inferred" },
+    { field: "purchasePattern", value: purchasePattern, evidence: `Recurrencia inferida: ${playbook.recurrence}`, source: "inferred" },
+    { field: "primaryChannel", value: primaryChannel || "unknown", evidence: activeChannels.join(", ") || "Sin canales evaluados", source: "inferred" },
+  );
+
+  const profile = {
     businessId: business.id,
     businessName: business.nombre,
     originalIndustry: business.rubro,
@@ -182,11 +216,16 @@ export function buildBusinessProfile(business: BusinessWithGoal, aggregated: Agg
     location: business.ubicacion || business.ciudad || null,
     customerType: business.tipoCliente || null,
     offerings: [business.productosServicios, business.descripcion].filter((value): value is string => Boolean(value?.trim())),
+    offeringType,
     audienceSignals,
     primaryCustomerAction: goalAction.action,
     primaryResult: goalAction.result,
     recurrence: playbook.recurrence,
+    requiresAppointmentOrReservation,
+    purchasePattern,
+    geographicArea: business.ubicacion || business.ciudad || null,
     activeChannels: Array.from(new Set(activeChannels)),
+    primaryChannel,
     unavailableChannels: Object.entries(aggregated.sources).filter(([, evidence]) => evidence.status !== "evaluated").map(([source]) => source as SourceType),
     channelDeclarations: {
       web: noWebDeclared ? "absent" : business.webUrl ? "present" : "unknown",
@@ -202,7 +241,21 @@ export function buildBusinessProfile(business: BusinessWithGoal, aggregated: Agg
     goal: { text: goal.objetivo || "hacer crecer el negocio", magnitude: goal.magnitud ?? null, timeframeDays: goal.plazoDias ?? null, timeframeLabel: goal.plazoLabel || null },
     resources: { monthlyBudget: business.inversionMarketing ?? null, executionCapacity: business.empleados || business.tamano || null },
     additionalInformation: business.otrosCanales || null,
+    decisionFactors,
     areaRelevance,
     inferenceTrace,
-  };
+    commercialEvidence: [] as CommercialEvidence[],
+    commercialJourney: null as unknown as CommercialJourney,
+    problemCandidates: [] as ProblemCandidate[],
+    strengthCandidates: [] as StrengthCandidate[],
+  } satisfies BusinessProfile;
+  profile.commercialEvidence = buildCommercialEvidence({ business, aggregated, inferences: inferenceTrace });
+  profile.commercialJourney = CommercialJourneyEngine.build(profile, profile.commercialEvidence);
+  profile.problemCandidates = buildProblemCandidates(profile, profile.commercialJourney, profile.commercialEvidence);
+  profile.strengthCandidates = buildStrengthCandidates(profile, profile.commercialJourney, profile.commercialEvidence);
+  return profile;
+}
+
+function operatingModeValue(hasPhysical: boolean, hasOnline: boolean): BusinessProfile["operatingMode"] {
+  return hasPhysical && hasOnline ? "mixed" : hasPhysical ? "physical" : hasOnline ? "online" : "unknown";
 }

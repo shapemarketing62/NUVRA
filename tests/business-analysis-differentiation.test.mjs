@@ -4,6 +4,9 @@ import { buildBusinessProfile } from "../services/intelligence/business-profile.
 import { NuvraScoreCalculator } from "../services/intelligence/nuvra-score-calculator.ts";
 import { buildProfileDiagnosis } from "../services/diagnostic/diagnostic-engine.ts";
 import { buildProfileStrategy } from "../services/strategy/strategy-engine.ts";
+import { buildAnalysisTrace } from "../services/intelligence/analysis-trace.ts";
+import { parseCustomTimeframe } from "../lib/timeframe.ts";
+import { PLAZOS } from "../lib/utils.ts";
 
 const finding = (id, category, type, impact, source, evidence, confidence = "ALTA") => ({ id, category, type, impact, source, evidence, confidence, attribution: `${source}:fixture`, weight: impact === "high" ? .9 : impact === "medium" ? .7 : .5 });
 const areaFor = (category) => category === "conversion" ? "conversion" : category === "posicionamiento" ? "posicionamiento" : category === "propuesta" ? "propuesta" : category === "redes" ? "redes" : /adquisicion|seo/.test(category) ? "adquisicion" : category === "retencion" ? "retencion" : "presencia";
@@ -31,7 +34,7 @@ function analyzeFixture(input) {
   const businessContext = { nombre: input.name, rubro: input.industry, objetivo: input.goal, plazoDias: 90, plazoLabel: "3 meses", descripcion: input.description, businessProfile: profile };
   const diagnosis = buildProfileDiagnosis(businessContext, score, profile);
   const strategy = buildProfileStrategy({ nombre: input.name, rubro: input.industry, objetivo: input.goal, plazoDias: 90, plazoLabel: "3 meses", magnitud: 20, ubicacion: input.location, tipoCliente: input.customerType, presupuesto: input.budget ?? 200, capacidad: input.capacity || "Lo hago yo", canales: [JSON.stringify(input.channels || []), input.additional].filter(Boolean).join(" "), descripcion: input.description, informacionComplementaria: input.additional, businessProfile: profile }, diagnosis, score, profile);
-  return { input, profile, score, diagnosis, strategy };
+  return { input, profile, score, intelligenceScore, diagnosis, strategy, aggregated };
 }
 
 const fixtures = [
@@ -165,6 +168,101 @@ test("el texto libre sobre origen de clientes cambia las acciones", () => {
   assert.ok(referrals.strategy.actions.some((action) => /recomendaciones/i.test(action.title)));
   assert.ok(instagram.strategy.actions.some((action) => /canal informado/i.test(action.title)));
   assert.notDeepEqual(referrals.strategy.actions.map((action) => action.title), instagram.strategy.actions.map((action) => action.title));
+});
+
+test("Otro permite conservar un plazo personalizado válido", () => {
+  assert.ok(PLAZOS.some((item) => item.id === "custom" && item.label === "Otro"));
+  assert.deepEqual(parseCustomTimeframe("6 semanas"), { days: 42, label: "6 semanas" });
+  assert.equal(parseCustomTimeframe("algún día"), null);
+});
+
+test("la evidencia conserva origen, límites de afirmación y etapa comercial", () => {
+  const result = results.find((item) => item.input.id === "ap");
+  const kinds = new Set(result.profile.commercialEvidence.map((item) => item.kind));
+  assert.deepEqual(kinds, new Set(["ObservedEvidence", "DeclaredEvidence", "InferredEvidence"]));
+  for (const evidence of result.profile.commercialEvidence) {
+    assert.ok(evidence.source && evidence.text && evidence.entity.businessId);
+    assert.ok(evidence.confidence && evidence.journeyStage && evidence.possibleImpact && evidence.polarity);
+    assert.ok(evidence.allowsClaims.length && evidence.disallowsClaims.length);
+  }
+});
+
+test("reseñas positivas comprobadas cambian confianza, problema y estrategia", () => {
+  const common = {
+    id: "review-counterfactual", name: "Clínica del Parque", industry: "clínica estética", goal: "conseguir más consultas", location: "Córdoba",
+    findings: [
+      finding("review-discovery", "adquisicion", "negative", "medium", "search", "El negocio aparece de forma poco consistente en búsquedas locales."),
+      finding("review-contact", "conversion", "positive", "high", "web", "El pedido de turno por WhatsApp está visible desde el comienzo."),
+      finding("review-offer", "propuesta", "positive", "medium", "web", "La página explica los tratamientos principales."),
+    ],
+  };
+  const withoutReviews = analyzeFixture({ ...common, findings: [...common.findings, finding("review-absence", "posicionamiento", "negative", "high", "reviews", "No se encontraron opiniones recientes verificables del negocio.")] });
+  const positiveReviews = Array.from({ length: 8 }, (_, index) => finding(`review-positive-${index}`, "posicionamiento", "positive", "high", "reviews", `La opinión verificada ${index + 1} destaca la atención profesional y el cuidado.`));
+  const withReviews = analyzeFixture({ ...common, id: "review-counterfactual-positive", findings: [...common.findings, ...positiveReviews] });
+  assert.ok(withoutReviews.profile.problemCandidates.some((item) => item.pattern === "trust"));
+  const reviewStrength = withReviews.profile.strengthCandidates.find((item) => item.evidence.length === positiveReviews.length);
+  assert.equal(reviewStrength?.confidence, "ALTA");
+  assert.equal(withReviews.profile.problemCandidates.some((item) => item.pattern === "trust"), false);
+  assert.notEqual(withoutReviews.diagnosis.bottleneck.findingId, withReviews.diagnosis.bottleneck.findingId);
+  assert.notDeepEqual(withoutReviews.strategy.actions.map((item) => item.title), withReviews.strategy.actions.map((item) => item.title));
+});
+
+test("el gimnasio distingue un camino de reserva claro de uno cortado", () => {
+  const blocked = results.find((item) => item.input.id === "gym");
+  const clear = analyzeFixture({
+    ...blocked.input,
+    id: "gym-clear-path",
+    findings: blocked.input.findings.map((item) => item.id === "gym-trial"
+      ? finding("gym-direct-booking", "conversion", "positive", "high", "instagram", "Instagram ofrece un enlace directo a WhatsApp con un mensaje preparado para reservar la clase de prueba.")
+      : item),
+  });
+  assert.ok(blocked.profile.problemCandidates.some((item) => item.pattern === "action_path"));
+  assert.equal(clear.profile.problemCandidates.some((item) => item.pattern === "action_path"), false);
+  assert.ok(clear.profile.strengthCandidates.some((item) => item.pattern === "action_path"));
+  assert.notDeepEqual(blocked.strategy.actions.map((item) => item.title), clear.strategy.actions.map((item) => item.title));
+});
+
+test("treinta comentarios sobre demora forman un problema frecuente de experiencia", () => {
+  const comments = Array.from({ length: 30 }, (_, index) => finding(`delay-${index}`, "experiencia", "negative", "high", "reviews", `La opinión pública ${index + 1} menciona demora para recibir una respuesta.`));
+  const result = analyzeFixture({ id: "delays", name: "Servicio con demoras", industry: "servicio profesional", goal: "conseguir más clientes", location: "Buenos Aires", findings: comments });
+  const delayProblem = result.profile.problemCandidates.find((item) => item.pattern === "experience");
+  assert.equal(delayProblem?.frequency, 30);
+  assert.equal(result.profile.problemCandidates[0]?.id, delayProblem?.id);
+  assert.equal(result.diagnosis.bottleneck.findingId, "observed:delay-0");
+});
+
+test("el restaurante cambia entre atraer reservas nuevas y lograr que vuelvan", () => {
+  const restaurant = results.find((item) => item.input.id === "restaurant").input;
+  const evidence = [...restaurant.findings, finding("restaurant-return", "retencion", "negative", "high", "other", "No se observó un próximo paso para invitar a volver después de la visita.")];
+  const newVisits = analyzeFixture({ ...restaurant, id: "restaurant-new-visits", findings: evidence, goal: "conseguir más reservas nuevas" });
+  const repeatVisits = analyzeFixture({ ...restaurant, id: "restaurant-repeat-visits", findings: evidence, goal: "hacer que vuelvan más clientes" });
+  assert.notEqual(newVisits.diagnosis.bottleneck.findingId, repeatVisits.diagnosis.bottleneck.findingId);
+  assert.notEqual(newVisits.profile.primaryCustomerAction, repeatVisits.profile.primaryCustomerAction);
+  assert.notDeepEqual(newVisits.strategy.actions.slice(0, 3).map((item) => item.title), repeatVisits.strategy.actions.slice(0, 3).map((item) => item.title));
+});
+
+test("cuatro modelos dejan huellas comerciales distintas sin depender del nombre", () => {
+  const selected = ["pets", "shop", "restaurant", "accounting"].map((id) => results.find((item) => item.input.id === id));
+  const fingerprints = selected.map((item) => `${item.profile.commercialModel}:${item.profile.primaryCustomerAction}:${item.profile.problemCandidates[0]?.pattern}`);
+  assert.equal(new Set(fingerprints).size, 4, fingerprints.join("\n"));
+});
+
+test("AnalysisTrace explica búsquedas, descartes, prioridad, acciones y score", () => {
+  const result = results.find((item) => item.input.id === "ap");
+  const trace = buildAnalysisTrace({
+    discovery: { candidates: [], validatedSources: [], rejectedSources: [{ url: "https://example.invalid", status: "rejected" }] },
+    aggregated: result.aggregated,
+    profile: result.profile,
+    diagnosis: result.diagnosis,
+    strategy: result.strategy,
+    score: result.intelligenceScore,
+  });
+  assert.equal(trace.version, "commercial-journey-v1");
+  assert.ok(trace.searched.length && trace.found.length && trace.discarded.length);
+  assert.ok(trace.businessProfile.primaryCustomerAction && trace.commercialJourney.stages.length);
+  assert.ok(trace.problemCandidates.length && trace.prioritization.selectedProblemId);
+  assert.ok(trace.actionConsiderations.length && trace.finalActions.length);
+  assert.equal(trace.scoreExplanation.total, result.score.total);
 });
 
 test("comparación metodológica legible", () => {

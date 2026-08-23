@@ -1,0 +1,176 @@
+import type { BusinessProfile } from "./business-profile.ts";
+import type { CommercialEvidence, CommercialJourneyStageId } from "./commercial-evidence.ts";
+import type { CommercialJourney } from "./commercial-journey-engine.ts";
+
+export type CommercialProblemPattern = "visibility" | "offer_clarity" | "trust" | "decision_information" | "action_path" | "experience" | "retention" | "demand_pattern" | "other";
+
+export interface ProblemCandidate {
+  id: string;
+  pattern: CommercialProblemPattern;
+  hypothesis: string;
+  journeyStage: CommercialJourneyStageId;
+  evidenceFor: string[];
+  evidenceAgainst: string[];
+  frequency: number;
+  goalImpact: number;
+  commercialRelevance: number;
+  severity: "high" | "medium" | "low";
+  confidence: "ALTA" | "MEDIA" | "BAJA";
+  solvability: number;
+  dependencies: string[];
+  scope: "single_touchpoint" | "multi_channel" | "business_wide";
+  priorityScore: number;
+  causalExplanation: string;
+}
+
+export interface StrengthCandidate {
+  id: string;
+  pattern: CommercialProblemPattern;
+  statement: string;
+  journeyStage: CommercialJourneyStageId;
+  evidence: string[];
+  frequency: number;
+  commercialImpact: number;
+  confidence: "ALTA" | "MEDIA" | "BAJA";
+  exploitability: number;
+  priorityScore: number;
+}
+
+const normalize = (value: string) => value.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+function patternFor(evidence: CommercialEvidence): CommercialProblemPattern {
+  const text = normalize(evidence.text);
+  if (/lunes|martes|miercoles|jueves|viernes|pocas reservas|temporada|demanda/.test(text)) return "demand_pattern";
+  if (evidence.journeyStage === "discovery") return "visibility";
+  if (evidence.journeyStage === "action") return "action_path";
+  if (evidence.journeyStage === "experience") return "experience";
+  if (evidence.journeyStage === "retention") return "retention";
+  if (/resena|opinion|testimonio|confianza|caso|garantia|profesional/.test(text)) return "trust";
+  if (/precio|pago|envio|horario|ubicacion|direccion|disponibilidad|cuota/.test(text) || evidence.journeyStage === "decision") return "decision_information";
+  if (/producto|servicio|tratamiento|especializ|propuesta|bio|que ofrece|mensaje/.test(text)) return "offer_clarity";
+  return "other";
+}
+
+function stageImportance(journey: CommercialJourney, stage: CommercialJourneyStageId) {
+  return journey.stages.find((item) => item.id === stage)?.importanceForGoal || .5;
+}
+
+function confidenceOf(items: CommercialEvidence[]): "ALTA" | "MEDIA" | "BAJA" {
+  const points = items.reduce((sum, item) => sum + (item.confidence === "ALTA" ? 1 : item.confidence === "MEDIA" ? .7 : .4), 0) / Math.max(items.length, 1);
+  return points >= .85 ? "ALTA" : points >= .58 ? "MEDIA" : "BAJA";
+}
+
+function hypothesis(pattern: CommercialProblemPattern, profile: BusinessProfile): string {
+  if (pattern === "visibility") return `El negocio puede estar perdiendo oportunidades antes de ser considerado porque cuesta encontrarlo en los canales relevantes.`;
+  if (pattern === "offer_clarity") return `Las personas pueden encontrar el negocio, pero no reunir suficiente claridad sobre qué ofrece y por qué les conviene elegirlo.`;
+  if (pattern === "trust") return `La evaluación puede frenarse porque faltan pruebas suficientes para reducir dudas antes de ${profile.primaryCustomerAction}.`;
+  if (pattern === "decision_information") return `El interés puede frenarse antes de la decisión porque falta información práctica necesaria para ${profile.primaryCustomerAction}.`;
+  if (pattern === "action_path") return `El principal freno parece estar entre el interés y la acción: cuesta pasar desde la información disponible hasta ${profile.primaryCustomerAction}.`;
+  if (pattern === "experience") return `La experiencia posterior a la acción puede estar reduciendo el resultado comercial o generando pérdida de clientes.`;
+  if (pattern === "retention") return `El negocio puede estar perdiendo continuidad porque no aparece un próximo paso claro para volver o mantener la relación.`;
+  if (pattern === "demand_pattern") return `La demanda no está distribuida de manera útil para el negocio y existen momentos concretos que necesitan una intervención propia.`;
+  return `Existe una fricción observada que puede dificultar que una persona avance hacia ${profile.primaryCustomerAction}.`;
+}
+
+function solvabilityFor(pattern: CommercialProblemPattern, profile: BusinessProfile): number {
+  const base = ["action_path", "offer_clarity", "decision_information", "retention", "demand_pattern"].includes(pattern) ? .9 : pattern === "visibility" ? .7 : .65;
+  const constrained = /lo hago yo|2.?3|poco|sin equipo/i.test(profile.resources.executionCapacity || "") || (profile.resources.monthlyBudget !== null && profile.resources.monthlyBudget <= 100);
+  return constrained ? Math.max(.45, base - .12) : base;
+}
+
+function sourceScope(items: CommercialEvidence[]): ProblemCandidate["scope"] {
+  const sources = new Set(items.map((item) => item.source));
+  return sources.size >= 3 ? "business_wide" : sources.size === 2 ? "multi_channel" : "single_touchpoint";
+}
+
+export function buildProblemCandidates(profile: BusinessProfile, journey: CommercialJourney, evidence: CommercialEvidence[]): ProblemCandidate[] {
+  const negatives = evidence.filter((item) => item.polarity === "negative");
+  // Una declaración del onboarding orienta la estrategia, pero no alcanza por sí
+  // sola para presentar una fortaleza como si NUVRA la hubiera comprobado.
+  const positives = evidence.filter(
+    (item) => item.polarity === "positive" && item.kind === "ObservedEvidence",
+  );
+  const groups = new Map<string, CommercialEvidence[]>();
+  for (const item of negatives) {
+    const pattern = patternFor(item);
+    const key = `${item.journeyStage}:${pattern}`;
+    (groups.get(key) || groups.set(key, []).get(key)!).push(item);
+  }
+  return Array.from(groups.values()).map((items) => {
+    const pattern = patternFor(items[0]);
+    const stage = items[0].journeyStage;
+    const against = positives.filter((item) => item.journeyStage === stage && patternFor(item) === pattern);
+    const evidenceStrength = Math.min(1, items.reduce((sum, item) => sum + (item.confidence === "ALTA" ? 1 : item.confidence === "MEDIA" ? .7 : .4), 0) / 2);
+    const goalImpact = stageImportance(journey, stage);
+    const retentionGoal = /volv|vuelv|recompra|renov|recurren|fideliza|clientes actuales|socios actuales/i.test(profile.goal.text);
+    const commercialRelevance = retentionGoal
+      ? stage === "retention" ? 1 : stage === "experience" ? .9 : .25
+      : stage === "action" ? 1 : stage === "decision" || stage === "evaluation" ? .85 : .7;
+    const solvability = solvabilityFor(pattern, profile);
+    const contradictionPenalty = Math.min(.35, against.length * .12);
+    const frequency = items.length;
+    const frequencyFactor = Math.min(1, .55 + frequency * .15);
+    const priorityScore = Math.round(evidenceStrength * goalImpact * commercialRelevance * frequencyFactor * solvability * (1 - contradictionPenalty) * 100);
+    const causal = hypothesis(pattern, profile);
+    return {
+      id: `problem:${stage}:${pattern}`,
+      pattern,
+      hypothesis: causal,
+      journeyStage: stage,
+      evidenceFor: items.map((item) => item.id),
+      evidenceAgainst: against.map((item) => item.id),
+      frequency,
+      goalImpact,
+      commercialRelevance,
+      severity: items.some((item) => item.possibleImpact === "high") ? "high" : items.some((item) => item.possibleImpact === "medium") ? "medium" : "low",
+      confidence: confidenceOf(items),
+      solvability,
+      dependencies: stage === "action" ? ["La oferta y la información de decisión deben ser suficientemente claras."] : stage === "retention" ? ["La experiencia anterior debe justificar una nueva relación."] : [],
+      scope: sourceScope(items),
+      priorityScore,
+      causalExplanation: `${causal} La hipótesis se apoya en ${items.length} señal(es) y considera ${against.length} señal(es) que podrían contradecirla.`,
+    } satisfies ProblemCandidate;
+  }).sort((a, b) => b.priorityScore - a.priorityScore);
+}
+
+function strengthStatement(pattern: CommercialProblemPattern, profile: BusinessProfile): string {
+  if (pattern === "visibility") return "El negocio ya logra aparecer en canales donde puede ser descubierto.";
+  if (pattern === "trust") return `Existen pruebas públicas que ayudan a reducir dudas antes de ${profile.primaryCustomerAction}.`;
+  if (pattern === "action_path") return `El paso para ${profile.primaryCustomerAction} aparece de forma clara en la evidencia observada.`;
+  if (pattern === "offer_clarity") return "La oferta se entiende con suficiente claridad en las fuentes observadas.";
+  if (pattern === "decision_information") return "La información práctica observada ayuda a tomar una decisión sin sorpresas importantes.";
+  if (pattern === "experience") return "La experiencia observada aporta señales favorables que pueden sostener la elección.";
+  if (pattern === "retention") return "Existe una base observable para promover continuidad o recompra.";
+  return "Existe una señal favorable y utilizable en el recorrido comercial.";
+}
+
+export function buildStrengthCandidates(profile: BusinessProfile, journey: CommercialJourney, evidence: CommercialEvidence[]): StrengthCandidate[] {
+  const positives = evidence.filter(
+    (item) => item.polarity === "positive" && item.kind === "ObservedEvidence",
+  );
+  const groups = new Map<string, CommercialEvidence[]>();
+  for (const item of positives) {
+    const pattern = patternFor(item);
+    const key = `${item.journeyStage}:${pattern}`;
+    (groups.get(key) || groups.set(key, []).get(key)!).push(item);
+  }
+  return Array.from(groups.values()).map((items) => {
+    const pattern = patternFor(items[0]);
+    const stage = items[0].journeyStage;
+    const impact = stageImportance(journey, stage);
+    const exploitability = ["trust", "visibility", "offer_clarity"].includes(pattern) ? .9 : .75;
+    const frequency = items.length;
+    return {
+      id: `strength:${stage}:${pattern}`,
+      pattern,
+      statement: strengthStatement(pattern, profile),
+      journeyStage: stage,
+      evidence: items.map((item) => item.id),
+      frequency,
+      commercialImpact: impact,
+      confidence: confidenceOf(items),
+      exploitability,
+      priorityScore: Math.round(Math.min(1, .55 + frequency * .15) * impact * exploitability * 100),
+    } satisfies StrengthCandidate;
+  }).filter((item) => item.priorityScore >= 25).sort((a, b) => b.priorityScore - a.priorityScore);
+}
