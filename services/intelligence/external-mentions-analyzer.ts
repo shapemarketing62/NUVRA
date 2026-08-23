@@ -1,4 +1,4 @@
-import { SourceAnalyzer, SourceEvidence, SourceRelevance, SourceType, EvidenceFinding } from "./source-analyzer";
+import { SourceAnalyzer, SourceEvidence, SourceRelevance, SourceType, EvidenceFinding, type SourceAnalysisContext } from "./source-analyzer";
 import { SmartSearchProvider } from "./search-source-analyzer";
 import { EntityMatcher, CandidateSource, BusinessEntityTarget } from "@/services/discovery/entity-matcher";
 import type { Business } from "@prisma/client";
@@ -77,7 +77,7 @@ export class ExternalMentionsSourceAnalyzer extends SourceAnalyzer {
     };
   }
 
-  async analyze(business: Business, discoveryResult?: any): Promise<SourceEvidence> {
+  async analyze(business: Business, context?: SourceAnalysisContext): Promise<SourceEvidence> {
     const businessWithGoals = business as BusinessWithGoals;
     const nombre = businessWithGoals.nombre;
     const rubro = businessWithGoals.rubro || "";
@@ -99,12 +99,14 @@ export class ExternalMentionsSourceAnalyzer extends SourceAnalyzer {
       const allResults: Array<{ result: any; query: string }> = [];
 
       for (const query of queries) {
+        if (context?.signal?.aborted) throw Object.assign(new Error("mentions_search_canceled"), { name: "AbortError" });
         try {
-          const results = await this.searchProvider.search(query, business);
+          const results = await this.searchProvider.search(query, business, { signal: context?.signal });
           for (const r of results) {
             allResults.push({ result: r, query });
           }
         } catch (err) {
+          if (context?.signal?.aborted) throw err;
           console.warn(`[EXTERNAL_MENTIONS] Query failed: "${query}"`, err instanceof Error ? err.message : String(err));
         }
       }

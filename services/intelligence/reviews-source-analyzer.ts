@@ -1,4 +1,4 @@
-import { SourceAnalyzer, SourceEvidence, SourceRelevance, SourceType, EvidenceFinding } from "./source-analyzer";
+import { SourceAnalyzer, SourceEvidence, SourceRelevance, SourceType, EvidenceFinding, type SourceAnalysisContext } from "./source-analyzer";
 import { ReviewsProvider, GoogleMapsScrapeProvider, GooglePlacesApiProvider } from "./providers/reviews-provider";
 import type { Business } from "@prisma/client";
 
@@ -70,7 +70,7 @@ export class ReviewsSourceAnalyzer extends SourceAnalyzer {
     };
   }
 
-  async analyze(business: Business, discoveryResult?: any): Promise<SourceEvidence> {
+  async analyze(business: Business, context?: SourceAnalysisContext): Promise<SourceEvidence> {
     const businessWithGoals = business as BusinessWithGoals;
     const nombre = businessWithGoals.nombre;
     const rubro = businessWithGoals.rubro || "";
@@ -86,15 +86,17 @@ export class ReviewsSourceAnalyzer extends SourceAnalyzer {
       let providerUsed = "primary";
 
       try {
-        reviewsData = await this.primaryProvider.getReviews(business, discoveryResult);
+        reviewsData = await this.primaryProvider.getReviews(business, undefined, { signal: context?.signal });
       } catch (primaryError) {
+        if (context?.signal?.aborted) throw primaryError;
         console.warn("[REVIEWS_ANALYZER] Primary provider failed:", primaryError instanceof Error ? primaryError.message : String(primaryError));
         
         // Fallback a GoogleMapsScrapeProvider
         try {
-          reviewsData = await this.fallbackProvider.getReviews(business);
+          reviewsData = await this.fallbackProvider.getReviews(business, undefined, { signal: context?.signal });
           providerUsed = "fallback";
         } catch (fallbackError) {
+          if (context?.signal?.aborted) throw fallbackError;
           console.warn("[REVIEWS_ANALYZER] Fallback provider also failed:", fallbackError instanceof Error ? fallbackError.message : String(fallbackError));
           return this.unavailable(`Ambos providers fallaron. Primary: ${primaryError instanceof Error ? primaryError.message : String(primaryError)}. Fallback: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`);
         }

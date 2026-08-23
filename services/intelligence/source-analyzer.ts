@@ -35,6 +35,10 @@ export interface SourceRelevance {
   weight: number; // Cuánto contribuye a coverage total (0-1)
 }
 
+export interface SourceAnalysisContext {
+  signal?: AbortSignal;
+}
+
 export abstract class SourceAnalyzer {
   abstract type: SourceType;
   abstract requiresAuth: boolean;
@@ -42,7 +46,7 @@ export abstract class SourceAnalyzer {
 
   abstract isAvailable(business: Business): boolean;
   abstract isRelevant(business: Business): SourceRelevance;
-  abstract analyze(business: Business): Promise<SourceEvidence>;
+  abstract analyze(business: Business, context?: SourceAnalysisContext): Promise<SourceEvidence>;
 
   protected generateFinding(
     category: string,

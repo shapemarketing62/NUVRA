@@ -1,4 +1,4 @@
-import { SourceAnalyzer, type SourceEvidence, type SourceRelevance, type SourceType, type EvidenceFinding } from "./source-analyzer.ts";
+import { SourceAnalyzer, type SourceEvidence, type SourceRelevance, type SourceType, type EvidenceFinding, type SourceAnalysisContext } from "./source-analyzer.ts";
 import { DuckDuckGoProvider, type SearchProvider, type SearchResult } from "./providers/search-provider.ts";
 import { TavilySearchProvider } from "./providers/tavily-search-provider.ts";
 
@@ -15,13 +15,13 @@ export class SmartSearchProvider implements SearchProvider {
   private tavily = new TavilySearchProvider();
   private ddg = new DuckDuckGoProvider();
 
-  async search(query: string, business: Business): Promise<SearchResult[]> {
+  async search(query: string, business: Business, options: { signal?: AbortSignal } = {}): Promise<SearchResult[]> {
     const hasTavilyKey = !!process.env.TAVILY_API_KEY;
 
     if (hasTavilyKey) {
       try {
         console.log("[SmartSearchProvider] Intentando búsqueda con Tavily...");
-        return await this.tavily.search(query, business);
+        return await this.tavily.search(query, business, options);
       } catch (error) {
         console.error("[SmartSearchProvider] Tavily falló, intentando fallback DuckDuckGo...", error);
         // Fallback a DDG si Tavily falla incluso teniendo la key (ej: error de API, rate limit)
@@ -31,7 +31,7 @@ export class SmartSearchProvider implements SearchProvider {
     }
 
     try {
-      return await this.ddg.search(query, business);
+      return await this.ddg.search(query, business, options);
     } catch (error) {
       console.error("[SmartSearchProvider] DuckDuckGo también falló:", error);
       throw error; // Dejar que SearchSourceAnalyzer lo maneje
@@ -92,7 +92,7 @@ export class SearchSourceAnalyzer extends SourceAnalyzer {
     };
   }
 
-  async analyze(business: Business): Promise<SourceEvidence> {
+  async analyze(business: Business, context?: SourceAnalysisContext): Promise<SourceEvidence> {
     const businessWithGoals = business as BusinessWithGoals;
     const nombre = businessWithGoals.nombre;
     const rubro = businessWithGoals.rubro || "";
@@ -112,11 +112,13 @@ export class SearchSourceAnalyzer extends SourceAnalyzer {
       ])).filter(Boolean);
       const collected: Array<{ result: SearchResult; query: string; kind: "brand" | "reviews" | "category" }> = [];
       for (const query of queries) {
+        if (context?.signal?.aborted) throw Object.assign(new Error("search_canceled"), { name: "AbortError" });
         try {
           const kind = /reseñas|opiniones/.test(query) ? "reviews" : query === `${rubro} ${ubicacion}`.trim() ? "category" : "brand";
-          const queryResults = await this.provider.search(query, business);
+          const queryResults = await this.provider.search(query, business, { signal: context?.signal });
           for (const result of queryResults) collected.push({ result, query, kind });
         } catch (error) {
+          if (context?.signal?.aborted) throw error;
           console.warn(`[SEARCH_ANALYZER] No se pudo completar la búsqueda "${query}":`, error instanceof Error ? error.message : String(error));
         }
       }

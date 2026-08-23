@@ -1,4 +1,5 @@
 import { SourceAnalyzer, type SourceEvidence, type SourceType, type EvidenceFinding } from "./source-analyzer.ts";
+import { executeSource, type SourceExecutionPolicy } from "./source-execution.ts";
 import type { Business } from "@prisma/client";
 
 // Extender Business temporalmente para incluir goals
@@ -43,26 +44,30 @@ const ALL_SOURCE_TYPES: SourceType[] = ["web", "instagram", "search", "reviews",
 
 export class EvidenceAggregator {
   private sources: Map<SourceType, SourceAnalyzer>;
+  private readonly policies: Partial<Record<SourceType, SourceExecutionPolicy>>;
 
-  constructor() {
+  constructor(policies: Partial<Record<SourceType, SourceExecutionPolicy>> = {}) {
     this.sources = new Map();
+    this.policies = policies;
   }
 
   registerSource(analyzer: SourceAnalyzer): void {
     this.sources.set(analyzer.type, analyzer);
   }
 
-  async aggregate(business: Business): Promise<AggregatedEvidence> {
+  async aggregate(business: Business, context: { signal?: AbortSignal } = {}): Promise<AggregatedEvidence> {
     const businessWithGoals = business as BusinessWithGoals;
     const evidenceMap: Record<SourceType, SourceEvidence> = {} as any;
     const allFindings: EvidenceFinding[] = [];
 
-    // Ejecutar todos los sources disponibles y relevantes
-    for (const [type, analyzer] of Array.from(this.sources.entries())) {
+    // Las fuentes se ejecutan de forma concurrente y aislada. Una excepción, un
+    // timeout o un proveedor caído solo modifica el estado de esa fuente.
+    const entries = Array.from(this.sources.entries());
+    const settled = await Promise.allSettled(entries.map(async ([type, analyzer]) => {
       const relevance = analyzer.isRelevant(business);
       
       if (!relevance.relevant) {
-        evidenceMap[type] = {
+        return [type, {
           source: type,
           status: "not_relevant",
           data: null,
@@ -72,12 +77,11 @@ export class EvidenceAggregator {
           evaluatedAt: new Date(),
           requiresAuth: analyzer.requiresAuth,
           metadata: { reason: relevance.reason, notRelevant: true },
-        };
-        continue;
+        } satisfies SourceEvidence] as const;
       }
 
       if (analyzer.requiresAuth && !analyzer.isAvailable(business)) {
-        evidenceMap[type] = {
+        return [type, {
           source: type,
           status: "requires_auth",
           data: null,
@@ -87,12 +91,11 @@ export class EvidenceAggregator {
           evaluatedAt: new Date(),
           requiresAuth: true,
           metadata: { reason: "Esta fuente requiere autenticación/API real", requiresAuth: true },
-        };
-        continue;
+        } satisfies SourceEvidence] as const;
       }
 
       if (!analyzer.isAvailable(business)) {
-        evidenceMap[type] = {
+        return [type, {
           source: type,
           status: "unavailable",
           data: null,
@@ -102,16 +105,18 @@ export class EvidenceAggregator {
           evaluatedAt: new Date(),
           requiresAuth: analyzer.requiresAuth,
           metadata: { reason: "Fuente no disponible o sin datos públicos", unavailable: true },
-        };
-        continue;
+        } satisfies SourceEvidence] as const;
       }
 
-      try {
-        const evidence = await analyzer.analyze(business);
-        evidenceMap[type] = evidence;
-        allFindings.push(...evidence.findings);
-      } catch (error) {
-        evidenceMap[type] = {
+      const policy = this.policies[type] || defaultPolicy(type);
+      const execution = await executeSource({
+        source: type,
+        operation: (signal) => analyzer.analyze(business, { signal }),
+        policy,
+        signal: context.signal,
+        shouldRetryResult: (value) => value.status === "unavailable",
+      });
+      const evidence = execution.value || {
           source: type,
           status: "unavailable",
           data: null,
@@ -120,10 +125,38 @@ export class EvidenceAggregator {
           coverage: 0,
           evaluatedAt: new Date(),
           requiresAuth: analyzer.requiresAuth,
-          metadata: { error: error instanceof Error ? error.message : String(error) },
+          metadata: { reason: "No pudimos completar esta fuente." },
+        } satisfies SourceEvidence;
+      evidence.metadata = {
+        ...(evidence.metadata || {}),
+        execution: execution.audit,
+        ...(execution.audit.failure ? { failure: execution.audit.failure } : {}),
+      };
+      return [type, evidence] as const;
+    }));
+
+    settled.forEach((result, index) => {
+      const type = entries[index][0];
+      if (result.status === "fulfilled") {
+        evidenceMap[result.value[0]] = result.value[1];
+        allFindings.push(...result.value[1].findings);
+      } else {
+        evidenceMap[type] = {
+          source: type,
+          status: "unavailable",
+          data: null,
+          findings: [],
+          confidence: "INSUFICIENTE",
+          coverage: 0,
+          evaluatedAt: new Date(),
+          requiresAuth: entries[index][1].requiresAuth,
+          metadata: {
+            reason: "No pudimos completar esta fuente.",
+            execution: { source: type, status: "error", durationMs: 0, timeoutMs: defaultPolicy(type).timeoutMs, attempts: 0 },
+          },
         };
       }
-    }
+    });
 
     // Deduplicar findings
     const deduplicated = this.deduplicateFindings(allFindings);
@@ -215,6 +248,20 @@ export class EvidenceAggregator {
 
     return dimensions;
   }
+}
+
+function defaultPolicy(source: SourceType): SourceExecutionPolicy {
+  const policies: Record<SourceType, SourceExecutionPolicy> = {
+    web: { timeoutMs: 30_000, retries: 1, backoffMs: 350 },
+    search: { timeoutMs: 22_000, retries: 1, backoffMs: 300 },
+    reviews: { timeoutMs: 18_000, retries: 1, backoffMs: 300 },
+    competitor: { timeoutMs: 24_000, retries: 1, backoffMs: 350 },
+    external_mentions: { timeoutMs: 22_000, retries: 1, backoffMs: 300 },
+    instagram: { timeoutMs: 12_000, retries: 0, backoffMs: 0 },
+    x: { timeoutMs: 12_000, retries: 0, backoffMs: 0 },
+    other: { timeoutMs: 15_000, retries: 1, backoffMs: 250 },
+  };
+  return policies[source];
 }
 
 export class CoverageCalculator {

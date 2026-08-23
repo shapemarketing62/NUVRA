@@ -1,6 +1,5 @@
 import { randomUUID } from "crypto";
 import { prisma } from "@/lib/prisma";
-import { analyzeWebsite } from "@/services/website-analyzer";
 import { calculateNuvraScore } from "@/services/scoring/nuvra-score";
 import { runDiagnosticEngine } from "@/services/diagnostic/diagnostic-engine";
 import { runStrategyEngine } from "@/services/strategy/strategy-engine";
@@ -8,7 +7,8 @@ import { generateClarificationQuestions } from "@/services/clarification/clarifi
 import { selectStrategicFrameworks } from "@/services/frameworks/strategic-framework-engine";
 import { classifySiteType } from "@/services/scoring/site-type-classifier";
 import { BusinessIntelligenceLayer } from "@/services/intelligence/business-intelligence-layer";
-import { BusinessDiscoveryService } from "@/services/discovery/business-discovery-service";
+import { BusinessDiscoveryService, type DiscoveryResult } from "@/services/discovery/business-discovery-service";
+import { executeSource } from "@/services/intelligence/source-execution";
 import { normalizeUrl } from "@/lib/utils";
 import { REBUILD_TIMESTAMP } from "@/lib/rebuild-trigger";
 import { currentLogContext } from "@/lib/server/logger";
@@ -49,7 +49,7 @@ function deriveFindingConfidence(finding: any): "ALTA" | "MEDIA" | "BAJA" {
   return "BAJA";
 }
 
-export async function runFullAnalysis(businessId: string): Promise<RunAnalysisResult> {
+export async function runFullAnalysis(businessId: string, options: { signal?: AbortSignal } = {}): Promise<RunAnalysisResult> {
   const startedAt = Date.now();
   stageLog("1_inicio", { businessId, startedAt });
   
@@ -81,14 +81,21 @@ export async function runFullAnalysis(businessId: string): Promise<RunAnalysisRe
   const discoveryStarted = Date.now();
   const discoveryService = new BusinessDiscoveryService();
   const inferredCustomerType = business.tipoCliente || inferCustomerType(business);
-  const discoveryResult = await discoveryService.discover({
+  const discoveryTarget = {
     name: business.nombre,
     category: business.rubro,
     location: business.ubicacion || undefined,
     tipoCliente: inferredCustomerType,
     declaredWebUrl: business.webUrl || business.websites[0]?.url || undefined,
     declaredInstagram: business.instagramHandle || undefined,
+  };
+  const discoveryExecution = await executeSource({
+    source: "discovery",
+    operation: (signal) => discoveryService.discover(discoveryTarget, { signal }),
+    policy: { timeoutMs: 15_000, retries: 1, backoffMs: 300 },
+    signal: options.signal,
   });
+  const discoveryResult = discoveryExecution.value || emptyDiscoveryResult(discoveryTarget);
 
   stageLog("1_5_discovery", {
     businessId,
@@ -99,6 +106,7 @@ export async function runFullAnalysis(businessId: string): Promise<RunAnalysisRe
     primaryWebUrl: discoveryResult.primaryWebUrl,
     primaryInstagram: discoveryResult.primaryInstagram,
     primaryGoogleMaps: discoveryResult.primaryGoogleMaps,
+    execution: discoveryExecution.audit,
   }, { startedAt: discoveryStarted, endedAt: Date.now(), durationMs: Date.now() - discoveryStarted });
 
   const rawWebUrl = business.webUrl || business.websites[0]?.url || discoveryResult.primaryWebUrl;
@@ -144,25 +152,34 @@ export async function runFullAnalysis(businessId: string): Promise<RunAnalysisRe
   };
 
   try {
-    if (normalizedUrl) {
-      const analyzerStarted = Date.now();
-      console.log("[ANALYSIS] Starting website analysis for:", normalizedUrl);
-      const webResult = await analyzeWebsite(normalizedUrl);
+    // La capa de inteligencia es la única que ejecuta las fuentes. Antes la web
+    // se rastreaba aquí y volvía a rastrearse dentro de BusinessIntelligenceLayer.
+    const biLayerStarted = Date.now();
+    const biLayer = new BusinessIntelligenceLayer();
+    const biResult = await biLayer.analyze(business, discoveryResult, { signal: options.signal });
+    const webEvidence = biResult.aggregatedEvidence.sources.web;
+    if (webEvidence?.data && typeof webEvidence.data === "object") {
+      const webResult = webEvidence.data as typeof analysisResult & { screenshots?: unknown[]; performanceSummary?: Record<string, unknown> };
       analysisResult = {
         status: webResult.status,
         pagesAnalyzed: webResult.pagesAnalyzed,
         findings: webResult.findings,
-        screenshots: webResult.screenshots as any,
-        performanceSummary: webResult.performanceSummary as any,
+        screenshots: (webResult.screenshots || []) as any,
+        performanceSummary: (webResult.performanceSummary || {}) as any,
         errorMessage: webResult.errorMessage,
       };
-      stageLog("3_website_analyzer", { normalizedUrl, pagesAnalyzed: analysisResult.pagesAnalyzed, findingsCount: analysisResult.findings.length, status: analysisResult.status, errorMessage: analysisResult.errorMessage }, { startedAt: analyzerStarted, endedAt: Date.now(), durationMs: Date.now() - analyzerStarted, id: websiteAnalysis?.id });
-      console.log("[ANALYSIS] Website analysis completed:", { 
-        status: analysisResult.status, 
-        pagesAnalyzed: analysisResult.pagesAnalyzed,
-        findingsCount: analysisResult.findings.length 
-      });
+    } else if (webEvidence?.status === "unavailable") {
+      analysisResult.status = "failed";
+      analysisResult.errorMessage = String(webEvidence.metadata?.reason || "No pudimos analizar el sitio web.");
     }
+    stageLog("3_website_analyzer", { normalizedUrl, pagesAnalyzed: analysisResult.pagesAnalyzed, findingsCount: analysisResult.findings.length, status: webEvidence?.status || "not_relevant", execution: webEvidence?.metadata?.execution, failure: webEvidence?.metadata?.failure }, { startedAt: biLayerStarted, endedAt: Date.now(), durationMs: Date.now() - biLayerStarted, id: websiteAnalysis?.id });
+    stageLog("5_bi_layer", {
+      digitalScore: biResult.digitalScore.total,
+      nuvraScore: biResult.nuvraScore.total,
+      coverage: biResult.coverage.total,
+      canCalculateNuvraScore: biResult.coverage.canCalculateNuvraScore,
+      nuvraScoreReason: biResult.nuvraScore.reason,
+    }, { startedAt: biLayerStarted, endedAt: Date.now(), durationMs: Date.now() - biLayerStarted });
 
     const updateWebsiteAnalysisStarted = Date.now();
     if (websiteAnalysis) await prisma.websiteAnalysis.update({
@@ -207,17 +224,6 @@ export async function runFullAnalysis(businessId: string): Promise<RunAnalysisRe
     }
     stageLog("4_findings_persist", { websiteAnalysisId: websiteAnalysis?.id || null, findingsCount: analysisResult.findings.length, firstFindingId: findingIds[0], lastFindingId: findingIds[findingIds.length - 1] }, { startedAt: findingsPersistStarted, endedAt: Date.now(), durationMs: Date.now() - findingsPersistStarted, id: websiteAnalysis?.id });
 
-    // NUEVO: Usar BusinessIntelligenceLayer
-    const biLayerStarted = Date.now();
-    const biLayer = new BusinessIntelligenceLayer();
-    const biResult = await biLayer.analyze(business, discoveryResult);
-    stageLog("5_bi_layer", { 
-      digitalScore: biResult.digitalScore.total, 
-      nuvraScore: biResult.nuvraScore.total, 
-      coverage: biResult.coverage.total,
-      canCalculateNuvraScore: biResult.coverage.canCalculateNuvraScore,
-      nuvraScoreReason: biResult.nuvraScore.reason 
-    }, { startedAt: biLayerStarted, endedAt: Date.now(), durationMs: Date.now() - biLayerStarted });
     console.log("[ANALYSIS] Business Intelligence completed:", {
       digitalScore: biResult.digitalScore.total,
       nuvraScore: biResult.nuvraScore.total,
@@ -429,13 +435,27 @@ export async function runFullAnalysis(businessId: string): Promise<RunAnalysisRe
           intelligence: {
             coverage: biResult.coverage.total,
             sourceStatuses: Object.fromEntries(Object.entries(biResult.aggregatedEvidence.sources).map(([key, value]) => [key, value.status])),
+            sourceMessages: Object.fromEntries(Object.entries(biResult.aggregatedEvidence.sources).map(([key, value]) => [key, sourceUserMessage(key, value.status)])),
             discoveredInstagram: discoveryResult.primaryInstagram,
             competitorSummary: biResult.aggregatedEvidence.sources.competitor?.data || null,
             externalMentionsSummary: biResult.aggregatedEvidence.sources.external_mentions?.data || null,
           },
           businessProfile: biResult.businessProfile,
           analysisAudit: {
-            sources: Object.fromEntries(Object.entries(biResult.aggregatedEvidence.sources).map(([source, evidence]) => [source, { status: evidence.status, coverage: evidence.coverage, confidence: evidence.confidence, findings: evidence.findings.map((finding) => ({ id: finding.id, evidence: finding.evidence, type: finding.type, category: finding.category, attribution: finding.attribution })) }])),
+            discovery: discoveryExecution.audit,
+            sources: Object.fromEntries(Object.entries(biResult.aggregatedEvidence.sources).map(([source, evidence]) => [source, {
+              status: evidence.status,
+              coverage: evidence.coverage,
+              confidence: evidence.confidence,
+              execution: evidence.metadata?.execution,
+              failure: evidence.metadata?.failure,
+              survivingEvidenceCount: evidence.findings.length,
+              findings: evidence.findings.map((finding) => ({ id: finding.id, evidence: finding.evidence, type: finding.type, category: finding.category, attribution: finding.attribution })),
+            }])),
+            survivingEvidence: {
+              totalFindings: biResult.aggregatedEvidence.findings.length,
+              evaluatedSources: biResult.coverage.evaluatedSources,
+            },
             inferences: biResult.businessProfile.inferenceTrace,
             contextualFindings: biResult.businessProfile.contextualFindings,
             scoreMethodology: biResult.nuvraScore.methodology,
@@ -484,6 +504,29 @@ export async function runFullAnalysis(businessId: string): Promise<RunAnalysisRe
       error: error.message,
     };
   }
+}
+
+function emptyDiscoveryResult(target: DiscoveryResult["target"]): DiscoveryResult {
+  return {
+    target,
+    primaryWebUrl: target.declaredWebUrl || null,
+    primaryInstagram: target.declaredInstagram || null,
+    primaryGoogleMaps: null,
+    allCandidates: [],
+    confirmedSources: [],
+    probableSources: [],
+    uncertainSources: [],
+    rejectedSources: [],
+    discoveredAt: new Date(),
+  };
+}
+
+function sourceUserMessage(source: string, status: string): string {
+  if (status === "evaluated") return "Analizada";
+  if (status === "requires_auth") return "Necesita autorización";
+  if (status === "not_relevant") return "No necesaria para este negocio";
+  if (source === "web") return "No pudimos analizarlo";
+  return "No disponible en este momento";
 }
 
 function detectSiteType(input: { businessName?: string; rubro?: string; goal?: string; findings?: Array<{ category: string; title: string; evidence: string }>; url?: string }): string {

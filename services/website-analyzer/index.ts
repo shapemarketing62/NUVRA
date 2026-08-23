@@ -11,21 +11,32 @@ const MAX_REDIRECTS = 5;
 const MAX_HTML_BYTES = 2_000_000;
 const SCREENSHOTS_DIR = process.env.SCREENSHOTS_DIR || "./storage/screenshots";
 
-export async function analyzeWebsite(inputUrl: string): Promise<WebsiteAnalysisResult> {
-  console.log("[WEBSITE_ANALYZER] Starting analysis for:", inputUrl);
-  
-  const baseUrl = await validateAndNormalizeUrl(inputUrl);
-  console.log("[WEBSITE_ANALYZER] Validated and normalized URL:", baseUrl);
-  
-  const analysisId = `analysis-${Date.now()}`;
-  const screenshotDir = path.join(SCREENSHOTS_DIR, analysisId);
-  await fs.mkdir(screenshotDir, { recursive: true });
-  console.log("[WEBSITE_ANALYZER] Screenshot directory created:", screenshotDir);
+export interface WebsiteAnalysisOptions {
+  signal?: AbortSignal;
+  maxPages?: number;
+  timeoutMs?: number;
+}
 
+export async function analyzeWebsite(inputUrl: string, options: WebsiteAnalysisOptions = {}): Promise<WebsiteAnalysisResult> {
+  console.log("[WEBSITE_ANALYZER] Starting analysis for:", inputUrl);
+  let baseUrl = inputUrl;
   let browser: Browser | null = null;
   const startTime = Date.now();
+  const maxPages = Math.max(1, Math.min(options.maxPages ?? MAX_PAGES, MAX_PAGES));
+  const timeoutMs = Math.max(5_000, Math.min(options.timeoutMs ?? TIMEOUT_MS, TIMEOUT_MS));
+  const onAbort = () => { void browser?.close().catch(() => {}); };
+  options.signal?.addEventListener("abort", onAbort, { once: true });
 
   try {
+    if (options.signal?.aborted) throw Object.assign(new Error("website_analysis_canceled"), { name: "AbortError" });
+    baseUrl = await validateAndNormalizeUrl(inputUrl);
+    console.log("[WEBSITE_ANALYZER] Validated and normalized URL:", baseUrl);
+
+    const analysisId = `analysis-${Date.now()}`;
+    const screenshotDir = path.join(SCREENSHOTS_DIR, analysisId);
+    await fs.mkdir(screenshotDir, { recursive: true });
+    console.log("[WEBSITE_ANALYZER] Screenshot directory created:", screenshotDir);
+
     console.log("[WEBSITE_ANALYZER] Launching Playwright browser");
     browser = await chromium.launch({ headless: true });
     const context = await browser.newContext({
@@ -34,6 +45,7 @@ export async function analyzeWebsite(inputUrl: string): Promise<WebsiteAnalysisR
     });
     const publicUrlCache = new Map<string, boolean>();
     await context.route("**/*", async (route) => {
+      if (options.signal?.aborted) return route.abort("timedout");
       const requestUrl = route.request().url();
       try {
         const parsed = new URL(requestUrl);
@@ -55,8 +67,9 @@ export async function analyzeWebsite(inputUrl: string): Promise<WebsiteAnalysisR
     const screenshots: ScreenshotData[] = [];
     const allFindings: RawFinding[] = [];
 
-    while (queue.length > 0 && pages.length < MAX_PAGES) {
-      if (Date.now() - startTime > TIMEOUT_MS) {
+    while (queue.length > 0 && pages.length < maxPages) {
+      if (options.signal?.aborted) throw Object.assign(new Error("website_analysis_canceled"), { name: "AbortError" });
+      if (Date.now() - startTime > timeoutMs) {
         console.log("[WEBSITE_ANALYZER] Timeout reached");
         break;
       }
@@ -66,7 +79,7 @@ export async function analyzeWebsite(inputUrl: string): Promise<WebsiteAnalysisR
       if (visited.has(normalized)) continue;
       visited.add(normalized);
 
-      console.log("[WEBSITE_ANALYZER] Analyzing page:", normalized, `(Page ${pages.length + 1}/${MAX_PAGES})`);
+      console.log("[WEBSITE_ANALYZER] Analyzing page:", normalized, `(Page ${pages.length + 1}/${maxPages})`);
       
       const page = await context.newPage();
       page.setDefaultTimeout(30000);
@@ -101,7 +114,6 @@ export async function analyzeWebsite(inputUrl: string): Promise<WebsiteAnalysisR
             confidence: "alta",
             impact: "alto",
           });
-          await page.close();
           continue;
         }
 
@@ -145,7 +157,7 @@ export async function analyzeWebsite(inputUrl: string): Promise<WebsiteAnalysisR
           confidence: "alta",
         });
       } finally {
-        await page.close();
+        await page.close().catch(() => {});
       }
     }
 
@@ -163,7 +175,7 @@ export async function analyzeWebsite(inputUrl: string): Promise<WebsiteAnalysisR
 
     return {
       baseUrl,
-      status: pages.length > 0 ? (Date.now() - startTime > TIMEOUT_MS ? "partial" : "completed") : "failed",
+      status: pages.length > 0 ? (Date.now() - startTime > timeoutMs || options.signal?.aborted ? "partial" : "completed") : "failed",
       pagesAnalyzed: pages.length,
       pages,
       findings: dedupedFindings,
@@ -191,6 +203,8 @@ export async function analyzeWebsite(inputUrl: string): Promise<WebsiteAnalysisR
       errorMessage: err instanceof Error ? err.message : String(err),
       analyzedAt: new Date().toISOString(),
     };
+  } finally {
+    options.signal?.removeEventListener("abort", onAbort);
   }
 }
 

@@ -45,7 +45,7 @@ export class BusinessIntelligenceLayer {
     this.aggregator.registerSource(analyzer);
   }
 
-  async analyze(business: Business, discoveryResult?: DiscoveryResult): Promise<BusinessIntelligenceResult> {
+  async analyze(business: Business, discoveryResult?: DiscoveryResult, context: { signal?: AbortSignal } = {}): Promise<BusinessIntelligenceResult> {
     console.log("[BI_LAYER] Starting business intelligence analysis for:", business.nombre);
 
     // Si tenemos una URL descubierta confirmed/probable y business no tenía web, usarla dinámicamente
@@ -55,7 +55,7 @@ export class BusinessIntelligenceLayer {
     }
 
     // 1. Agregar evidencia de las fuentes registradas
-    const aggregatedEvidence = await this.aggregator.aggregate(targetBusiness);
+    const aggregatedEvidence = await this.aggregator.aggregate(targetBusiness, context);
 
     // 2. Integrar estado de fuentes descubiertas (Requisitos 2, 4 y 5)
     if (discoveryResult) {

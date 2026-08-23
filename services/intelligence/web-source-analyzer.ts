@@ -1,4 +1,4 @@
-import { SourceAnalyzer, SourceEvidence, SourceRelevance, SourceType } from "./source-analyzer";
+import { SourceAnalyzer, SourceEvidence, SourceRelevance, SourceType, type SourceAnalysisContext } from "./source-analyzer";
 import { analyzeWebsite } from "@/services/website-analyzer";
 import type { Business } from "@prisma/client";
 import type { RawFinding } from "@/services/website-analyzer/types";
@@ -59,7 +59,7 @@ export class WebSourceAnalyzer extends SourceAnalyzer {
     };
   }
 
-  async analyze(business: Business): Promise<SourceEvidence> {
+  async analyze(business: Business, context?: SourceAnalysisContext): Promise<SourceEvidence> {
     const webUrl = business.webUrl;
     if (!webUrl) {
       return {
@@ -76,7 +76,7 @@ export class WebSourceAnalyzer extends SourceAnalyzer {
     }
 
     try {
-      const analysisResult = await analyzeWebsite(webUrl);
+      const analysisResult = await analyzeWebsite(webUrl, { signal: context?.signal, timeoutMs: 28_000 });
       
       // Convertir RawFinding a EvidenceFinding
       const findings = analysisResult.findings.map((f: RawFinding) => {
@@ -101,7 +101,7 @@ export class WebSourceAnalyzer extends SourceAnalyzer {
 
       return {
         source: this.type,
-        status: "evaluated",
+        status: analysisResult.pagesAnalyzed > 0 ? "evaluated" : "unavailable",
         data: analysisResult,
         findings,
         confidence: coverage >= 50 ? "ALTA" : coverage >= 30 ? "MEDIA" : "BAJA",
@@ -111,6 +111,7 @@ export class WebSourceAnalyzer extends SourceAnalyzer {
         metadata: {
           pagesAnalyzed: analysisResult.pagesAnalyzed,
           status: analysisResult.status,
+          ...(analysisResult.errorMessage ? { reason: analysisResult.errorMessage } : {}),
         },
       };
     } catch (error) {

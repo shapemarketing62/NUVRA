@@ -1,4 +1,4 @@
-import { SourceAnalyzer, SourceEvidence, SourceRelevance, SourceType, EvidenceFinding } from "./source-analyzer";
+import { SourceAnalyzer, SourceEvidence, SourceRelevance, SourceType, EvidenceFinding, type SourceAnalysisContext } from "./source-analyzer";
 import { SmartSearchProvider } from "./search-source-analyzer";
 import type { Business } from "@prisma/client";
 
@@ -80,7 +80,7 @@ export class CompetitorSourceAnalyzer extends SourceAnalyzer {
     };
   }
 
-  async analyze(business: Business): Promise<SourceEvidence> {
+  async analyze(business: Business, context?: SourceAnalysisContext): Promise<SourceEvidence> {
     const businessWithGoals = business as BusinessWithGoals;
     const nombre = businessWithGoals.nombre;
     const rubro = businessWithGoals.rubro || "";
@@ -103,12 +103,14 @@ export class CompetitorSourceAnalyzer extends SourceAnalyzer {
       const allResults: Array<{ result: any; query: string }> = [];
 
       for (const query of queries) {
+        if (context?.signal?.aborted) throw Object.assign(new Error("competitor_search_canceled"), { name: "AbortError" });
         try {
-          const results = await this.searchProvider.search(query, business);
+          const results = await this.searchProvider.search(query, business, { signal: context?.signal });
           for (const result of results) {
             allResults.push({ result, query });
           }
         } catch (err) {
+          if (context?.signal?.aborted) throw err;
           console.warn(`[COMPETITOR_ANALYZER] Query failed: "${query}"`, err instanceof Error ? err.message : String(err));
         }
       }
@@ -128,7 +130,7 @@ export class CompetitorSourceAnalyzer extends SourceAnalyzer {
       for (const { name, source } of candidateNames) {
         if (this.isTargetBusiness(name, nombre)) continue;
 
-        const presenceInfo = await this.searchOfficialPresence(name, rubro, ubicacion, nombre);
+        const presenceInfo = await this.searchOfficialPresence(name, rubro, ubicacion, nombre, context?.signal);
 
         if (!presenceInfo || presenceInfo.evidence.filter((item) => item.type !== "irrelevant").length === 0) {
           continue;
@@ -320,10 +322,10 @@ export class CompetitorSourceAnalyzer extends SourceAnalyzer {
     return union.size > 0 && intersection.size / union.size > 0.7;
   }
 
-  private async searchOfficialPresence(name: string, rubro: string, ubicacion: string, targetName: string): Promise<PresenceInfo> {
+  private async searchOfficialPresence(name: string, rubro: string, ubicacion: string, targetName: string, signal?: AbortSignal): Promise<PresenceInfo> {
     try {
       const query = `"${name}" ${rubro} ${ubicacion} sitio oficial`;
-      const results = await this.searchProvider.search(query, {} as any);
+      const results = await this.searchProvider.search(query, {} as any, { signal });
 
       let officialWebsite: string | null = null;
       let officialSocialProfile: string | null = null;
@@ -383,7 +385,8 @@ export class CompetitorSourceAnalyzer extends SourceAnalyzer {
         discoveryEvidenceUrls,
         evidence: evidence.slice(0, 6),
       };
-    } catch {
+    } catch (error) {
+      if (signal?.aborted) throw error;
       return {
         officialWebsite: null,
         officialSocialProfile: null,

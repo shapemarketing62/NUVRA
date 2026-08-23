@@ -34,6 +34,7 @@ export interface DashboardData {
   intelligence: {
     coverage: number;
     sourceStatuses?: Record<string, "evaluated" | "unavailable" | "not_relevant" | "requires_auth">;
+    sourceMessages?: Record<string, string>;
     discoveredInstagram?: string | null;
     competitorSummary?: {
       competitors: Array<{
@@ -200,6 +201,7 @@ export function useDashboardData(): DashboardData {
             ? {
                 coverage: snapshot.intelligence.coverage || 0,
                 sourceStatuses: snapshot.intelligence.sourceStatuses || {},
+                sourceMessages: snapshot.intelligence.sourceMessages || {},
                 discoveredInstagram: snapshot.intelligence.discoveredInstagram || null,
                 competitorSummary: snapshot.intelligence.competitorSummary || null,
                 externalMentionsSummary: snapshot.intelligence.externalMentionsSummary || null,

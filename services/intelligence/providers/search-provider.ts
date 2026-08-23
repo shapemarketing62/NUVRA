@@ -7,7 +7,7 @@ export interface SearchResult {
 }
 
 export interface SearchProvider {
-  search(query: string, business: Business): Promise<SearchResult[]>;
+  search(query: string, business: Business, options?: { signal?: AbortSignal }): Promise<SearchResult[]>;
 }
 
 /**
@@ -15,11 +15,13 @@ export interface SearchProvider {
  * No requiere API key. Puede ser bloqueado por rate limiting.
  */
 export class DuckDuckGoProvider implements SearchProvider {
-  async search(query: string, business: Business): Promise<SearchResult[]> {
+  async search(query: string, business: Business, options: { signal?: AbortSignal } = {}): Promise<SearchResult[]> {
     const { chromium } = await import("playwright");
-    let browser;
+    let browser: import("playwright").Browser | undefined;
     try {
       browser = await chromium.launch({ headless: true });
+      const onAbort = () => { void browser?.close().catch(() => {}); };
+      options.signal?.addEventListener("abort", onAbort, { once: true });
       const context = await browser.newContext({
         userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; rv:124.0) Gecko/20100101 Firefox/124.0",
       });
@@ -42,6 +44,7 @@ export class DuckDuckGoProvider implements SearchProvider {
         }).filter(r => r.title || r.url);
       });
 
+      options.signal?.removeEventListener("abort", onAbort);
       return results;
     } finally {
       if (browser) await browser.close().catch(() => {});
@@ -59,7 +62,7 @@ export class DuckDuckGoProvider implements SearchProvider {
  * 3. Si no hay key, lanzar error para que el fallback se use
  */
 export class SearchApiProvider implements SearchProvider {
-  async search(query: string, business: Business): Promise<SearchResult[]> {
+  async search(query: string, business: Business, options: { signal?: AbortSignal } = {}): Promise<SearchResult[]> {
     // TODO: Conectar proveedor de Search API estable (no Google Custom Search)
     // Ejemplo de estructura:
     // const apiKey = process.env.SEARCH_API_KEY;

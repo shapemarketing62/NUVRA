@@ -21,7 +21,7 @@ export interface ReviewsData {
 }
 
 export interface ReviewsProvider {
-  getReviews(business: Business, discoveryResult?: any): Promise<ReviewsData>;
+  getReviews(business: Business, discoveryResult?: any, options?: { signal?: AbortSignal }): Promise<ReviewsData>;
 }
 
 /**
@@ -29,15 +29,17 @@ export interface ReviewsProvider {
  * No requiere API key. Puede ser bloqueado por captcha/rate limiting.
  */
 export class GoogleMapsScrapeProvider implements ReviewsProvider {
-  async getReviews(business: Business, _discoveryResult?: any): Promise<ReviewsData> {
+  async getReviews(business: Business, _discoveryResult?: any, options: { signal?: AbortSignal } = {}): Promise<ReviewsData> {
     const { chromium } = await import("playwright");
     const nombre = business.nombre;
     const rubro = business.rubro || "";
     const ciudad = business.ciudad || "";
 
-    let browser;
+    let browser: import("playwright").Browser | undefined;
     try {
       browser = await chromium.launch({ headless: true });
+      const onAbort = () => { void browser?.close().catch(() => {}); };
+      options.signal?.addEventListener("abort", onAbort, { once: true });
       const context = await browser.newContext({
         userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; rv:124.0) Gecko/20100101 Firefox/124.0",
         locale: "es-AR",
@@ -106,6 +108,7 @@ export class GoogleMapsScrapeProvider implements ReviewsProvider {
       const rating = ratingMatch ? parseFloat(ratingMatch[1].replace(",", ".")) : null;
       const reviewCount = ratingData.reviewCount ? parseInt(ratingData.reviewCount.replace(/[.,]/g, "")) : null;
 
+      options.signal?.removeEventListener("abort", onAbort);
       return {
         rating,
         reviewCount,
@@ -123,7 +126,7 @@ export class GoogleMapsScrapeProvider implements ReviewsProvider {
  * Valida resultados con EntityMatcher antes de aceptarlos.
  */
 export class GooglePlacesApiProvider implements ReviewsProvider {
-  async getReviews(business: Business, discoveryResult?: any): Promise<ReviewsData> {
+  async getReviews(business: Business, discoveryResult?: any, options: { signal?: AbortSignal } = {}): Promise<ReviewsData> {
     const apiKey = process.env.GOOGLE_PLACES_API_KEY;
     if (!apiKey) {
       throw new Error("GOOGLE_PLACES_API_KEY no configurada - usar GoogleMapsScrapeProvider como fallback");
@@ -144,6 +147,7 @@ export class GooglePlacesApiProvider implements ReviewsProvider {
         "X-Goog-FieldMask": "places.displayName,places.rating,places.userRatingCount,places.reviews,places.id,places.formattedAddress,places.websiteUri",
       },
       body: JSON.stringify({ textQuery: query }),
+      signal: options.signal,
     });
 
     if (!searchResponse.ok) {

@@ -67,10 +67,12 @@ export async function validateAndNormalizeUrl(input: string): Promise<string> {
   }
 
   try {
-    const addresses = await dns.resolve4(hostname).catch(() => [] as string[]);
-    const addresses6 = await dns.resolve6(hostname).catch(() => [] as string[]);
-    if (addresses.length === 0 && addresses6.length === 0) throw new UrlValidationError("No se pudo verificar que el dominio sea público");
-    for (const ip of [...addresses, ...addresses6]) {
+    // lookup usa el resolver del sistema (incluidos CNAME), igual que el navegador.
+    // resolve4/resolve6 puede devolver ECONNREFUSED en algunos hosts aunque el dominio
+    // resuelva correctamente mediante el sistema operativo.
+    const addresses = await dns.lookup(hostname, { all: true, verbatim: true });
+    if (addresses.length === 0) throw new UrlValidationError("No se pudo verificar que el dominio sea público");
+    for (const { address: ip } of addresses) {
       if (isPrivateIp(ip)) {
         throw new UrlValidationError("El dominio resuelve a una IP privada o local");
       }

@@ -25,7 +25,7 @@ interface TavilySearchResponse {
 export class TavilySearchProvider implements SearchProvider {
   private readonly apiUrl = "https://api.tavily.com/search";
 
-  async search(query: string, _business: Business): Promise<SearchResult[]> {
+  async search(query: string, _business: Business, options: { signal?: AbortSignal } = {}): Promise<SearchResult[]> {
     const apiKey = process.env.TAVILY_API_KEY;
     if (!apiKey) {
       throw new Error("TAVILY_API_KEY no configurada");
@@ -43,6 +43,7 @@ export class TavilySearchProvider implements SearchProvider {
         include_answer: false,
         max_results: 10,
       }),
+      signal: options.signal,
     });
 
     if (!response.ok) {

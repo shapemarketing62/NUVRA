@@ -31,7 +31,7 @@ export class BusinessDiscoveryService {
    * Descubre automáticamente fuentes públicas relevantes para un negocio.
    * Aplica agrupamiento por dominio/entidad para evitar doble conteo.
    */
-  async discover(target: BusinessEntityTarget): Promise<DiscoveryResult> {
+  async discover(target: BusinessEntityTarget, context: { signal?: AbortSignal } = {}): Promise<DiscoveryResult> {
     console.log("[BUSINESS_DISCOVERY] Starting discovery for:", target.name, target.category || "", target.location || "");
 
     const rawResults: Array<{ result: SearchResult; queryCategory: string }> = [];
@@ -54,12 +54,14 @@ export class BusinessDiscoveryService {
     };
 
     for (const item of queries) {
+      if (context.signal?.aborted) throw Object.assign(new Error("discovery_canceled"), { name: "AbortError" });
       try {
-        const results = await this.searchProvider.search(item.q, mockBusiness);
+        const results = await this.searchProvider.search(item.q, mockBusiness, { signal: context.signal });
         for (const r of results) {
           rawResults.push({ result: r, queryCategory: item.cat });
         }
       } catch (err) {
+        if (context.signal?.aborted) throw err;
         console.warn(`[BUSINESS_DISCOVERY] Search query failed for "${item.q}":`, err instanceof Error ? err.message : String(err));
       }
     }
