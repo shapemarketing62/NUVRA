@@ -3,7 +3,7 @@
 import { useDashboardData } from "@/lib/use-dashboard-data";
 import { COLORS } from "@/lib/design-tokens";
 import { Btn, DemoBadge, ErrorState, PageSkeleton, UpgradePanel } from "@/components/ui";
-import { formatActionForBusiness, simplifyTechnicalText } from "@/lib/simple-language-presenter";
+import { formatActionForBusiness } from "@/lib/simple-language-presenter";
 import { applyUsageLimit } from "@/lib/plans";
 import { useState } from "react";
 
@@ -150,7 +150,7 @@ export default function AccionesPage() {
                         {formatted.order || "?"}
                       </div>
                       <div style={{ fontWeight: 700, fontSize: 16, color: COLORS.ink }}>
-                        {formatted.whatToDo}
+                        {formatted.title}
                       </div>
                     </div>
                   </div>
@@ -168,33 +168,16 @@ export default function AccionesPage() {
                   </div>
                 </div>
 
-                <div style={{ 
-                  display: "grid", 
-                  gap: 12, 
-                  background: COLORS.paperDim, 
-                  padding: 16, 
-                  borderRadius: 12, 
-                  marginBottom: 16 
-                }}>
-                  <div style={{ fontSize: 14, lineHeight: 1.5 }}>
-                    <strong style={{ color: COLORS.blueDeep }}>1. ¿Qué problema hay?:</strong>{" "}
-                    <span style={{ color: COLORS.ink }}>{formatted.problem}</span>
-                  </div>
-
-                  <div style={{ fontSize: 14, lineHeight: 1.5 }}>
-                    <strong style={{ color: COLORS.blueDeep }}>2. ¿Por qué importa para tu negocio?:</strong>{" "}
-                    <span style={{ color: COLORS.inkSoft }}>{formatted.importance}</span>
-                  </div>
-
-                  <div style={{ fontSize: 14, lineHeight: 1.5 }}>
-                    <strong style={{ color: COLORS.blueDeep }}>3. ¿Qué debería hacer el negocio?:</strong>{" "}
-                    <span style={{ color: COLORS.ink }}>{formatted.whatToDo}</span>
-                  </div>
-
-                  <div style={{ fontSize: 14, lineHeight: 1.5 }}>
-                    <strong style={{ color: COLORS.olive }}>4. ¿Qué resultado podría mejorar?:</strong>{" "}
-                    <span style={{ color: COLORS.ink }}>{formatted.expectedResult}</span>
-                  </div>
+                <div style={{ background: COLORS.paperDim, padding: 16, borderRadius: 12, marginBottom: 16 }}>
+                  <p style={{ fontSize: 14, lineHeight: 1.55, color: COLORS.ink }}>{formatted.whatToDo}</p>
+                  <p style={{ fontSize: 13, lineHeight: 1.5, color: COLORS.olive, marginTop: 8 }}>{formatted.expectedResult}</p>
+                  <details style={{ marginTop: 12 }}>
+                    <summary style={{ cursor: "pointer", fontSize: 13, color: COLORS.inkSoft }}>Ver por qué recomendamos esta acción</summary>
+                    <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
+                      <p style={{ fontSize: 13, lineHeight: 1.5 }}><strong>Qué observamos:</strong> {formatted.problem}</p>
+                      <p style={{ fontSize: 13, lineHeight: 1.5, color: COLORS.inkSoft }}><strong>Por qué importa:</strong> {formatted.importance}</p>
+                    </div>
+                  </details>
                 </div>
 
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
