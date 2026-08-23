@@ -24,7 +24,17 @@ export interface RunAnalysisResult {
   scoreTotal?: number;
   error?: string;
   analysisStatus?: "completed" | "partial";
+  internalFailure?: {
+    failedAt: string;
+    errorType: string;
+    message: string;
+    timestamp: string;
+    relevantStack?: string;
+  };
 }
+
+const SECRET_PATTERN = /(api[_-]?key|access[_-]?token|token|authorization|password|secret)\s*[:=]\s*[^\s,;]+/gi;
+const safeInternalText = (value: unknown, max = 500) => String(value ?? "unknown_error").replace(SECRET_PATTERN, "$1=[redacted]").slice(0, max);
 
 const stageLog = (stage: string, payload: Record<string, unknown> | string, meta?: { startedAt?: number; endedAt?: number; durationMs?: number; error?: unknown; id?: string }) => {
   const base: Record<string, unknown> = { ...currentLogContext(), stage, payload };
@@ -52,6 +62,7 @@ function deriveFindingConfidence(finding: any): "ALTA" | "MEDIA" | "BAJA" {
 
 export async function runFullAnalysis(businessId: string, options: { signal?: AbortSignal } = {}): Promise<RunAnalysisResult> {
   const startedAt = Date.now();
+  let currentStage = "load_business";
   stageLog("1_inicio", { businessId, startedAt });
   
   const business = await prisma.business.findUnique({
@@ -79,6 +90,7 @@ export async function runFullAnalysis(businessId: string, options: { signal?: Ab
   }
 
   // 1.5 Ejecutar BusinessDiscoveryService para fuentes públicas automáticas
+  currentStage = "discovery";
   const discoveryStarted = Date.now();
   const discoveryService = new BusinessDiscoveryService();
   const inferredCustomerType = business.tipoCliente || inferCustomerType(business);
@@ -113,6 +125,7 @@ export async function runFullAnalysis(businessId: string, options: { signal?: Ab
   const rawWebUrl = business.webUrl || business.websites[0]?.url || discoveryResult.primaryWebUrl;
   stageLog("1_inicio", { businessId, nombre: business.nombre, webUrl: rawWebUrl, objetivo: goal.objetivo, plazoDias: goal.plazoDias }, { startedAt, endedAt: Date.now(), durationMs: Date.now() - startedAt });
 
+  currentStage = "website_normalize";
   let normalizedUrl: string | null = null;
   if (rawWebUrl) {
     try {
@@ -128,6 +141,7 @@ export async function runFullAnalysis(businessId: string, options: { signal?: Ab
     console.log("[ANALYSIS] No website URL declared or discovered; continuing with non-web public sources.");
   }
 
+  currentStage = "website_persist";
   let website = business.websites[0];
   if (!website && normalizedUrl) {
     const createStarted = Date.now();
@@ -155,6 +169,7 @@ export async function runFullAnalysis(businessId: string, options: { signal?: Ab
   try {
     // La capa de inteligencia es la única que ejecuta las fuentes. Antes la web
     // se rastreaba aquí y volvía a rastrearse dentro de BusinessIntelligenceLayer.
+    currentStage = "business_intelligence";
     const biLayerStarted = Date.now();
     const biLayer = new BusinessIntelligenceLayer();
     const biResult = await biLayer.analyze(business, discoveryResult, { signal: options.signal });
@@ -182,6 +197,7 @@ export async function runFullAnalysis(businessId: string, options: { signal?: Ab
       nuvraScoreReason: biResult.nuvraScore.reason,
     }, { startedAt: biLayerStarted, endedAt: Date.now(), durationMs: Date.now() - biLayerStarted });
 
+    currentStage = "website_analysis_persist";
     const updateWebsiteAnalysisStarted = Date.now();
     if (websiteAnalysis) await prisma.websiteAnalysis.update({
       where: { id: websiteAnalysis.id },
@@ -202,6 +218,7 @@ export async function runFullAnalysis(businessId: string, options: { signal?: Ab
       console.warn("[ANALYSIS] Website analysis had errors, continuing with remaining sources:", analysisResult.errorMessage);
     }
 
+    currentStage = "findings_persist";
     const findingsPersistStarted = Date.now();
     console.log("[ANALYSIS] Saving findings to database:", analysisResult.findings.length);
     const findingIds: string[] = [];
@@ -251,6 +268,7 @@ export async function runFullAnalysis(businessId: string, options: { signal?: Ab
     const hasInstagram = business.instagramConnection?.status === "connected";
     console.log("[ANALYSIS] Nuvra Score calculated:", scoreResult.total);
 
+    currentStage = "score_persist";
     const scoreId = randomUUID();
     const scorePersistStarted = Date.now();
     await prisma.$executeRaw`
@@ -302,6 +320,7 @@ export async function runFullAnalysis(businessId: string, options: { signal?: Ab
       businessProfile: biResult.businessProfile,
     };
 
+    currentStage = "diagnostic";
     const diagnosisStarted = Date.now();
     const diagnosisResult = await runDiagnosticEngine(
       businessContext,
@@ -311,6 +330,7 @@ export async function runFullAnalysis(businessId: string, options: { signal?: Ab
     );
     stageLog("7_diagnostic_engine", { businessId, total: scoreResult.total, coverage: scoreResult.coverage, summary: diagnosisResult.summary, bottleneck: diagnosisResult.bottleneck, priorities: diagnosisResult.priorities }, { startedAt: diagnosisStarted, endedAt: Date.now(), durationMs: Date.now() - diagnosisStarted });
 
+    currentStage = "diagnosis_persist";
     const diagnosisPersistStarted = Date.now();
     const diagnosis = await prisma.diagnosis.create({
       data: {
@@ -386,6 +406,7 @@ export async function runFullAnalysis(businessId: string, options: { signal?: Ab
       informacionComplementaria: business.otrosCanales,
       businessProfile: biResult.businessProfile,
     };
+    currentStage = "strategy";
     const strategyResult = await runStrategyEngine(
       strategyContext,
       diagnosisResult,
@@ -395,6 +416,7 @@ export async function runFullAnalysis(businessId: string, options: { signal?: Ab
     );
     stageLog("9_strategy_engine", { businessId, objective: strategyContext.objetivo, plazoDias: strategyContext.plazoDias, total: scoreResult.total, frameworks: strategyResult.frameworks, priorities: strategyResult.prioridades, principalProblema: strategyResult.principalProblema, siteType: siteTypeResult.siteType }, { startedAt: frameworksStarted, endedAt: Date.now(), durationMs: Date.now() - frameworksStarted });
 
+    currentStage = "strategy_persist";
     const strategyPersistStarted = Date.now();
     const strategyId = randomUUID();
     try {
@@ -424,9 +446,18 @@ export async function runFullAnalysis(businessId: string, options: { signal?: Ab
     }
     stageLog("10_strategy_actions_persist", { strategyId, actionCount: actionIds.length, firstActionId: actionIds[0], lastActionId: actionIds[actionIds.length - 1] }, { startedAt: actionsPersistStarted, endedAt: Date.now(), durationMs: Date.now() - actionsPersistStarted, id: strategyId });
 
+    currentStage = "analysis_trace";
     const historyStarted = Date.now();
     const historyId = randomUUID();
-    const analysisTrace = buildAnalysisTrace({ discovery: discoveryResult, aggregated: biResult.aggregatedEvidence, profile: biResult.businessProfile, diagnosis: diagnosisResult, strategy: strategyResult, score: biResult.nuvraScore });
+    let analysisTrace: ReturnType<typeof buildAnalysisTrace> | { version: "commercial-journey-v1"; createdAt: string; failedAt: "analysis_trace"; processingIssues: unknown[] };
+    try {
+      analysisTrace = buildAnalysisTrace({ discovery: discoveryResult, aggregated: biResult.aggregatedEvidence, profile: biResult.businessProfile, diagnosis: diagnosisResult, strategy: strategyResult, score: biResult.nuvraScore });
+    } catch (error) {
+      const issue = { stage: "analysis_trace" as const, errorType: error instanceof Error ? error.name : "AnalysisTraceError", message: safeInternalText(error instanceof Error ? error.message : error, 180) };
+      biResult.businessProfile.processingIssues.push(issue);
+      analysisTrace = { version: "commercial-journey-v1", createdAt: new Date().toISOString(), failedAt: "analysis_trace", processingIssues: biResult.businessProfile.processingIssues };
+    }
+    currentStage = "history_persist";
     try {
       await (prisma as any).$executeRaw`
         INSERT INTO "AnalysisHistory" ("id", "businessId", "scoreId", "diagnosisId", "strategyId", "websiteAnalysisId", "nuvraScoreTotal", "snapshot", "createdAt")
@@ -490,21 +521,31 @@ export async function runFullAnalysis(businessId: string, options: { signal?: Ab
     };
   } catch (err) {
     const error = err instanceof Error ? err : new Error(String(err));
-    const stage = "ERROR_CATCH";
-    console.error("[ANALYSIS] Error during analysis:", error);
-    stageLog(stage, { businessId, websiteAnalysisId: websiteAnalysis?.id || null, error: error.message, stack: error.stack }, { startedAt, endedAt: Date.now(), durationMs: Date.now() - startedAt, error: error.message });
-    if (websiteAnalysis) await prisma.websiteAnalysis.update({
-      where: { id: websiteAnalysis.id },
-      data: {
-        status: "failed",
-        errorMessage: error.message,
-        completedAt: new Date(),
-      },
-    });
+    const stage = `FAILED_AT:${currentStage}`;
+    const internalFailure = {
+      failedAt: currentStage,
+      errorType: error.name || "Error",
+      message: safeInternalText(error.message),
+      timestamp: new Date().toISOString(),
+      relevantStack: safeInternalText(error.stack, 1_500),
+    };
+    console.error("[ANALYSIS] Analysis failed:", { businessId, failedAt: currentStage, errorType: internalFailure.errorType });
+    stageLog(stage, { businessId, websiteAnalysisId: websiteAnalysis?.id || null, internalFailure }, { startedAt, endedAt: Date.now(), durationMs: Date.now() - startedAt, error: internalFailure.message });
+    if (websiteAnalysis) {
+      try {
+        await prisma.websiteAnalysis.update({
+          where: { id: websiteAnalysis.id },
+          data: { status: "failed", errorMessage: safeInternalText(error.message), completedAt: new Date() },
+        });
+      } catch (persistError) {
+        stageLog("FAILED_AT:failure_persist", { businessId, originalStage: currentStage, errorType: persistError instanceof Error ? persistError.name : "Error" });
+      }
+    }
     return {
       success: false,
       businessId,
       error: error.message,
+      internalFailure,
     };
   }
 }

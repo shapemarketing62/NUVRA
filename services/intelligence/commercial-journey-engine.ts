@@ -36,7 +36,7 @@ function objectiveFor(stage: CommercialJourneyStageId, profile: BusinessProfile)
 
 function importance(stage: CommercialJourneyStageId, profile: BusinessProfile): number {
   let value = BASE_IMPORTANCE[stage];
-  const goal = profile.goal.text.toLowerCase();
+  const goal = String(profile.goal?.text || "").toLowerCase();
   if (/volv|vuelv|recompra|renov|recurren|fideliza|clientes actuales|socios actuales/.test(goal)) {
     if (stage === "retention") value = 1;
     if (stage === "experience") value = .95;
@@ -63,11 +63,11 @@ function missingEvidence(stage: CommercialJourneyStageId, evidence: CommercialEv
 
 export class CommercialJourneyEngine {
   static build(profile: BusinessProfile, evidence: CommercialEvidence[]): CommercialJourney {
-    const retentionGoal = /volv|vuelv|recompra|renov|recurren|fideliza|clientes actuales|socios actuales/i.test(profile.goal.text);
+    const retentionGoal = /volv|vuelv|recompra|renov|recurren|fideliza|clientes actuales|socios actuales/i.test(String(profile.goal?.text || ""));
     const sequence: CommercialJourneyStageId[] = ["discovery", "evaluation", "decision", "action", "experience"];
     if (retentionGoal || profile.recurrence !== "occasional") sequence.push("retention");
     const stages = sequence.map((id) => {
-      const stageEvidence = evidence.filter((item) => item.journeyStage === id);
+      const stageEvidence = (Array.isArray(evidence) ? evidence : []).filter((item) => item?.journeyStage === id && typeof item.text === "string" && item.text.trim());
       const stageImportance = importance(id, profile);
       return {
         id,
@@ -90,6 +90,17 @@ export class CommercialJourneyEngine {
         `El recorrido termina en “${profile.primaryCustomerAction}”, inferido a partir del modelo comercial y el objetivo.`,
         `La importancia de cada etapa cambia según “${profile.goal.text}”, la recurrencia ${profile.recurrence} y la modalidad ${profile.operatingMode}.`,
       ],
+      createdAt: new Date().toISOString(),
+    };
+  }
+
+  static empty(profile: Pick<BusinessProfile, "businessId" | "primaryCustomerAction">): CommercialJourney {
+    return {
+      businessId: String(profile.businessId || "unknown"),
+      primaryAction: String(profile.primaryCustomerAction || "avanzar con el negocio"),
+      sequence: [],
+      stages: [],
+      rationale: ["No fue posible construir el recorrido completo; las demás etapas continuaron con la evidencia válida."],
       createdAt: new Date().toISOString(),
     };
   }

@@ -138,8 +138,9 @@ export class EvidenceAggregator {
     settled.forEach((result, index) => {
       const type = entries[index][0];
       if (result.status === "fulfilled") {
-        evidenceMap[result.value[0]] = result.value[1];
-        allFindings.push(...result.value[1].findings);
+        const evidence = this.normalizeSourceEvidence(result.value[1]);
+        evidenceMap[result.value[0]] = evidence;
+        allFindings.push(...evidence.findings);
       } else {
         evidenceMap[type] = {
           source: type,
@@ -173,6 +174,34 @@ export class EvidenceAggregator {
       byDimension,
       deduplicated,
       evaluatedAt: new Date(),
+    };
+  }
+
+  private normalizeSourceEvidence(evidence: SourceEvidence): SourceEvidence {
+    const issues: Array<{ stage: string; itemId?: string; errorType: string; message: string }> = [];
+    const findings = (Array.isArray(evidence?.findings) ? evidence.findings : []).flatMap((raw, index) => {
+      const finding = raw as EvidenceFinding & Record<string, unknown>;
+      if (typeof finding?.evidence !== "string" || !finding.evidence.trim()) {
+        issues.push({ stage: "source_evidence", itemId: typeof finding?.id === "string" ? finding.id : undefined, errorType: "InvalidEvidence", message: "Se descartó una señal sin texto utilizable." });
+        return [];
+      }
+      return [{
+        ...finding,
+        id: typeof finding.id === "string" && finding.id ? finding.id : `${evidence.source}-finding-${index + 1}`,
+        category: typeof finding.category === "string" && finding.category ? finding.category : "other",
+        type: ["positive", "negative", "neutral"].includes(String(finding.type)) ? finding.type : "neutral",
+        impact: ["high", "medium", "low"].includes(String(finding.impact)) ? finding.impact : "low",
+        evidence: finding.evidence.trim(),
+        source: evidence.source,
+        attribution: typeof finding.attribution === "string" && finding.attribution.trim() ? finding.attribution.trim() : "Fuente sin atribución detallada",
+        weight: Number.isFinite(Number(finding.weight)) ? Math.max(0, Math.min(1, Number(finding.weight))) : .25,
+        confidence: ["ALTA", "MEDIA", "BAJA"].includes(String(finding.confidence)) ? finding.confidence : "BAJA",
+      } as EvidenceFinding];
+    });
+    return {
+      ...evidence,
+      findings,
+      metadata: { ...(evidence.metadata || {}), ...(issues.length ? { processingIssues: issues } : {}) },
     };
   }
 

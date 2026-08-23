@@ -27,7 +27,14 @@ export async function runDiagnosticEngine(business: BusinessContext, scoreResult
   const profile = businessProfile || business.businessProfile;
   // Cuando existe el mapa comercial, la decisión debe ser causal y trazable.
   // La IA queda reservada al fallback legacy para no saltarse ProblemCandidates.
-  if (profile) return buildProfileDiagnosis(business, scoreResult, profile);
+  if (profile) {
+    try {
+      return buildProfileDiagnosis(business, scoreResult, profile);
+    } catch (error) {
+      profile.processingIssues?.push({ stage: "diagnostic", errorType: error instanceof Error ? error.name : "DiagnosticError", message: error instanceof Error ? error.message.slice(0, 180) : String(error).slice(0, 180) });
+      return buildLegacyFallback(business, scoreResult, findings);
+    }
+  }
   const ai = createAIService();
   if (ai.isAvailable()) {
     const aiResult = await ai.completeStructured(buildAIPrompt(business, scoreResult, findings, profile), diagnosisSchema);
@@ -42,6 +49,7 @@ export function buildProfileDiagnosis(business: BusinessContext, scoreResult: Nu
   const primary = problems[0];
   const primaryStrength = strengthsFound[0];
   const score = scoreResult.total ?? 40;
+  const objective = String(business.objetivo || profile.goal?.text || "hacer crecer el negocio").toLowerCase();
   const mainTitle = primary ? primary.hypothesis : primaryStrength ? `La base comercial más aprovechable está en ${stageLabel(primaryStrength.journeyStage).toLowerCase()}` : "Todavía no encontramos un obstáculo comprobable";
   const mainExplanation = primary ? candidateExplanation(profile, primary) : primaryStrength ? `${primaryStrength.statement} Conviene usar esa base para avanzar hacia ${profile.goal.text.toLowerCase()}.` : "El puntaje se muestra con la información disponible, pero todavía no hay una señal concreta que justifique señalar un problema principal.";
   const strengths = strengthsFound.slice(0, 4).map((candidate) => ({ title: candidate.statement, evidence: evidenceText(profile, candidate.evidence) }));
@@ -52,7 +60,7 @@ export function buildProfileDiagnosis(business: BusinessContext, scoreResult: Nu
   const summaryEvidence = primary ? `El freno más probable está en ${stageLabel(primary.journeyStage).toLowerCase()}: ${primary.hypothesis}` : primaryStrength ? `La señal más firme es: ${primaryStrength.statement}` : "Todavía hay poca evidencia concreta para señalar un único freno.";
   return {
     engineType: "deterministic",
-    summary: `${business.nombre} obtiene un Nuvra Score de ${score}/100 para su objetivo de ${business.objetivo.toLowerCase()}. ${summaryEvidence}`,
+    summary: `${business.nombre} obtiene un Nuvra Score de ${score}/100 para su objetivo de ${objective}. ${summaryEvidence}`,
     bottleneck: { dimension: primary?.journeyStage || "estado actual", title: mainTitle, explanation: mainExplanation, findingId: primary?.evidenceFor[0] },
     strengths,
     weaknesses,
@@ -98,15 +106,17 @@ function buildProfileRisks(profile: BusinessProfile, problems: ProblemCandidate[
 }
 
 function buildLegacyFallback(business: BusinessContext, scoreResult: NuvraScoreResult, findings: RawFinding[]): DiagnosisResult {
-  const problem = findings.find((finding) => finding.type === "problem");
+  const safeFindings = Array.isArray(findings) ? findings : [];
+  const problem = safeFindings.find((finding) => finding?.type === "problem");
   const score = scoreResult.total ?? 40;
+  const objective = String(business.objetivo || "hacer crecer el negocio").toLowerCase();
   return {
     engineType: "deterministic",
     summary: `${business.nombre} obtiene un Nuvra Score de ${score}/100 con la información disponible.`,
     bottleneck: { dimension: problem?.category || "estado actual", title: problem?.title || "Hace falta observar un poco más", explanation: problem?.evidence || "Todavía no hay una señal concreta suficiente para elegir un único problema." },
     strengths: [],
     weaknesses: problem ? [{ title: problem.title, evidence: problem.evidence }] : [],
-    opportunities: problem ? [`Resolver lo observado para avanzar hacia ${business.objetivo.toLowerCase()}: ${problem.evidence}`] : [],
+    opportunities: problem ? [`Resolver lo observado para avanzar hacia ${objective}: ${problem.evidence}`] : [],
     risks: [],
     priorities: problem ? [{ title: problem.title, reason: problem.evidence, order: 1 }] : [],
   };

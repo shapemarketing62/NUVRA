@@ -13,6 +13,16 @@ export function automaticIdempotencyKey(input: { organizationId: string; busines
 }
 
 function safeResult(result: RunAnalysisResult) { return { success: result.success, businessId: result.businessId, analysisId: result.analysisId, scoreTotal: result.scoreTotal }; }
+function storedResult(result: RunAnalysisResult) {
+  return { ...safeResult(result), ...(result.internalFailure ? { internalFailure: result.internalFailure } : {}) };
+}
+function publicStoredResult(value: string | null) {
+  if (!value) return undefined;
+  try {
+    const parsed = JSON.parse(value) as RunAnalysisResult;
+    return safeResult(parsed);
+  } catch { return undefined; }
+}
 async function controlled<T>(operation: (signal: AbortSignal) => Promise<T>, signal?: AbortSignal) {
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -42,19 +52,21 @@ export class AnalysisExecutionService {
   constructor(private readonly execute: (businessId: string, signal?: AbortSignal) => Promise<RunAnalysisResult> = (businessId, signal) => runFullAnalysis(businessId, { signal })) {}
   async run(input: { organizationId: string; businessId: string; userId: string; requestId: string; idempotencyKey: string; signal?: AbortSignal }) {
     let run = await prisma.analysisRun.findUnique({ where: { organizationId_idempotencyKey: { organizationId: input.organizationId, idempotencyKey: input.idempotencyKey } } });
-    if (run) return { run, reused: true, result: run.result ? JSON.parse(run.result) : undefined };
+    if (run) return { run, reused: true, result: publicStoredResult(run.result) };
     try { run = await prisma.analysisRun.create({ data: { organizationId: input.organizationId, businessId: input.businessId, idempotencyKey: input.idempotencyKey, requestId: input.requestId, status: "queued" } }); }
-    catch { run = await prisma.analysisRun.findUnique({ where: { organizationId_idempotencyKey: { organizationId: input.organizationId, idempotencyKey: input.idempotencyKey } } }); if (!run) throw new Error("analysis_lock_failed"); return { run, reused: true, result: run.result ? JSON.parse(run.result) : undefined }; }
+    catch { run = await prisma.analysisRun.findUnique({ where: { organizationId_idempotencyKey: { organizationId: input.organizationId, idempotencyKey: input.idempotencyKey } } }); if (!run) throw new Error("analysis_lock_failed"); return { run, reused: true, result: publicStoredResult(run.result) }; }
     await prisma.analysisRun.update({ where: { id: run.id }, data: { status: "running", startedAt: new Date() } });
     return runWithLogContext({ requestId: input.requestId, organizationId: input.organizationId, businessId: input.businessId }, async () => {
       const started = Date.now(); logger.info({ operation: "analysis.run", outcome: "success", phase: "started" });
       try {
         const result = await controlled((signal) => this.execute(input.businessId, signal), input.signal);
         const status: AnalysisRunStatus = result.success ? (result.analysisStatus || (await detectedPartial(input.businessId) ? "partial" : "completed")) : "failed";
-        const saved = safeResult(result); const updated = await prisma.analysisRun.update({ where: { id: run.id }, data: { status, result: JSON.stringify(saved), errorCode: result.success ? null : "source_unavailable", completedAt: new Date() } });
-        logger.info({ operation: "analysis.run", durationMs: Date.now() - started, outcome: result.success ? "success" : "failure", analysisRunId: run.id, status }); return { run: updated, reused: false, result: saved };
+        const saved = safeResult(result); const updated = await prisma.analysisRun.update({ where: { id: run.id }, data: { status, result: JSON.stringify(storedResult(result)), errorCode: result.success ? null : result.internalFailure?.failedAt || "source_unavailable", completedAt: new Date() } });
+        logger.info({ operation: "analysis.run", durationMs: Date.now() - started, outcome: result.success ? "success" : "failure", analysisRunId: run.id, status, failedAt: result.internalFailure?.failedAt }); return { run: updated, reused: false, result: saved };
       } catch (error) {
-        const code = error instanceof Error ? error.name : "analysis_failed"; const updated = await prisma.analysisRun.update({ where: { id: run.id }, data: { status: "failed", errorCode: code, completedAt: new Date() } }); logger.error({ operation: "analysis.run", durationMs: Date.now() - started, outcome: "failure", errorCode: code, analysisRunId: run.id }); return { run: updated, reused: false };
+        const code = error instanceof Error ? error.name : "analysis_failed";
+        const internalFailure = { failedAt: "analysis_execution", errorType: code, message: "El análisis no pudo completar su ejecución controlada.", timestamp: new Date().toISOString() };
+        const updated = await prisma.analysisRun.update({ where: { id: run.id }, data: { status: "failed", result: JSON.stringify({ success: false, businessId: input.businessId, internalFailure }), errorCode: "analysis_execution", completedAt: new Date() } }); logger.error({ operation: "analysis.run", durationMs: Date.now() - started, outcome: "failure", errorCode: code, analysisRunId: run.id, failedAt: "analysis_execution" }); return { run: updated, reused: false };
       }
     });
   }

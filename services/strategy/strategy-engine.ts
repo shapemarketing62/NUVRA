@@ -62,7 +62,14 @@ export async function runStrategyEngine(
   businessProfile?: BusinessProfile
 ): Promise<StrategyResult> {
   const profile = businessProfile || context.businessProfile;
-  if (profile) return buildProfileStrategy(context, diagnosis, scoreResult, profile);
+  if (profile) {
+    try {
+      return buildProfileStrategy(context, diagnosis, scoreResult, profile);
+    } catch (error) {
+      profile.processingIssues?.push({ stage: "strategy", errorType: error instanceof Error ? error.name : "StrategyError", message: error instanceof Error ? error.message.slice(0, 180) : String(error).slice(0, 180) });
+      return buildDeterministicStrategy(context, diagnosis, scoreResult, Array.isArray(findings) ? findings : []);
+    }
+  }
   const ai = createAIService();
 
   if (ai.isAvailable()) {
@@ -133,7 +140,18 @@ function actionTextForFinding(profile: BusinessProfile, finding: ContextualFindi
 export function buildProfileStrategy(context: StrategyContext, diagnosis: DiagnosisResult, scoreResult: NuvraScoreResult, profile: BusinessProfile): StrategyResult {
   const constrained = hasConstrainedExecution(context);
   const shortTerm = context.plazoDias <= 60;
-  const candidates = profile.problemCandidates.map((problem) => ({ problem, intervention: interventionFor(profile, problem, context, constrained, shortTerm) })).sort((a, b) => b.problem.priorityScore - a.problem.priorityScore);
+  const candidates: Array<{ problem: ProblemCandidate; intervention: Intervention }> = [];
+  const rejectedInterventions: Array<{ problem: ProblemCandidate; reason: string }> = [];
+  for (const problem of Array.isArray(profile.problemCandidates) ? profile.problemCandidates : []) {
+    try {
+      candidates.push({ problem, intervention: interventionFor(profile, problem, context, constrained, shortTerm) });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message.slice(0, 180) : String(error).slice(0, 180);
+      rejectedInterventions.push({ problem, reason });
+      profile.processingIssues?.push({ stage: "strategy", itemId: problem?.id, errorType: error instanceof Error ? error.name : "InterventionError", message: reason });
+    }
+  }
+  candidates.sort((a, b) => b.problem.priorityScore - a.problem.priorityScore);
   const seen = new Set<string>();
   const selected = candidates.filter(({ problem }) => {
     const key = `${problem.journeyStage}:${problem.pattern}`;
@@ -168,7 +186,13 @@ export function buildProfileStrategy(context: StrategyContext, diagnosis: Diagno
   })).filter(isSpecificBusinessAction);
 
   const primary = selected[0]?.problem;
-  const frameworkSelection = selectStrategicFrameworks({ objetivo: context.objetivo, bottleneck: diagnosis.bottleneck.title, dimensionProblems: profile.problemCandidates.map((problem) => problem.journeyStage), score: scoreResult.total, hasWeb: profile.activeChannels.includes("web"), hasInstagram: profile.activeChannels.includes("instagram") });
+  let frameworkSelection: FrameworkSelection;
+  try {
+    frameworkSelection = selectStrategicFrameworks({ objetivo: context.objetivo, bottleneck: diagnosis.bottleneck.title, dimensionProblems: profile.problemCandidates.map((problem) => problem.journeyStage), score: scoreResult.total, hasWeb: profile.activeChannels.includes("web"), hasInstagram: profile.activeChannels.includes("instagram") });
+  } catch (error) {
+    profile.processingIssues?.push({ stage: "strategy", errorType: error instanceof Error ? error.name : "FrameworkError", message: error instanceof Error ? error.message.slice(0, 180) : String(error).slice(0, 180) });
+    frameworkSelection = { primary: "CRO", secondary: [], rationale: "Fallback interno por indisponibilidad de la selección de marcos." };
+  }
   return {
     engineType: "deterministic",
     objetivo: `${context.objetivo}${context.magnitud ? ` (+${context.magnitud}%)` : ""} en ${context.plazoLabel}`,
@@ -179,7 +203,7 @@ export function buildProfileStrategy(context: StrategyContext, diagnosis: Diagno
     frameworks: [{ id: frameworkSelection.primary, title: FRAMEWORKS[frameworkSelection.primary]?.name || frameworkSelection.primary, rationale: "Selección interna basada en la hipótesis causal, el objetivo y el recorrido comercial.", useCase: FRAMEWORKS[frameworkSelection.primary]?.description || "", dimension: primary?.journeyStage, priority: 1 }],
     actions,
     audit: {
-      candidates: candidates.map((candidate) => ({
+      candidates: [...candidates.map((candidate) => ({
         findingId: candidate.problem.evidenceFor[0] || candidate.problem.id,
         problemCandidateId: candidate.problem.id,
         title: candidate.intervention.title,
@@ -198,7 +222,17 @@ export function buildProfileStrategy(context: StrategyContext, diagnosis: Diagno
         metric: candidate.intervention.metric,
         expectedImpact: candidate.intervention.expectedImpact,
         confidence: candidate.problem.confidence,
-      })),
+      })), ...rejectedInterventions.map(({ problem, reason }) => ({
+        findingId: problem.evidenceFor?.[0] || problem.id,
+        problemCandidateId: problem.id,
+        title: "Intervención descartada",
+        priority: problem.priorityScore,
+        selected: false,
+        reason: `No se pudo construir esta intervención; el resto continuó. ${reason}`,
+        journeyStage: problem.journeyStage,
+        evidenceIds: problem.evidenceFor,
+        confidence: problem.confidence,
+      }))],
     },
   };
 }

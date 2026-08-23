@@ -2,7 +2,7 @@ import type { Business } from "@prisma/client";
 import type { AggregatedEvidence } from "./evidence-aggregator";
 import type { EvidenceFinding, SourceType } from "./source-analyzer";
 import { getGoalAdjustedAction, getGoalAreaRelevance, selectBusinessPlaybook, type CommercialModel } from "../strategy/business-playbook.ts";
-import { buildCommercialEvidence, type CommercialEvidence } from "./commercial-evidence.ts";
+import { buildCommercialEvidence, type CommercialEvidence, type CommercialProcessingIssue } from "./commercial-evidence.ts";
 import { CommercialJourneyEngine, type CommercialJourney } from "./commercial-journey-engine.ts";
 import { buildProblemCandidates, buildStrengthCandidates, type ProblemCandidate, type StrengthCandidate } from "./commercial-candidates.ts";
 
@@ -72,6 +72,7 @@ export interface BusinessProfile {
   commercialJourney: CommercialJourney;
   problemCandidates: ProblemCandidate[];
   strengthCandidates: StrengthCandidate[];
+  processingIssues: CommercialProcessingIssue[];
 }
 
 const categoryToArea = (category: string): string => {
@@ -205,6 +206,10 @@ export function buildBusinessProfile(business: BusinessWithGoal, aggregated: Agg
     { field: "primaryChannel", value: primaryChannel || "unknown", evidence: activeChannels.join(", ") || "Sin canales evaluados", source: "inferred" },
   );
 
+  const processingIssues: CommercialProcessingIssue[] = Object.values(aggregated.sources || {}).flatMap((source) => {
+    const raw = source?.metadata?.processingIssues;
+    return Array.isArray(raw) ? raw.filter((item): item is CommercialProcessingIssue => Boolean(item && typeof item === "object" && "stage" in item && "errorType" in item && "message" in item)) : [];
+  });
   const profile = {
     businessId: business.id,
     businessName: business.nombre,
@@ -248,11 +253,17 @@ export function buildBusinessProfile(business: BusinessWithGoal, aggregated: Agg
     commercialJourney: null as unknown as CommercialJourney,
     problemCandidates: [] as ProblemCandidate[],
     strengthCandidates: [] as StrengthCandidate[],
+    processingIssues,
   } satisfies BusinessProfile;
-  profile.commercialEvidence = buildCommercialEvidence({ business, aggregated, inferences: inferenceTrace });
-  profile.commercialJourney = CommercialJourneyEngine.build(profile, profile.commercialEvidence);
-  profile.problemCandidates = buildProblemCandidates(profile, profile.commercialJourney, profile.commercialEvidence);
-  profile.strengthCandidates = buildStrengthCandidates(profile, profile.commercialJourney, profile.commercialEvidence);
+  profile.commercialEvidence = buildCommercialEvidence({ business, aggregated, inferences: inferenceTrace }, processingIssues);
+  try {
+    profile.commercialJourney = CommercialJourneyEngine.build(profile, profile.commercialEvidence);
+  } catch (error) {
+    processingIssues.push({ stage: "commercial_journey", errorType: error instanceof Error ? error.name : "JourneyError", message: error instanceof Error ? error.message.slice(0, 180) : String(error).slice(0, 180) });
+    profile.commercialJourney = CommercialJourneyEngine.empty(profile);
+  }
+  profile.problemCandidates = buildProblemCandidates(profile, profile.commercialJourney, profile.commercialEvidence, processingIssues);
+  profile.strengthCandidates = buildStrengthCandidates(profile, profile.commercialJourney, profile.commercialEvidence, processingIssues);
   return profile;
 }
 

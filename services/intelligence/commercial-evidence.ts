@@ -5,6 +5,13 @@ import type { EvidenceFinding, SourceType } from "./source-analyzer.ts";
 export type CommercialEvidenceKind = "ObservedEvidence" | "DeclaredEvidence" | "InferredEvidence";
 export type CommercialJourneyStageId = "discovery" | "evaluation" | "decision" | "action" | "experience" | "retention";
 
+export interface CommercialProcessingIssue {
+  stage: "source_evidence" | "commercial_evidence" | "commercial_journey" | "problem_candidates" | "strength_candidates" | "diagnostic" | "strategy" | "analysis_trace";
+  itemId?: string;
+  errorType: string;
+  message: string;
+}
+
 export interface CommercialEvidence {
   id: string;
   kind: CommercialEvidenceKind;
@@ -24,7 +31,18 @@ export interface CommercialEvidence {
 
 type BusinessInput = Business & { goals?: Array<{ objetivo?: string; plazoDias?: number; plazoLabel?: string; magnitud?: number | null }> };
 
-const normalize = (value: string) => value.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+const normalize = (value: unknown) => String(value ?? "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+const validStages = new Set<CommercialJourneyStageId>(["discovery", "evaluation", "decision", "action", "experience", "retention"]);
+const validSources = new Set<SourceType>(["web", "instagram", "search", "reviews", "competitor", "x", "external_mentions", "other"]);
+
+function processingIssue(stage: CommercialProcessingIssue["stage"], itemId: string | undefined, error: unknown): CommercialProcessingIssue {
+  return {
+    stage,
+    itemId,
+    errorType: error instanceof Error ? error.name : "InvalidEvidence",
+    message: error instanceof Error ? error.message.slice(0, 180) : String(error).slice(0, 180),
+  };
+}
 
 export function inferJourneyStage(text: string, source: string, category = ""): CommercialJourneyStageId {
   const value = normalize(`${text} ${category}`);
@@ -48,26 +66,57 @@ function observedClaims(finding: EvidenceFinding): { allows: string[]; disallows
   return { allows, disallows };
 }
 
-function observedEvidence(business: BusinessInput, aggregated: AggregatedEvidence): CommercialEvidence[] {
-  return aggregated.findings.map((finding) => {
-    const claims = observedClaims(finding);
-    return {
-      id: `observed:${finding.id}`,
-      kind: "ObservedEvidence",
-      source: finding.source,
-      text: finding.evidence,
-      timestamp: aggregated.sources[finding.source]?.evaluatedAt?.toISOString?.() || null,
-      entity: { businessId: business.id, businessName: business.nombre },
-      confidence: finding.confidence,
-      journeyStage: inferJourneyStage(finding.evidence, finding.source, finding.category),
-      possibleImpact: finding.impact,
-      polarity: finding.type,
-      allowsClaims: claims.allows,
-      disallowsClaims: claims.disallows,
-      attribution: finding.attribution,
-      originalFindingId: finding.id,
-    };
-  });
+function safeTimestamp(value: unknown): string | null {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString();
+  if (typeof value === "string") {
+    const parsed = new Date(value);
+    if (!Number.isNaN(parsed.getTime())) return parsed.toISOString();
+  }
+  return null;
+}
+
+function observedEvidence(business: BusinessInput, aggregated: AggregatedEvidence, issues: CommercialProcessingIssue[]): CommercialEvidence[] {
+  const result: CommercialEvidence[] = [];
+  for (const rawFinding of Array.isArray(aggregated.findings) ? aggregated.findings : []) {
+    const finding = rawFinding as EvidenceFinding & Record<string, unknown>;
+    const itemId = typeof finding.id === "string" && finding.id ? finding.id : undefined;
+    try {
+      if (typeof finding.evidence !== "string" || !finding.evidence.trim()) throw new TypeError("La evidencia no contiene texto utilizable.");
+      const source = validSources.has(finding.source as SourceType) ? finding.source as SourceType : "other";
+      const category = typeof finding.category === "string" ? finding.category : "other";
+      const normalizedFinding = {
+        ...finding,
+        id: itemId || `invalid-id-${result.length + 1}`,
+        evidence: finding.evidence.trim(),
+        attribution: typeof finding.attribution === "string" && finding.attribution.trim() ? finding.attribution.trim() : "Fuente sin atribución detallada",
+        source,
+        category,
+        confidence: ["ALTA", "MEDIA", "BAJA"].includes(String(finding.confidence)) ? finding.confidence as "ALTA" | "MEDIA" | "BAJA" : "BAJA",
+        impact: ["high", "medium", "low"].includes(String(finding.impact)) ? finding.impact as "high" | "medium" | "low" : "low",
+        type: ["positive", "negative", "neutral"].includes(String(finding.type)) ? finding.type as "positive" | "negative" | "neutral" : "neutral",
+      } satisfies EvidenceFinding;
+      const claims = observedClaims(normalizedFinding);
+      result.push({
+        id: `observed:${normalizedFinding.id}`,
+        kind: "ObservedEvidence",
+        source,
+        text: normalizedFinding.evidence,
+        timestamp: safeTimestamp(aggregated.sources?.[source]?.evaluatedAt),
+        entity: { businessId: String(business.id || "unknown"), businessName: String(business.nombre || "Negocio") },
+        confidence: normalizedFinding.confidence,
+        journeyStage: inferJourneyStage(normalizedFinding.evidence, source, category),
+        possibleImpact: normalizedFinding.impact,
+        polarity: normalizedFinding.type,
+        allowsClaims: claims.allows,
+        disallowsClaims: claims.disallows,
+        attribution: normalizedFinding.attribution,
+        originalFindingId: normalizedFinding.id,
+      });
+    } catch (error) {
+      issues.push(processingIssue("commercial_evidence", itemId, error));
+    }
+  }
+  return result;
 }
 
 function declaredEvidence(business: BusinessInput): CommercialEvidence[] {
@@ -106,8 +155,8 @@ export function buildCommercialEvidence(input: {
   business: BusinessInput;
   aggregated: AggregatedEvidence;
   inferences: Array<{ field: string; value: string; evidence: string; source: "declared" | "observed" | "inferred" }>;
-}): CommercialEvidence[] {
-  const inferred: CommercialEvidence[] = input.inferences.filter((item) => item.source === "inferred").map((item) => ({
+}, issues: CommercialProcessingIssue[] = []): CommercialEvidence[] {
+  const inferred: CommercialEvidence[] = (Array.isArray(input.inferences) ? input.inferences : []).filter((item) => item?.source === "inferred" && item.field).map((item) => ({
     id: `inferred:${item.field}`,
     kind: "InferredEvidence",
     source: "business_profile",
@@ -115,12 +164,12 @@ export function buildCommercialEvidence(input: {
     timestamp: null,
     entity: { businessId: input.business.id, businessName: input.business.nombre },
     confidence: "MEDIA",
-    journeyStage: inferJourneyStage(`${item.field} ${item.value} ${item.evidence}`, "business_profile"),
+    journeyStage: validStages.has(inferJourneyStage(`${item.field} ${item.value} ${item.evidence}`, "business_profile")) ? inferJourneyStage(`${item.field} ${item.value} ${item.evidence}`, "business_profile") : "evaluation",
     possibleImpact: "medium",
     polarity: "neutral",
     allowsClaims: [`Permite usar “${item.value}” como hipótesis de contexto respaldada por: ${item.evidence}.`],
     disallowsClaims: ["No permite presentarlo como un hecho observado.", "Debe revisarse si aparece evidencia que lo contradiga."],
     attribution: item.evidence,
   }));
-  return [...observedEvidence(input.business, input.aggregated), ...declaredEvidence(input.business), ...inferred];
+  return [...observedEvidence(input.business, input.aggregated, issues), ...declaredEvidence(input.business), ...inferred];
 }

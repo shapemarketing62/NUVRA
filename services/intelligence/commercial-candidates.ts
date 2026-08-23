@@ -1,5 +1,5 @@
 import type { BusinessProfile } from "./business-profile.ts";
-import type { CommercialEvidence, CommercialJourneyStageId } from "./commercial-evidence.ts";
+import type { CommercialEvidence, CommercialJourneyStageId, CommercialProcessingIssue } from "./commercial-evidence.ts";
 import type { CommercialJourney } from "./commercial-journey-engine.ts";
 
 export type CommercialProblemPattern = "visibility" | "offer_clarity" | "trust" | "decision_information" | "action_path" | "experience" | "retention" | "demand_pattern" | "other";
@@ -36,7 +36,7 @@ export interface StrengthCandidate {
   priorityScore: number;
 }
 
-const normalize = (value: string) => value.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+const normalize = (value: unknown) => String(value ?? "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 
 function patternFor(evidence: CommercialEvidence): CommercialProblemPattern {
   const text = normalize(evidence.text);
@@ -83,12 +83,13 @@ function sourceScope(items: CommercialEvidence[]): ProblemCandidate["scope"] {
   return sources.size >= 3 ? "business_wide" : sources.size === 2 ? "multi_channel" : "single_touchpoint";
 }
 
-export function buildProblemCandidates(profile: BusinessProfile, journey: CommercialJourney, evidence: CommercialEvidence[]): ProblemCandidate[] {
-  const negatives = evidence.filter((item) => item.polarity === "negative");
+export function buildProblemCandidates(profile: BusinessProfile, journey: CommercialJourney, evidence: CommercialEvidence[], issues: CommercialProcessingIssue[] = []): ProblemCandidate[] {
+  const safeEvidence = Array.isArray(evidence) ? evidence : [];
+  const negatives = safeEvidence.filter((item) => item?.polarity === "negative" && item.id && item.journeyStage);
   // Una declaración del onboarding orienta la estrategia, pero no alcanza por sí
   // sola para presentar una fortaleza como si NUVRA la hubiera comprobado.
-  const positives = evidence.filter(
-    (item) => item.polarity === "positive" && item.kind === "ObservedEvidence",
+  const positives = safeEvidence.filter(
+    (item) => item?.polarity === "positive" && item.kind === "ObservedEvidence",
   );
   const groups = new Map<string, CommercialEvidence[]>();
   for (const item of negatives) {
@@ -96,41 +97,49 @@ export function buildProblemCandidates(profile: BusinessProfile, journey: Commer
     const key = `${item.journeyStage}:${pattern}`;
     (groups.get(key) || groups.set(key, []).get(key)!).push(item);
   }
-  return Array.from(groups.values()).map((items) => {
-    const pattern = patternFor(items[0]);
-    const stage = items[0].journeyStage;
-    const against = positives.filter((item) => item.journeyStage === stage && patternFor(item) === pattern);
-    const evidenceStrength = Math.min(1, items.reduce((sum, item) => sum + (item.confidence === "ALTA" ? 1 : item.confidence === "MEDIA" ? .7 : .4), 0) / 2);
-    const goalImpact = stageImportance(journey, stage);
-    const retentionGoal = /volv|vuelv|recompra|renov|recurren|fideliza|clientes actuales|socios actuales/i.test(profile.goal.text);
-    const commercialRelevance = retentionGoal
-      ? stage === "retention" ? 1 : stage === "experience" ? .9 : .25
-      : stage === "action" ? 1 : stage === "decision" || stage === "evaluation" ? .85 : .7;
-    const solvability = solvabilityFor(pattern, profile);
-    const contradictionPenalty = Math.min(.35, against.length * .12);
-    const frequency = items.length;
-    const frequencyFactor = Math.min(1, .55 + frequency * .15);
-    const priorityScore = Math.round(evidenceStrength * goalImpact * commercialRelevance * frequencyFactor * solvability * (1 - contradictionPenalty) * 100);
-    const causal = hypothesis(pattern, profile);
-    return {
-      id: `problem:${stage}:${pattern}`,
-      pattern,
-      hypothesis: causal,
-      journeyStage: stage,
-      evidenceFor: items.map((item) => item.id),
-      evidenceAgainst: against.map((item) => item.id),
-      frequency,
-      goalImpact,
-      commercialRelevance,
-      severity: items.some((item) => item.possibleImpact === "high") ? "high" : items.some((item) => item.possibleImpact === "medium") ? "medium" : "low",
-      confidence: confidenceOf(items),
-      solvability,
-      dependencies: stage === "action" ? ["La oferta y la información de decisión deben ser suficientemente claras."] : stage === "retention" ? ["La experiencia anterior debe justificar una nueva relación."] : [],
-      scope: sourceScope(items),
-      priorityScore,
-      causalExplanation: `${causal} La hipótesis se apoya en ${items.length} señal(es) y considera ${against.length} señal(es) que podrían contradecirla.`,
-    } satisfies ProblemCandidate;
-  }).sort((a, b) => b.priorityScore - a.priorityScore);
+  const candidates: ProblemCandidate[] = [];
+  for (const items of Array.from(groups.values())) {
+    try {
+      const first = items[0];
+      if (!first) continue;
+      const pattern = patternFor(first);
+      const stage = first.journeyStage;
+      const against = positives.filter((item) => item.journeyStage === stage && patternFor(item) === pattern);
+      const evidenceStrength = Math.min(1, items.reduce((sum, item) => sum + (item.confidence === "ALTA" ? 1 : item.confidence === "MEDIA" ? .7 : .4), 0) / 2);
+      const goalImpact = stageImportance(journey, stage);
+      const retentionGoal = /volv|vuelv|recompra|renov|recurren|fideliza|clientes actuales|socios actuales/i.test(String(profile.goal?.text || ""));
+      const commercialRelevance = retentionGoal
+        ? stage === "retention" ? 1 : stage === "experience" ? .9 : .25
+        : stage === "action" ? 1 : stage === "decision" || stage === "evaluation" ? .85 : .7;
+      const solvability = solvabilityFor(pattern, profile);
+      const contradictionPenalty = Math.min(.35, against.length * .12);
+      const frequency = items.length;
+      const frequencyFactor = Math.min(1, .55 + frequency * .15);
+      const priorityScore = Math.round(evidenceStrength * goalImpact * commercialRelevance * frequencyFactor * solvability * (1 - contradictionPenalty) * 100);
+      const causal = hypothesis(pattern, profile);
+      candidates.push({
+        id: `problem:${stage}:${pattern}`,
+        pattern,
+        hypothesis: causal,
+        journeyStage: stage,
+        evidenceFor: items.map((item) => item.id),
+        evidenceAgainst: against.map((item) => item.id),
+        frequency,
+        goalImpact,
+        commercialRelevance,
+        severity: items.some((item) => item.possibleImpact === "high") ? "high" : items.some((item) => item.possibleImpact === "medium") ? "medium" : "low",
+        confidence: confidenceOf(items),
+        solvability,
+        dependencies: stage === "action" ? ["La oferta y la información de decisión deben ser suficientemente claras."] : stage === "retention" ? ["La experiencia anterior debe justificar una nueva relación."] : [],
+        scope: sourceScope(items),
+        priorityScore,
+        causalExplanation: `${causal} La hipótesis se apoya en ${items.length} señal(es) y considera ${against.length} señal(es) que podrían contradecirla.`,
+      });
+    } catch (error) {
+      issues.push({ stage: "problem_candidates", itemId: items[0]?.id, errorType: error instanceof Error ? error.name : "CandidateError", message: error instanceof Error ? error.message.slice(0, 180) : String(error).slice(0, 180) });
+    }
+  }
+  return candidates.sort((a, b) => b.priorityScore - a.priorityScore);
 }
 
 function strengthStatement(pattern: CommercialProblemPattern, profile: BusinessProfile): string {
@@ -144,9 +153,9 @@ function strengthStatement(pattern: CommercialProblemPattern, profile: BusinessP
   return "Existe una señal favorable y utilizable en el recorrido comercial.";
 }
 
-export function buildStrengthCandidates(profile: BusinessProfile, journey: CommercialJourney, evidence: CommercialEvidence[]): StrengthCandidate[] {
-  const positives = evidence.filter(
-    (item) => item.polarity === "positive" && item.kind === "ObservedEvidence",
+export function buildStrengthCandidates(profile: BusinessProfile, journey: CommercialJourney, evidence: CommercialEvidence[], issues: CommercialProcessingIssue[] = []): StrengthCandidate[] {
+  const positives = (Array.isArray(evidence) ? evidence : []).filter(
+    (item) => item?.polarity === "positive" && item.kind === "ObservedEvidence" && item.id && item.journeyStage,
   );
   const groups = new Map<string, CommercialEvidence[]>();
   for (const item of positives) {
@@ -154,23 +163,21 @@ export function buildStrengthCandidates(profile: BusinessProfile, journey: Comme
     const key = `${item.journeyStage}:${pattern}`;
     (groups.get(key) || groups.set(key, []).get(key)!).push(item);
   }
-  return Array.from(groups.values()).map((items) => {
-    const pattern = patternFor(items[0]);
-    const stage = items[0].journeyStage;
-    const impact = stageImportance(journey, stage);
-    const exploitability = ["trust", "visibility", "offer_clarity"].includes(pattern) ? .9 : .75;
-    const frequency = items.length;
-    return {
-      id: `strength:${stage}:${pattern}`,
-      pattern,
-      statement: strengthStatement(pattern, profile),
-      journeyStage: stage,
-      evidence: items.map((item) => item.id),
-      frequency,
-      commercialImpact: impact,
-      confidence: confidenceOf(items),
-      exploitability,
-      priorityScore: Math.round(Math.min(1, .55 + frequency * .15) * impact * exploitability * 100),
-    } satisfies StrengthCandidate;
-  }).filter((item) => item.priorityScore >= 25).sort((a, b) => b.priorityScore - a.priorityScore);
+  const candidates: StrengthCandidate[] = [];
+  for (const items of Array.from(groups.values())) {
+    try {
+      const first = items[0];
+      if (!first) continue;
+      const pattern = patternFor(first);
+      const stage = first.journeyStage;
+      const impact = stageImportance(journey, stage);
+      const exploitability = ["trust", "visibility", "offer_clarity"].includes(pattern) ? .9 : .75;
+      const frequency = items.length;
+      const candidate = { id: `strength:${stage}:${pattern}`, pattern, statement: strengthStatement(pattern, profile), journeyStage: stage, evidence: items.map((item) => item.id), frequency, commercialImpact: impact, confidence: confidenceOf(items), exploitability, priorityScore: Math.round(Math.min(1, .55 + frequency * .15) * impact * exploitability * 100) } satisfies StrengthCandidate;
+      if (candidate.priorityScore >= 25) candidates.push(candidate);
+    } catch (error) {
+      issues.push({ stage: "strength_candidates", itemId: items[0]?.id, errorType: error instanceof Error ? error.name : "CandidateError", message: error instanceof Error ? error.message.slice(0, 180) : String(error).slice(0, 180) });
+    }
+  }
+  return candidates.sort((a, b) => b.priorityScore - a.priorityScore);
 }

@@ -29,6 +29,7 @@ const { BusinessIntelligenceLayer } = require("../services/intelligence/business
 const { executeSource } = require("../services/intelligence/source-execution.ts");
 const { runDiagnosticEngine } = require("../services/diagnostic/diagnostic-engine.ts");
 const { runStrategyEngine } = require("../services/strategy/strategy-engine.ts");
+const { buildAnalysisTrace } = require("../services/intelligence/analysis-trace.ts");
 
 const business = {
   id: "numa-test",
@@ -48,8 +49,8 @@ const business = {
   goals: [{ objetivo: "Aumentar ventas", plazoDias: 90, plazoLabel: "3 meses" }],
 };
 
-function finding(source, category = "presencia") {
-  return { id: `${source}-finding`, category, type: "positive", impact: "medium", evidence: `Evidencia verificable de ${source}`, source, attribution: `${source}.test`, weight: 0.5, confidence: "ALTA" };
+function finding(source, category = "presencia", type = "positive") {
+  return { id: `${source}-finding`, category, type, impact: "medium", evidence: `Evidencia verificable de ${source}`, source, attribution: `${source}.test`, weight: 0.5, confidence: "ALTA" };
 }
 
 function fakeSource(type, outcome = "ok", category = "presencia") {
@@ -61,7 +62,7 @@ function fakeSource(type, outcome = "ok", category = "presencia") {
     isRelevant: () => ({ source: type, relevant: true, reason: "Fuente de prueba relevante", weight: 0.2 }),
     analyze: async () => {
       if (outcome === "fail") throw Object.assign(new Error(`${type}_provider_down`), { code: "PROVIDER_DOWN" });
-      return { source: type, status: "evaluated", data: { provider: type }, findings: [finding(type, category)], confidence: "ALTA", coverage: 75, evaluatedAt: new Date(), requiresAuth: false };
+      return { source: type, status: "evaluated", data: { provider: type }, findings: [finding(type, category, ["web", "search"].includes(type) ? "negative" : "positive")], confidence: "ALTA", coverage: 75, evaluatedAt: new Date(), requiresAuth: false };
     },
   };
 }
@@ -137,4 +138,67 @@ test("el validador SSRF usa resolución del sistema y mantiene bloqueos privados
   assert.match(validator, /dns\.lookup\(hostname, \{ all: true/);
   assert.doesNotMatch(validator, /dns\.resolve4\(/);
   assert.match(validator, /isPrivateIp\(ip\)/);
+});
+
+test("NÜMA completa Etapa A con evidencia realista, parcial y malformada", async () => {
+  const partialBusiness = {
+    ...business,
+    id: "numa-partial-production-shape",
+    ubicacion: null,
+    ciudad: null,
+    tipoCliente: null,
+    canales: null,
+    otrosCanales: null,
+    descripcion: null,
+    productosServicios: null,
+    inversionMarketing: null,
+    empleados: null,
+    instagramHandle: "numahome.ok",
+    goals: [{ objetivo: "Aumentar ventas", plazoDias: 90, plazoLabel: "3 meses" }],
+  };
+  const partialSource = (type, value) => ({
+    type,
+    requiresAuth: false,
+    requiresPermission: false,
+    isAvailable: () => true,
+    isRelevant: () => ({ source: type, relevant: true, reason: "Fuente parcial de regresión", weight: .2 }),
+    analyze: async () => value,
+  });
+  const unavailable = (type) => partialSource(type, { source: type, status: "unavailable", data: null, findings: [], confidence: "INSUFICIENTE", coverage: 0, evaluatedAt: new Date(), requiresAuth: false });
+  const layer = new BusinessIntelligenceLayer();
+  layer.registerSource(partialSource("web", {
+    source: "web", status: "evaluated", data: { status: "partial", pagesAnalyzed: 1, findings: [] },
+    findings: [
+      { id: "web-null", category: null, type: "negative", impact: null, evidence: null, source: "web", attribution: null, weight: null, confidence: null },
+      { id: "web-shipping", category: "conversion", type: "negative", impact: "high", evidence: "El costo y el plazo de envío no aparecen antes de intentar comprar.", source: "web", attribution: "Página pública protegida", weight: .8, confidence: "MEDIA" },
+    ],
+    confidence: "MEDIA", coverage: 25, evaluatedAt: new Date(), requiresAuth: false,
+  }));
+  layer.registerSource(partialSource("instagram", {
+    source: "instagram", status: "evaluated", data: { publicOnly: true },
+    findings: [{ id: "ig-partial", category: "redes", type: "neutral", impact: "low", evidence: "Se identificó un perfil público, sin métricas privadas disponibles.", source: "instagram", weight: .2, confidence: "BAJA" }],
+    confidence: "BAJA", coverage: 20, evaluatedAt: new Date().toISOString(), requiresAuth: true,
+  }));
+  layer.registerSource(partialSource("search", { source: "search", status: "evaluated", data: {}, findings: [{ id: "search-result", category: "adquisicion", type: "positive", impact: "medium", evidence: "El negocio aparece por su nombre y dominio.", source: "search", attribution: "Resultado público", weight: .5, confidence: "MEDIA" }], confidence: "MEDIA", coverage: 35, evaluatedAt: new Date(), requiresAuth: false }));
+  for (const type of ["reviews", "competitor", "external_mentions", "x"]) layer.registerSource(unavailable(type));
+
+  const result = await layer.analyze(partialBusiness);
+  const legacyFindings = layer.getLegacyFindings(result);
+  const score = { total: result.nuvraScore.total, dimensions: layer.getLegacyDimensions(result), weights: {}, allFindings: legacyFindings, coverage: result.coverage.total };
+  const context = { nombre: partialBusiness.nombre, rubro: partialBusiness.rubro, objetivo: partialBusiness.goals[0].objetivo, plazoDias: 90, plazoLabel: "3 meses", descripcion: null, ubicacion: null, tipoCliente: null, businessProfile: result.businessProfile };
+  const diagnosis = await runDiagnosticEngine(context, score, legacyFindings, result.businessProfile);
+
+  result.businessProfile.problemCandidates.unshift({ id: "malformed-candidate", pattern: "action_path", hypothesis: "Candidato incompleto", journeyStage: "action", evidenceFor: null, evidenceAgainst: [], frequency: 1, goalImpact: 1, commercialRelevance: 1, severity: "medium", confidence: "MEDIA", solvability: .8, dependencies: [], scope: "single_touchpoint", priorityScore: 99, causalExplanation: "Candidato deliberadamente incompleto." });
+  const strategy = await runStrategyEngine(context, diagnosis, score, legacyFindings, result.businessProfile);
+  const trace = buildAnalysisTrace({ discovery: { target: {}, rejectedSources: [], confirmedSources: [], probableSources: [], uncertainSources: [], allCandidates: [] }, aggregated: result.aggregatedEvidence, profile: result.businessProfile, diagnosis, strategy, score: result.nuvraScore });
+
+  assert.equal(result.businessProfile.commercialEvidence.some((item) => item.originalFindingId === "web-null"), false);
+  assert.ok(result.businessProfile.processingIssues.some((item) => item.stage === "source_evidence"));
+  assert.ok(result.businessProfile.commercialJourney.stages.length >= 5);
+  assert.ok(result.businessProfile.problemCandidates.some((item) => item.id !== "malformed-candidate"));
+  assert.ok(diagnosis.summary);
+  assert.ok(strategy.actions.length > 0);
+  assert.ok(strategy.audit.candidates.some((item) => item.problemCandidateId === "malformed-candidate" && item.selected === false));
+  assert.equal(trace.version, "commercial-journey-v1");
+  assert.ok(trace.processingIssues.length >= 2);
 });

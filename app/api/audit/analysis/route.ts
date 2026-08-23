@@ -20,6 +20,7 @@ export async function GET(req: NextRequest) {
         diagnoses: { orderBy: { createdAt: "desc" }, take: 1 },
         strategies: { orderBy: { createdAt: "desc" }, take: 1, include: { actions: { orderBy: { order: "asc" } } } },
         analysisHistory: { orderBy: { createdAt: "desc" }, take: 1 },
+        analysisRuns: { orderBy: { queuedAt: "desc" }, take: 1 },
       },
     });
 
@@ -29,6 +30,9 @@ export async function GET(req: NextRequest) {
     const diagnosis = business.diagnoses[0];
     const strategy = business.strategies[0];
     const snapshot = business.analysisHistory[0]?.snapshot ? JSON.parse(business.analysisHistory[0].snapshot) : null;
+    const latestRun = business.analysisRuns[0];
+    let runFailure: unknown = null;
+    try { runFailure = latestRun?.result ? JSON.parse(latestRun.result)?.internalFailure || null : null; } catch { runFailure = null; }
 
     const audit = {
       businessName: business.nombre,
@@ -36,6 +40,7 @@ export async function GET(req: NextRequest) {
       businessProfile: snapshot?.businessProfile || null,
       pipelineAudit: snapshot?.analysisAudit || null,
       analysisTrace: snapshot?.analysisTrace || null,
+      latestRun: latestRun ? { id: latestRun.id, status: latestRun.status, startedAt: latestRun.startedAt, completedAt: latestRun.completedAt, failedAt: latestRun.errorCode, failure: runFailure } : null,
       scoreTotal: score?.total,
       scoreDimensions: score?.dimensions.map((d) => ({
         name: d.name,
