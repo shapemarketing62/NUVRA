@@ -168,6 +168,8 @@ test("el onboarding no precarga ejemplos ni menciona el caso de prueba", () => {
   const onboarding = fs.readFileSync(new URL("../app/onboarding/page.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(onboarding, /placeholder=/);
   assert.doesNotMatch(onboarding, /AP Medicina Estética|También puede quedar vacío/i);
+  assert.match(onboarding, /<Field label="Rubro"><TextInput value=\{data\.rubro\}/);
+  assert.doesNotMatch(onboarding, /RUBROS|<Select/);
   assert.match(onboarding, /plazoId: "", plazoCustomDate: "", presupuestoMarketing: "", capacidadEjecucion: ""/);
   assert.match(onboarding, /No tengo página web/);
 });
