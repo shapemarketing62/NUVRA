@@ -1,4 +1,4 @@
-import { SourceAnalyzer, SourceEvidence, SourceType, EvidenceFinding } from "./source-analyzer";
+import { SourceAnalyzer, type SourceEvidence, type SourceType, type EvidenceFinding } from "./source-analyzer.ts";
 import type { Business } from "@prisma/client";
 
 // Extender Business temporalmente para incluir goals
@@ -196,11 +196,11 @@ export class EvidenceAggregator {
     };
 
     for (const f of findings) {
-      if (f.category === "presencia" || f.category === "ux" || f.category === "trust") {
+      if (f.category === "presencia") {
         dimensions.presencia.push(f);
-      } else if (f.category === "conversion") {
+      } else if (f.category === "conversion" || f.category === "ux") {
         dimensions.conversion.push(f);
-      } else if (f.category === "posicionamiento") {
+      } else if (f.category === "posicionamiento" || f.category === "trust") {
         dimensions.posicionamiento.push(f);
       } else if (f.category === "propuesta") {
         dimensions.propuesta.push(f);
@@ -310,7 +310,9 @@ export class CoverageCalculator {
     const isRestaurante = /restaurante|cafe|cafeter|comida|delivery|bar|pizza|burger|food/i.test(rubro);
     const isServicio = /servicio|consult|abogado|clinic|dent|psic|arquitect|agency|studio|profesional|salud|belleza|estetica/i.test(rubro);
     const isSaaS = /saas|software|platform|app|subscription|crm|b2b|tech|tecnolog/i.test(rubro);
-    const isLocal = isRestaurante || isServicio || /local|barrio|zona|ciudad/i.test(rubro);
+    const isLocal = Boolean(business.ubicacion || business.ciudad) || isRestaurante || isServicio || /local|barrio|zona|ciudad/i.test(rubro);
+    const noWebDeclared = Boolean(business.noWebDeclared);
+    const noInstagramDeclared = Boolean(business.noInstagramDeclared);
 
     switch (sourceType) {
       case "web": {
@@ -327,7 +329,8 @@ export class CoverageCalculator {
         // Objetivo de marca/posicionamiento reduce peso (otros canales importan)
         if (/marca|reconoc|posicion|brand/i.test(objetivo)) weight = Math.max(weight - 0.05, 0.2);
 
-        return { weight, relevant: true, reason: "Sitio web es canal principal de presencia digital" };
+        const relevant = !(noWebDeclared && !isEcommerce && !isSaaS && !isB2B);
+        return { weight, relevant, reason: relevant ? "El sitio web puede aportar información comercial verificable" : "El negocio declaró no tener web y su modelo no depende de ella para operar" };
       }
 
       case "instagram": {
@@ -347,13 +350,14 @@ export class CoverageCalculator {
         // Objetivo de redes/engagement
         if (/redes|social|instagram|engagement|seguidores/i.test(objetivo)) { weight = Math.max(weight, 0.3); relevant = true; }
 
-        return { weight, relevant, reason: relevant ? "Instagram es canal de engagement y visibilidad para este negocio" : "Instagram no es un canal relevante para este negocio" };
+        if (noInstagramDeclared && !instagramHandle) relevant = false;
+        return { weight, relevant, reason: relevant ? "Instagram puede aportar actividad comercial observable" : "Instagram no fue declarado como canal activo para este negocio" };
       }
 
       case "search": {
         // Search relevante para negocios locales, servicios, ecommerce
         let weight = 0.15;
-        let relevant = false;
+        let relevant = isLocal;
 
         if (isLocal) { weight = 0.25; relevant = true; }
         else if (isServicio) { weight = 0.2; relevant = true; }
@@ -369,7 +373,7 @@ export class CoverageCalculator {
       case "reviews": {
         // Reviews relevante para restaurantes, servicios, hoteles, ecommerce
         let weight = 0.15;
-        let relevant = false;
+        let relevant = isLocal;
 
         if (isRestaurante) { weight = 0.3; relevant = true; }
         else if (isServicio) { weight = 0.25; relevant = true; }
@@ -408,7 +412,7 @@ export class CoverageCalculator {
       case "external_mentions": {
         // Menciones externas relevantes para autoridad y posicionamiento
         let weight = 0.1;
-        let relevant = false;
+        let relevant = true;
 
         if (isServicio) { weight = 0.15; relevant = true; }
         if (/reconoc|marca|posicion|visibil|autoridad|presencia/i.test(objetivo)) { weight = 0.15; relevant = true; }

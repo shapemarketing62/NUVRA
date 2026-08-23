@@ -10,6 +10,7 @@ import { NuvraScoreCalculator, NuvraScoreResult } from "./nuvra-score-calculator
 import type { DiscoveryResult } from "@/services/discovery/business-discovery-service";
 import type { Business } from "@prisma/client";
 import { IntegrationSourceAnalyzer } from "@/services/integrations/integration-source-analyzer";
+import { buildBusinessProfile, type BusinessProfile } from "./business-profile";
 
 export interface BusinessIntelligenceResult {
   aggregatedEvidence: AggregatedEvidence;
@@ -18,6 +19,7 @@ export interface BusinessIntelligenceResult {
   nuvraScore: NuvraScoreResult;
   evaluatedAt: Date;
   discoveryResult?: DiscoveryResult;
+  businessProfile: BusinessProfile;
 }
 
 export class BusinessIntelligenceLayer {
@@ -60,6 +62,7 @@ export class BusinessIntelligenceLayer {
       this.enrichEvidenceWithDiscovery(aggregatedEvidence, discoveryResult);
     }
     this.enrichEvidenceWithDeclaredContext(aggregatedEvidence, targetBusiness, objectiveFromBusiness(targetBusiness));
+    const businessProfile = buildBusinessProfile(targetBusiness as Business & { goals?: Array<{ objetivo?: string; magnitud?: number | null; plazoDias?: number; plazoLabel?: string }> }, aggregatedEvidence);
 
     console.log("[BI_LAYER] Evidence aggregated:", {
       sourcesEvaluated: Object.values(aggregatedEvidence.sources).filter((s) => s.status === "evaluated").length,
@@ -83,7 +86,7 @@ export class BusinessIntelligenceLayer {
 
     // 5. Calcular Nuvra Score (basado en evidence agregada)
     const objective = (targetBusiness as Business & { goals?: Array<{ objetivo?: string }> }).goals?.[0]?.objetivo;
-    const nuvraScore = NuvraScoreCalculator.calculate(aggregatedEvidence, coverage, { objective });
+    const nuvraScore = NuvraScoreCalculator.calculate(aggregatedEvidence, coverage, { objective, businessProfile });
     console.log("[BI_LAYER] Nuvra Score calculated:", {
       total: nuvraScore.total,
       confidence: nuvraScore.confidence,
@@ -98,6 +101,7 @@ export class BusinessIntelligenceLayer {
       nuvraScore,
       evaluatedAt: new Date(),
       discoveryResult,
+      businessProfile,
     };
   }
 
@@ -139,12 +143,12 @@ export class BusinessIntelligenceLayer {
       const publicFinding: EvidenceFinding = {
         id: `instagram-public-${Buffer.from(discovery.primaryInstagram).toString("base64url").slice(0, 20)}`,
         category: "redes",
-        type: "positive" as const,
-        impact: "medium" as const,
-        evidence: `Se identificó el perfil público oficial de Instagram: ${discovery.primaryInstagram}.`,
+        type: "neutral" as const,
+        impact: "low" as const,
+        evidence: `Se identificó el perfil público oficial de Instagram, pero su existencia por sí sola no demuestra utilidad comercial: ${discovery.primaryInstagram}.`,
         source: "instagram" as const,
         attribution: candidate?.title || "Perfil aportado o descubierto públicamente",
-        weight: 0.55,
+        weight: 0.25,
         confidence,
       };
       aggregated.sources.instagram = {
@@ -162,6 +166,25 @@ export class BusinessIntelligenceLayer {
           privateMetricsAvailable: false,
         },
       };
+      if (candidate?.snippet) {
+        const hasDirectStep = /whatsapp|reserv|turno|pedid|compr|contact|link/i.test(candidate.snippet);
+        const bioFinding: EvidenceFinding = {
+          id: `instagram-public-description-${Buffer.from(discovery.primaryInstagram).toString("base64url").slice(0, 20)}`,
+          category: hasDirectStep ? "conversion" : "propuesta",
+          type: hasDirectStep ? "positive" : "neutral",
+          impact: hasDirectStep ? "medium" : "low",
+          evidence: `Descripción pública observada en Instagram: ${candidate.snippet}`,
+          source: "instagram",
+          attribution: discovery.primaryInstagram,
+          weight: hasDirectStep ? 0.55 : 0.3,
+          confidence,
+        };
+        aggregated.sources.instagram.findings.push(bioFinding);
+        aggregated.findings.push(bioFinding);
+        aggregated.deduplicated.push(bioFinding);
+        (aggregated.byCategory[bioFinding.category] ||= []).push(bioFinding);
+        (aggregated.byDimension[bioFinding.category] ||= []).push(bioFinding);
+      }
       aggregated.findings.push(publicFinding);
       aggregated.deduplicated.push(publicFinding);
       (aggregated.byCategory.redes ||= []).push(publicFinding);
@@ -205,12 +228,13 @@ export class BusinessIntelligenceLayer {
     const legacyFindings: any[] = [];
     
     for (const finding of biResult.aggregatedEvidence.findings) {
+      const contextual = biResult.businessProfile.contextualFindings.find((item) => item.findingId === finding.id);
       legacyFindings.push({
         type: finding.type === "positive" ? "strength" : finding.type === "negative" ? "problem" : "info",
         category: finding.category,
         severity: finding.impact === "high" ? "high" : finding.impact === "medium" ? "medium" : "low",
-        title: finding.category.charAt(0).toUpperCase() + finding.category.slice(1),
-        description: finding.category.charAt(0).toUpperCase() + finding.category.slice(1),
+        title: contextual?.interpretation || finding.category.charAt(0).toUpperCase() + finding.category.slice(1),
+        description: contextual?.goalRelation || finding.evidence,
         evidence: finding.evidence,
         pageUrl: finding.attribution,
         source: finding.source,
@@ -229,8 +253,8 @@ export class BusinessIntelligenceLayer {
         slug: d.slug,
         name: d.name,
         points: d.points,
-        weight: 0.16,
-        criteria: [],
+        weight: biResult.nuvraScore.methodology.dimensionWeights[d.slug]?.combinedWeight ?? 0,
+        criteria: d.scoringSignals || [],
         strengths: d.findings.filter((f) => f.type === "positive").map((f) => f.evidence),
         problems: d.findings.filter((f) => f.type === "negative").map((f) => f.evidence),
         source: d.sources.join(", "),
@@ -243,8 +267,8 @@ export class BusinessIntelligenceLayer {
       slug: d.slug,
       name: d.name,
       points: d.points,
-      weight: 0.16,
-      criteria: [],
+      weight: biResult.nuvraScore.methodology.dimensionWeights[d.slug]?.combinedWeight ?? 0,
+      criteria: d.scoringSignals || [],
       strengths: d.findings.filter((f) => f.type === "positive").map((f) => f.evidence),
       problems: d.findings.filter((f) => f.type === "negative").map((f) => f.evidence),
       source: d.sources.join(", "),
@@ -258,9 +282,9 @@ export class BusinessIntelligenceLayer {
   private mapCategoryToDimension(category: string): string {
     const mapping: Record<string, string> = {
       presencia: "presencia",
-      ux: "presencia",
+      ux: "conversion",
       conversion: "conversion",
-      trust: "presencia",
+      trust: "posicionamiento",
       posicionamiento: "posicionamiento",
       propuesta: "propuesta",
       redes: "redes",

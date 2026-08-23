@@ -39,7 +39,7 @@ export const PLAZOS = [
   { id: "3m", label: "3 meses", dias: 90 },
   { id: "6m", label: "6 meses", dias: 180 },
   { id: "12m", label: "12 meses", dias: 365 },
-  { id: "custom", label: "Personalizado", dias: 0 },
+  { id: "custom", label: "Otro", dias: 0 },
 ] as const;
 
 export const RUBROS = [

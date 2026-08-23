@@ -226,10 +226,18 @@ export async function runFullAnalysis(businessId: string): Promise<RunAnalysisRe
 
     // Usar findings del BI layer para compatibilidad
     const legacyFindings = biLayer.getLegacyFindings(biResult);
+    const methodologicalWeights = biResult.nuvraScore.methodology.dimensionWeights;
     const scoreResult = {
       total: biResult.nuvraScore.total,
       dimensions: biLayer.getLegacyDimensions(biResult),
-      weights: { presencia: 0.16, conversion: 0.17, posicionamiento: 0.17, propuesta: 0.16, redes: 0.17, adquisicion: 0.17 },
+      weights: {
+        presencia: methodologicalWeights.presencia?.combinedWeight ?? 0,
+        conversion: methodologicalWeights.conversion?.combinedWeight ?? 0,
+        posicionamiento: methodologicalWeights.posicionamiento?.combinedWeight ?? 0,
+        propuesta: methodologicalWeights.propuesta?.combinedWeight ?? 0,
+        redes: methodologicalWeights.redes?.combinedWeight ?? 0,
+        adquisicion: methodologicalWeights.adquisicion?.combinedWeight ?? 0,
+      },
       allFindings: legacyFindings,
       coverage: biResult.coverage.total,
     };
@@ -284,13 +292,15 @@ export async function runFullAnalysis(businessId: string): Promise<RunAnalysisRe
       plazoLabel: goal.plazoLabel,
       descripcion: business.descripcion,
       publicoObjetivo: business.publicoObjetivo,
+      businessProfile: biResult.businessProfile,
     };
 
     const diagnosisStarted = Date.now();
     const diagnosisResult = await runDiagnosticEngine(
       businessContext,
       scoreResult,
-      legacyFindings
+      legacyFindings,
+      biResult.businessProfile
     );
     stageLog("7_diagnostic_engine", { businessId, total: scoreResult.total, coverage: scoreResult.coverage, summary: diagnosisResult.summary, bottleneck: diagnosisResult.bottleneck, priorities: diagnosisResult.priorities }, { startedAt: diagnosisStarted, endedAt: Date.now(), durationMs: Date.now() - diagnosisStarted });
 
@@ -364,13 +374,17 @@ export async function runFullAnalysis(businessId: string): Promise<RunAnalysisRe
       tipoCliente: inferredCustomerType,
       presupuesto: business.inversionMarketing,
       capacidad: business.empleados || business.tamano,
-      canales: business.canales || business.otrosCanales,
+      canales: [business.canales, business.otrosCanales].filter(Boolean).join(" ") || null,
+      descripcion: business.descripcion,
+      informacionComplementaria: business.otrosCanales,
+      businessProfile: biResult.businessProfile,
     };
     const strategyResult = await runStrategyEngine(
       strategyContext,
       diagnosisResult,
       scoreResult,
-      legacyFindings
+      legacyFindings,
+      biResult.businessProfile
     );
     stageLog("9_strategy_engine", { businessId, objective: strategyContext.objetivo, plazoDias: strategyContext.plazoDias, total: scoreResult.total, frameworks: strategyResult.frameworks, priorities: strategyResult.prioridades, principalProblema: strategyResult.principalProblema, siteType: siteTypeResult.siteType }, { startedAt: frameworksStarted, endedAt: Date.now(), durationMs: Date.now() - frameworksStarted });
 
@@ -410,7 +424,7 @@ export async function runFullAnalysis(businessId: string): Promise<RunAnalysisRe
         INSERT INTO "AnalysisHistory" ("id", "businessId", "scoreId", "diagnosisId", "strategyId", "websiteAnalysisId", "nuvraScoreTotal", "snapshot", "createdAt")
         VALUES (${historyId}, ${businessId}, ${scoreId}, ${diagnosis.id}, ${strategyId}, ${websiteAnalysis?.id || null}, ${scoreResult.total ?? null}, ${JSON.stringify({
           score: scoreResult.total,
-          dimensions: scoreResult.dimensions.map((d) => ({ slug: d.slug, points: d.points })),
+          dimensions: biResult.nuvraScore.dimensions.map((d) => ({ slug: d.slug, points: d.points, findings: d.findings.map((finding) => finding.id), scoringSignals: d.scoringSignals || [], weight: biResult.nuvraScore.methodology.dimensionWeights[d.slug] })),
           pagesAnalyzed: analysisResult.pagesAnalyzed,
           intelligence: {
             coverage: biResult.coverage.total,
@@ -418,6 +432,17 @@ export async function runFullAnalysis(businessId: string): Promise<RunAnalysisRe
             discoveredInstagram: discoveryResult.primaryInstagram,
             competitorSummary: biResult.aggregatedEvidence.sources.competitor?.data || null,
             externalMentionsSummary: biResult.aggregatedEvidence.sources.external_mentions?.data || null,
+          },
+          businessProfile: biResult.businessProfile,
+          analysisAudit: {
+            sources: Object.fromEntries(Object.entries(biResult.aggregatedEvidence.sources).map(([source, evidence]) => [source, { status: evidence.status, coverage: evidence.coverage, confidence: evidence.confidence, findings: evidence.findings.map((finding) => ({ id: finding.id, evidence: finding.evidence, type: finding.type, category: finding.category, attribution: finding.attribution })) }])),
+            inferences: biResult.businessProfile.inferenceTrace,
+            contextualFindings: biResult.businessProfile.contextualFindings,
+            scoreMethodology: biResult.nuvraScore.methodology,
+            selectedProblem: diagnosisResult.bottleneck,
+            selectedOpportunities: diagnosisResult.opportunities,
+            actionSelection: strategyResult.audit || { candidates: [] },
+            finalActions: strategyResult.actions.map((action) => ({ title: action.title, findingIds: action.findingIds, evidence: action.evidence, inference: action.inference, problem: action.problem })),
           },
           engineTypes: {
             diagnosis: diagnosisResult.engineType,

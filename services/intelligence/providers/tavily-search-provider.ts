@@ -1,4 +1,4 @@
-import { SearchProvider, SearchResult } from "./search-provider";
+import type { SearchProvider, SearchResult } from "./search-provider.ts";
 import type { Business } from "@prisma/client";
 
 interface TavilySearchResponse {

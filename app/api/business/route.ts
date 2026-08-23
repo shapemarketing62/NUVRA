@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { normalizeUrl } from "@/lib/utils";
 import { apiError, handleApiError, readJsonBody } from "@/lib/server/api-response";
@@ -9,33 +8,7 @@ import { getUsageLimit } from "@/lib/plans";
 import { writeAuditEvent } from "@/lib/server/audit";
 import { hasInternalAccess } from "@/lib/server/internal-access";
 import { parseInstagramProfile } from "@/lib/instagram-profile";
-
-const businessSchema = z.object({
-  nombre: z.string().trim().min(1).max(120),
-  rubro: z.string().trim().min(1).max(120),
-  descripcion: z.string().max(2000).optional(),
-  ubicacion: z.string().optional(),
-  ciudad: z.string().optional(),
-  pais: z.string().optional(),
-  tamano: z.string().optional(),
-  tipoCliente: z.string().optional(),
-  publicoObjetivo: z.string().optional(),
-  productosServicios: z.string().optional(),
-  ticketPromedio: z.number().optional().nullable(),
-  empleados: z.string().optional(),
-  webUrl: z.string().trim().max(2048).optional(),
-  instagramHandle: z.string().optional(),
-  otrosCanales: z.string().optional(),
-  canales: z.array(z.string()).optional(),
-  facturacion: z.number().optional().nullable(),
-  clientesMensuales: z.number().optional().nullable(),
-  inversionMarketing: z.number().optional().nullable(),
-  objetivo: z.string().min(1),
-  objetivoCustom: z.string().optional(),
-  magnitud: z.number().optional().nullable(),
-  plazoDias: z.number().min(1),
-  plazoLabel: z.string().min(1),
-});
+import { businessInputSchema } from "@/lib/business-input";
 
 export async function POST(req: NextRequest) {
   try {
@@ -45,7 +18,7 @@ export async function POST(req: NextRequest) {
     if (!membership) return apiError("forbidden", 403);
     if (!(await canConsume(membership.organizationId, "businesses", 1, auth.user.id))) return apiError("usage_limit_reached", 403);
     const body = await readJsonBody(req, 32_000);
-    const data = businessSchema.parse(body);
+    const data = businessInputSchema.parse(body);
 
     let webUrl: string | undefined;
     if (data.webUrl) {
@@ -72,6 +45,8 @@ export async function POST(req: NextRequest) {
         empleados: data.empleados,
         webUrl,
         instagramHandle: instagram?.url,
+        noWebDeclared: data.noWebDeclared,
+        noInstagramDeclared: data.noInstagramDeclared,
         otrosCanales: data.otrosCanales,
         canales: JSON.stringify(data.canales || []),
         facturacion: data.facturacion ?? undefined,

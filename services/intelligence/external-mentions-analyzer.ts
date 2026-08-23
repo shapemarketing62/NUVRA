@@ -55,7 +55,7 @@ export class ExternalMentionsSourceAnalyzer extends SourceAnalyzer {
     const objetivo = businessWithGoals.goals?.[0]?.objetivo?.toLowerCase() || "";
 
     let weight = 0.1;
-    let relevant = false;
+    let relevant = Boolean(businessWithGoals.nombre);
 
     // Menciones externas son relevantes para casi cualquier negocio
     if (/reconoc|marca|posicion|visibil|autoridad|presencia/i.test(objetivo)) {

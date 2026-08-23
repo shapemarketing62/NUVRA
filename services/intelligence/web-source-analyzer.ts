@@ -2,6 +2,7 @@ import { SourceAnalyzer, SourceEvidence, SourceRelevance, SourceType } from "./s
 import { analyzeWebsite } from "@/services/website-analyzer";
 import type { Business } from "@prisma/client";
 import type { RawFinding } from "@/services/website-analyzer/types";
+import { normalizeRawFindingType } from "./normalize-finding";
 
 interface BusinessWithGoals extends Business {
   goals?: Array<{ objetivo?: string }>;
@@ -85,7 +86,7 @@ export class WebSourceAnalyzer extends SourceAnalyzer {
         return {
           id: `web-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
           category: f.category,
-          type: f.type as "positive" | "negative" | "neutral",
+          type: normalizeRawFindingType(f.type),
           impact: (f.severity === "high" ? "high" : f.severity === "medium" ? "medium" : "low") as "high" | "medium" | "low",
           evidence: f.evidence,
           source: this.type,

@@ -286,6 +286,8 @@ model Business {
   empleados          String?
   webUrl             String?
   instagramHandle    String?
+  noWebDeclared      Boolean       @default(false)
+  noInstagramDeclared Boolean      @default(false)
   otrosCanales       String?
   canales            String?
   facturacion        Float?

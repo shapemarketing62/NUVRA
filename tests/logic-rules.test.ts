@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { calculateNuvraScore } from '../services/scoring/nuvra-score';
-import { runStrategyEngine } from '../services/strategy/strategy-engine';
-import { selectStrategicFrameworks } from '../services/strategy/strategic-frameworks';
-import { generateClarificationQuestions } from '../services/clarification/clarification-engine';
+import { calculateNuvraScore } from '../services/scoring/nuvra-score.ts';
+import { runStrategyEngine } from '../services/strategy/strategy-engine.ts';
+import { selectStrategicFrameworks } from '../services/strategy/strategic-frameworks.ts';
+import { generateClarificationQuestions } from '../services/clarification/clarification-engine.ts';
 
 test('presence digital cannot score 100 with insufficient coverage', () => {
   const findings = [

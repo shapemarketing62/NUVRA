@@ -26,6 +26,9 @@ const TECHNICAL_GLOSSARY: Array<[RegExp, string]> = [
   [/\bcustomer journey\b/gi, "recorrido de las personas antes de consultar o comprar"],
   [/\bengagement\b/gi, "nivel de interacción de las personas"],
   [/\bframeworks?\b/gi, "método de trabajo"],
+  [/\bperformance\b/gi, "rendimiento"],
+  [/\battribution\b/gi, "origen de los resultados"],
+  [/\bretención\b/gi, "capacidad de hacer que los clientes vuelvan"],
   [/\bconversión\b/gi, "capacidad de lograr consultas, reservas o compras"],
   [/\bpropuesta de valor\b/gi, "claridad de lo que ofrecés y por qué elegirte"],
   [/\bposicionamiento\b/gi, "diferencia frente a negocios parecidos"],
@@ -119,10 +122,11 @@ export function formatActionForBusiness(action: {
   const simplifiedDesc = simplifyTechnicalText(action.description || action.rationale || "");
   const simplifiedInference = simplifyTechnicalText(action.inference || action.rationale || "");
   const simplifiedProblem = simplifyTechnicalText(action.problem || "");
+  const simplifiedEvidence = simplifyTechnicalText(action.evidence || "");
   const simplifiedKpi = simplifyTechnicalText(action.indicatorToImprove || "");
 
   // 1. Qué problema hay
-  const problem = simplifiedProblem || simplifiedTitle;
+  const problem = simplifiedProblem || simplifiedEvidence || simplifiedTitle;
 
   // 2. Por qué importa
   const importance = simplifiedInference || "Resolver esto permite que más visitantes confíen en tu propuesta y avancen hacia la compra o consulta.";

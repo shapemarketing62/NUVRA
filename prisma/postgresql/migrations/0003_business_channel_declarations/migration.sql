@@ -1,0 +1,3 @@
+ALTER TABLE "Business"
+ADD COLUMN "noWebDeclared" BOOLEAN NOT NULL DEFAULT false,
+ADD COLUMN "noInstagramDeclared" BOOLEAN NOT NULL DEFAULT false;

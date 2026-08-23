@@ -1,9 +1,9 @@
-import { calculateNuvraScore } from "../services/scoring/nuvra-score";
-import { runDiagnosticEngine } from "../services/diagnostic/diagnostic-engine";
-import { runStrategyEngine } from "../services/strategy/strategy-engine";
-import { generateClarificationQuestions } from "../services/clarification/clarification-engine";
-import { selectStrategicFrameworks } from "../services/frameworks/strategic-framework-engine";
-import { classifySiteType } from "../services/scoring/site-type-classifier";
+import { calculateNuvraScore } from "../services/scoring/nuvra-score.ts";
+import { runDiagnosticEngine } from "../services/diagnostic/diagnostic-engine.ts";
+import { runStrategyEngine } from "../services/strategy/strategy-engine.ts";
+import { generateClarificationQuestions } from "../services/clarification/clarification-engine.ts";
+import { selectStrategicFrameworks } from "../services/frameworks/strategic-framework-engine.ts";
+import { classifySiteType } from "../services/scoring/site-type-classifier.ts";
 import type { RawFinding } from "../services/website-analyzer/types";
 
 const findings: RawFinding[] = [

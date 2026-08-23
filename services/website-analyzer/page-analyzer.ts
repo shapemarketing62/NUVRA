@@ -12,6 +12,16 @@ const TRUST_KEYWORDS = [
   "case study", "garantía", "certific", "confian", "trust", "partner",
 ];
 
+const COMMERCIAL_SIGNALS = [
+  { category: "propuesta", title: "Productos o servicios visibles", pattern: /servicio|producto|tratamiento|men[uú]|cat[aá]logo|especialidad/i, evidence: "La página muestra información sobre productos o servicios concretos." },
+  { category: "propuesta", title: "Precios o promociones visibles", pattern: /\$\s?\d|precio|promoci[oó]n|descuento|cuota/i, evidence: "La página publica precios, promociones o condiciones comerciales observables." },
+  { category: "presencia", title: "Horarios visibles", pattern: /horario|lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo/i, evidence: "La página muestra horarios o días de atención." },
+  { category: "conversion", title: "Información de entrega visible", pattern: /env[ií]o|entrega|retiro|despacho/i, evidence: "La página menciona información de envío, entrega o retiro." },
+  { category: "conversion", title: "Medios de pago visibles", pattern: /medio de pago|tarjeta|transferencia|mercado pago|efectivo|cuota/i, evidence: "La página muestra medios o condiciones de pago." },
+  { category: "trust", title: "Equipo o profesionales visibles", pattern: /nuestro equipo|profesionales|especialistas|staff|fundador|experiencia/i, evidence: "La página presenta al equipo, profesionales o experiencia del negocio." },
+  { category: "propuesta", title: "Preguntas frecuentes visibles", pattern: /preguntas frecuentes|frequently asked|\bfaq\b/i, evidence: "La página responde preguntas frecuentes antes de avanzar." },
+] as const;
+
 export function analyzePageHtml(url: string, html: string, loadTimeMs?: number): PageAnalysisData {
   const $ = cheerio.load(html);
   const findings: RawFinding[] = [];
@@ -71,6 +81,9 @@ export function analyzePageHtml(url: string, html: string, loadTimeMs?: number):
   }
 
   const textLower = text.toLowerCase();
+  for (const signal of COMMERCIAL_SIGNALS) {
+    if (signal.pattern.test(textLower)) findings.push(makeFinding(signal.category, "info", signal.title, signal.evidence, url, "html", "media"));
+  }
   const hasTrust = TRUST_KEYWORDS.some((k) => textLower.includes(k));
   if (!hasTrust) {
     findings.push(makeFinding("trust", "medium", "Señales de confianza limitadas", "No se detectaron testimonios, reseñas, casos o garantías en el contenido visible.", url, "html", "media"));

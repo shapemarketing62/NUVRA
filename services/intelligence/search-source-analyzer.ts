@@ -1,6 +1,6 @@
-import { SourceAnalyzer, SourceEvidence, SourceRelevance, SourceType, EvidenceFinding } from "./source-analyzer";
-import { SearchProvider, DuckDuckGoProvider, SearchResult } from "./providers/search-provider";
-import { TavilySearchProvider } from "./providers/tavily-search-provider";
+import { SourceAnalyzer, type SourceEvidence, type SourceRelevance, type SourceType, type EvidenceFinding } from "./source-analyzer.ts";
+import { DuckDuckGoProvider, type SearchProvider, type SearchResult } from "./providers/search-provider.ts";
+import { TavilySearchProvider } from "./providers/tavily-search-provider.ts";
 
 import type { Business } from "@prisma/client";
 
@@ -70,7 +70,7 @@ export class SearchSourceAnalyzer extends SourceAnalyzer {
     const isRestaurante = /restaurante|cafe|cafeter|comida|delivery|bar|pizza|burger|food/i.test(rubro);
     const isServicio = /servicio|consult|abogado|clinic|dent|psic|arquitect|agency|studio|profesional|salud|belleza|estetica/i.test(rubro);
     const isSaaS = /saas|software|platform|app|subscription|crm|b2b|tech|tecnolog/i.test(rubro);
-    const isLocal = isRestaurante || isServicio || /local|barrio|zona|ciudad/i.test(rubro);
+    const isLocal = Boolean(businessWithGoals.ubicacion || businessWithGoals.ciudad) || isRestaurante || isServicio || /local|barrio|zona|ciudad/i.test(rubro);
 
     let weight = 0.15;
     let relevant = false;
@@ -97,15 +97,32 @@ export class SearchSourceAnalyzer extends SourceAnalyzer {
     const nombre = businessWithGoals.nombre;
     const rubro = businessWithGoals.rubro || "";
     const webUrl = businessWithGoals.webUrl;
+    const ubicacion = businessWithGoals.ubicacion || businessWithGoals.ciudad || "";
 
     if (!nombre) {
       return this.unavailable("No se pudo obtener el nombre del negocio");
     }
 
     try {
-      // Usar el provider inyectado para obtener resultados de búsqueda
-      const query = `${nombre} ${rubro}`;
-      const results = await this.provider.search(query, business);
+      const queries = Array.from(new Set([
+        `${nombre} ${ubicacion}`.trim(),
+        `${nombre} ${rubro} ${ubicacion}`.trim(),
+        `${nombre} reseñas opiniones ${ubicacion}`.trim(),
+        `${rubro} ${ubicacion}`.trim(),
+      ])).filter(Boolean);
+      const collected: Array<{ result: SearchResult; query: string; kind: "brand" | "reviews" | "category" }> = [];
+      for (const query of queries) {
+        try {
+          const kind = /reseñas|opiniones/.test(query) ? "reviews" : query === `${rubro} ${ubicacion}`.trim() ? "category" : "brand";
+          const queryResults = await this.provider.search(query, business);
+          for (const result of queryResults) collected.push({ result, query, kind });
+        } catch (error) {
+          console.warn(`[SEARCH_ANALYZER] No se pudo completar la búsqueda "${query}":`, error instanceof Error ? error.message : String(error));
+        }
+      }
+      const resultMap = new Map<string, SearchResult>();
+      for (const item of collected) if (!resultMap.has(item.result.url)) resultMap.set(item.result.url, item.result);
+      const results = Array.from(resultMap.values());
 
       if (results.length === 0) {
         return this.unavailable("No se encontraron resultados de búsqueda para la marca");
@@ -115,24 +132,23 @@ export class SearchSourceAnalyzer extends SourceAnalyzer {
       const brandNameLower = nombre.toLowerCase();
       const domainLower = webUrl ? new URL(webUrl).hostname.replace("www.", "").toLowerCase() : "";
 
-      const brandMentions = results.filter(r => 
-        r.title.toLowerCase().includes(brandNameLower) || 
-        r.snippet.toLowerCase().includes(brandNameLower)
-      );
+      const brandMentions = results.filter(r => this.matchesEntity(r, nombre, rubro, ubicacion));
 
-      const domainMatches = results.filter(r => 
-        r.url.toLowerCase().includes(domainLower)
-      );
+      const domainMatches = domainLower ? results.filter(r => r.url.toLowerCase().includes(domainLower)) : [];
 
-      const topPosition = brandMentions.length > 0 
-        ? results.findIndex(r => r.title.toLowerCase().includes(brandNameLower) || r.snippet.toLowerCase().includes(brandNameLower)) + 1
-        : null;
+      const brandQueryResults = collected.filter((item) => item.kind === "brand").map((item) => item.result);
+      const brandIndex = brandQueryResults.findIndex(r => this.matchesEntity(r, nombre, rubro, ubicacion));
+      const topPosition = brandIndex >= 0 ? brandIndex + 1 : null;
 
       // Señales de autoridad (directorios conocidos)
       const authorityDomains = ["wikipedia.org", "linkedin.com", "crunchbase.com", "yelp.com", "tripadvisor.com", "facebook.com", "instagram.com", "trustpilot.com"];
-      const authoritySignals = results.filter(r => 
+      const authoritySignals = brandMentions.filter(r =>
         authorityDomains.some(d => r.url.includes(d))
       ).map(r => r.url);
+      const categoryResults = collected.filter((item) => item.kind === "category").map((item) => item.result);
+      const categoryMatches = categoryResults.filter((result) => this.matchesEntity(result, nombre, rubro, ubicacion));
+      const localDetails = brandMentions.filter((result) => /horario|abierto|direcci[oó]n|tel[eé]fono|whatsapp|maps|mapa/i.test(`${result.title} ${result.snippet}`));
+      const reviewMatches = collected.filter((item) => item.kind === "reviews" && this.matchesEntity(item.result, nombre, rubro, ubicacion));
 
       // Consistencia de información
       const consistencyScore = this.calculateConsistency(results, brandNameLower, domainLower);
@@ -145,8 +161,8 @@ export class SearchSourceAnalyzer extends SourceAnalyzer {
           "posicionamiento",
           "positive",
           brandMentions.length >= 3 ? "high" : "medium",
-          `La marca "${nombre}" aparece en ${brandMentions.length} de ${results.length} resultados de búsqueda para "${query}".`,
-          `Búsqueda: ${query}`,
+          `El negocio "${nombre}" aparece en ${brandMentions.length} resultados validados por nombre, rubro o ubicación.`,
+          `Búsquedas: ${queries.join(" | ")}`,
           0.5,
           brandMentions.length >= 3 ? "ALTA" : "MEDIA"
         ));
@@ -155,8 +171,8 @@ export class SearchSourceAnalyzer extends SourceAnalyzer {
           "posicionamiento",
           "negative",
           "high",
-          `La marca "${nombre}" no aparece en los primeros ${results.length} resultados de búsqueda para "${query}".`,
-          `Búsqueda: ${query}`,
+          `No se pudo validar la aparición de "${nombre}" en los resultados consultados por nombre, rubro y ubicación.`,
+          `Búsquedas: ${queries.join(" | ")}`,
           0.5,
           "ALTA"
         ));
@@ -168,7 +184,7 @@ export class SearchSourceAnalyzer extends SourceAnalyzer {
           "positive",
           "high",
           `La marca aparece en la posición ${topPosition} de los resultados de búsqueda.`,
-          `Búsqueda: ${query}`,
+          `Búsquedas de marca: ${queries.slice(0, 2).join(" | ")}`,
           0.4,
           "ALTA"
         ));
@@ -178,7 +194,7 @@ export class SearchSourceAnalyzer extends SourceAnalyzer {
           "positive",
           "medium",
           `La marca aparece en la posición ${topPosition} de los resultados de búsqueda.`,
-          `Búsqueda: ${query}`,
+          `Búsquedas de marca: ${queries.slice(0, 2).join(" | ")}`,
           0.4,
           "MEDIA"
         ));
@@ -188,7 +204,7 @@ export class SearchSourceAnalyzer extends SourceAnalyzer {
           "negative",
           "medium",
           `La marca no aparece en los primeros resultados de búsqueda.`,
-          `Búsqueda: ${query}`,
+          `Búsquedas de marca: ${queries.slice(0, 2).join(" | ")}`,
           0.4,
           "MEDIA"
         ));
@@ -200,7 +216,7 @@ export class SearchSourceAnalyzer extends SourceAnalyzer {
           "positive",
           "medium",
           `Se detectaron ${authoritySignals.length} señales de autoridad: ${authoritySignals.slice(0, 3).join(", ")}.`,
-          `Búsqueda: ${query}`,
+          `Búsquedas: ${queries.join(" | ")}`,
           0.3,
           "MEDIA"
         ));
@@ -212,10 +228,32 @@ export class SearchSourceAnalyzer extends SourceAnalyzer {
           "positive",
           "medium",
           `El dominio ${domainLower} aparece en ${domainMatches.length} resultados de búsqueda.`,
-          `Búsqueda: ${query}`,
+          `Búsquedas: ${queries.join(" | ")}`,
           0.3,
           "MEDIA"
         ));
+      }
+
+      if (categoryResults.length > 0) {
+        findings.push(this.generateFinding(
+          "adquisicion",
+          categoryMatches.length > 0 ? "positive" : "negative",
+          categoryMatches.length > 0 ? "high" : "medium",
+          categoryMatches.length > 0
+            ? `El negocio aparece cuando se busca su rubro en ${ubicacion || "su mercado"}.`
+            : `Se encontraron resultados para el rubro en ${ubicacion || "su mercado"}, pero no se pudo validar al negocio entre ellos.`,
+          `Búsqueda por categoría: ${rubro} ${ubicacion}`.trim(),
+          0.55,
+          categoryMatches.length > 0 ? "ALTA" : "MEDIA"
+        ));
+      }
+
+      if (localDetails.length > 0) {
+        findings.push(this.generateFinding("presencia", "positive", "medium", `Se encontraron datos comerciales públicos —como ubicación, horario o contacto— asociados al negocio en ${localDetails.length} resultado(s).`, localDetails[0].url, 0.5, "MEDIA"));
+      }
+
+      if (reviewMatches.length > 0) {
+        findings.push(this.generateFinding("trust", "positive", "medium", `Se encontraron resultados de opiniones asociados al negocio correcto.`, reviewMatches[0].result.url, 0.45, "MEDIA"));
       }
 
       // Calcular coverage basado en cuántos resultados se obtuvieron
@@ -226,7 +264,7 @@ export class SearchSourceAnalyzer extends SourceAnalyzer {
         source: this.type,
         status: "evaluated",
         data: {
-          query,
+          queries,
           results,
           brandMentions: brandMentions.length,
           topPosition,
@@ -240,7 +278,7 @@ export class SearchSourceAnalyzer extends SourceAnalyzer {
         evaluatedAt: new Date(),
         requiresAuth: false,
         metadata: {
-          query,
+          queries,
           resultsCount: results.length,
           brandMentions: brandMentions.length,
           topPosition,
@@ -251,6 +289,18 @@ export class SearchSourceAnalyzer extends SourceAnalyzer {
     } catch (error) {
       return this.unavailable(error instanceof Error ? error.message : String(error));
     }
+  }
+
+  private matchesEntity(result: SearchResult, businessName: string, rubro: string, location: string): boolean {
+    const normalize = (value: string) => value.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+    const text = normalize(`${result.title} ${result.snippet} ${result.url}`);
+    const name = normalize(businessName);
+    const nameTokens = name.split(" ").filter((token) => token.length > 2);
+    const matchedNameTokens = nameTokens.filter((token) => text.includes(token));
+    const nameMatch = text.includes(name) || (nameTokens.length > 0 && matchedNameTokens.length / nameTokens.length >= 0.75);
+    if (!nameMatch) return false;
+    const contextTokens = normalize(`${rubro} ${location}`).split(" ").filter((token) => token.length > 3);
+    return contextTokens.length === 0 || contextTokens.some((token) => text.includes(token)) || text.includes(name);
   }
 
   private calculateConsistency(results: Array<{ title: string; url: string; snippet: string }>, brandName: string, domain: string): number {

@@ -159,9 +159,7 @@ export default function EstrategiaPage() {
             </div>
             <div>
               <div style={{ fontSize: 13, color: COLORS.inkSoft }}>Nuvra Score actual</div>
-              <div style={{ fontSize: 12, color: COLORS.inkFaint }}>
-                Basado en {score.dimensions.filter((item) => item.points !== null && item.points >= 0).length} áreas con información comprobable
-              </div>
+              <div style={{ fontSize: 12, color: COLORS.inkFaint }}>Calculado con la información disponible del negocio</div>
             </div>
           </div>
         </div>

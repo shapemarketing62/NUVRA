@@ -6,20 +6,15 @@ import { DEMO_BUSINESS, DEMO_SCORE, DEMO_DIAGNOSIS, DEMO_ACTIONS } from "@/lib/d
 import { parseJsonSafe } from "@/lib/utils";
 import { getApiErrorMessage } from "@/lib/api-client";
 
-const LIMITED_AREA_SCORES: Record<string, number> = { presencia: 50, conversion: 40, posicionamiento: 30, propuesta: 40, redes: 30, adquisicion: 35, retencion: 45 };
 const AREA_NAMES: Record<string, string> = { presencia: "Presencia Digital", conversion: "Conversión", posicionamiento: "Posicionamiento", propuesta: "Propuesta de Valor", redes: "Redes Sociales", adquisicion: "Adquisición", retencion: "Clientes que vuelven" };
-const displayAreaScore = (slug: string, points: number | null | undefined) => points === null || points === undefined || points < 0 ? (LIMITED_AREA_SCORES[slug] ?? 40) : points;
 const normalizeAreaScores = (dimensions: Array<{ slug: string; name: string; points: number | null | undefined; weight?: number; problems?: string[] }>) =>
-  Object.keys(LIMITED_AREA_SCORES).map((slug) => {
-    const existing = dimensions.find((dimension) => dimension.slug === slug);
-    return {
-      slug,
-      name: existing?.name || AREA_NAMES[slug],
-      points: displayAreaScore(slug, existing?.points),
-      weight: existing?.weight ?? 0,
-      problems: existing?.problems,
-    };
-  });
+  dimensions.filter((dimension) => dimension.points !== null && dimension.points !== undefined && dimension.points >= 0).map((dimension) => ({
+    slug: dimension.slug,
+    name: dimension.name || AREA_NAMES[dimension.slug],
+    points: dimension.points as number,
+    weight: dimension.weight ?? 0,
+    problems: dimension.problems,
+  }));
 
 export interface DashboardData {
   isDemo: boolean;
@@ -212,12 +207,12 @@ export function useDashboardData(): DashboardData {
             : null,
           score: score
             ? {
-                total: score.total ?? Math.round(score.dimensions.reduce((sum: number, item: { slug: string; points: number }) => sum + displayAreaScore(item.slug, item.points), 0) / Math.max(1, score.dimensions.length)),
+                total: score.total ?? Math.round(score.dimensions.reduce((sum: number, item: { points: number }) => sum + item.points, 0) / Math.max(1, score.dimensions.length)),
                 coverage: snapshot?.intelligence?.coverage || 0,
                 dimensions: normalizeAreaScores(score.dimensions.map((d: { slug: string; name: string; points: number; weight: number; problems: string }) => ({
                   slug: d.slug,
                   name: d.name,
-                  points: displayAreaScore(d.slug, d.points),
+                  points: d.points,
                   weight: d.weight,
                   problems: parseJsonSafe<string[]>(d.problems, []),
                 }))),

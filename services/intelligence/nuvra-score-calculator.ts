@@ -1,5 +1,6 @@
 import type { AggregatedEvidence, CoverageResult } from "./evidence-aggregator";
 import type { EvidenceFinding, SourceType } from "./source-analyzer";
+import type { BusinessProfile } from "./business-profile";
 
 export type NuvraScoreStatus = "pending" | "preliminary" | "complete";
 
@@ -19,7 +20,7 @@ export interface NuvraScoreResult {
     objectiveRelevanceCovered: number;
     evidenceQuality: number;
     readiness: number;
-    dimensionWeights: Record<string, { objectiveRelevance: number; evidenceQuality: number; combinedWeight: number }>;
+    dimensionWeights: Record<string, { objectiveRelevance: number; businessRelevance: number; evidenceQuality: number; combinedWeight: number }>;
   };
 }
 
@@ -32,33 +33,37 @@ export interface NuvraDimension {
   findings: EvidenceFinding[];
   message?: string;
   estimatedFromLimitedEvidence?: boolean;
+  scoringSignals?: Array<{ label: string; effect: number; basis: "observed" | "declared" | "contextual" }>;
 }
 
 export class NuvraScoreCalculator {
   static calculate(
     aggregatedEvidence: AggregatedEvidence,
     coverage: CoverageResult,
-    context: { objective?: string } = {}
+    context: { objective?: string; businessProfile?: BusinessProfile } = {}
   ): NuvraScoreResult {
     const findings = aggregatedEvidence.findings;
     const byDimension = aggregatedEvidence.byDimension;
 
     // Las dimensiones mantienen sus propias reglas de evidencia. La cobertura
     // general no debe descartar dimensiones que sí pudieron evaluarse.
-    const dimensions = this.calculateDimensions(byDimension, aggregatedEvidence.sources, context.objective || "");
+    const dimensions = this.calculateDimensions(byDimension, aggregatedEvidence.sources, context.objective || "", context.businessProfile);
     const evaluableDimensions = dimensions.filter(d => d.points !== null);
     const evidenceBackedDimensions = dimensions.filter(d => d.findings.length > 0 && !d.estimatedFromLimitedEvidence);
-    const objectiveWeights = this.getObjectiveWeights(context.objective || "");
-    const dimensionWeights = Object.fromEntries(dimensions.map(d => {
+    const objectiveWeights = this.getObjectiveWeights(context.objective || "", context.businessProfile);
+    const rawDimensionWeights = Object.fromEntries(dimensions.map(d => {
       const objectiveRelevance = objectiveWeights[d.slug] ?? 0;
+      const businessRelevance = context.businessProfile?.areaRelevance[d.slug]?.businessRelevance ?? 0.7;
       const evidenceQuality = this.calculateEvidenceQuality(d);
-      return [d.slug, { objectiveRelevance, evidenceQuality, combinedWeight: objectiveRelevance * evidenceQuality }];
+      return [d.slug, { objectiveRelevance, businessRelevance, evidenceQuality, combinedWeight: objectiveRelevance * (0.4 + 0.6 * businessRelevance) }];
     }));
-    const objectiveRelevanceCovered = evidenceBackedDimensions.reduce((sum, d) => sum + (objectiveWeights[d.slug] ?? 0), 0);
+    const combinedTotal = Object.values(rawDimensionWeights).reduce((sum, weight) => sum + weight.combinedWeight, 0) || 1;
+    const dimensionWeights = Object.fromEntries(Object.entries(rawDimensionWeights).map(([slug, weight]) => [slug, { ...weight, combinedWeight: weight.combinedWeight / combinedTotal }]));
+    const objectiveRelevanceCovered = evidenceBackedDimensions.reduce((sum, d) => sum + dimensionWeights[d.slug].combinedWeight, 0);
     const evidenceQuality = objectiveRelevanceCovered > 0
-      ? evidenceBackedDimensions.reduce((sum, d) => sum + (objectiveWeights[d.slug] ?? 0) * dimensionWeights[d.slug].evidenceQuality, 0) / objectiveRelevanceCovered
+      ? evidenceBackedDimensions.reduce((sum, d) => sum + dimensionWeights[d.slug].combinedWeight * dimensionWeights[d.slug].evidenceQuality, 0) / objectiveRelevanceCovered
       : 0;
-    const relevanceShares = evidenceBackedDimensions.map(d => objectiveWeights[d.slug] ?? 0).filter(Boolean);
+    const relevanceShares = evidenceBackedDimensions.map(d => dimensionWeights[d.slug].combinedWeight).filter(Boolean);
     const relevanceTotal = relevanceShares.reduce((sum, value) => sum + value, 0);
     const effectiveDimensionDiversity = relevanceTotal > 0
       ? 1 / relevanceShares.reduce((sum, value) => sum + Math.pow(value / relevanceTotal, 2), 0)
@@ -81,12 +86,12 @@ export class NuvraScoreCalculator {
     if (evaluableDimensions.length > 0) {
       // Ponderar por relevancia para el objetivo y calidad de la evidencia.
       const weightedSum = evaluableDimensions.reduce((acc, d) => {
-        const qualityAdjustedWeight = (objectiveWeights[d.slug] ?? 0) * (0.25 + 0.75 * dimensionWeights[d.slug].evidenceQuality);
+        const qualityAdjustedWeight = dimensionWeights[d.slug].combinedWeight * (0.25 + 0.75 * dimensionWeights[d.slug].evidenceQuality);
         return acc + (d.points || 0) * qualityAdjustedWeight;
       }, 0);
       
       const totalWeight = evaluableDimensions.reduce((acc, d) => {
-        return acc + (objectiveWeights[d.slug] ?? 0) * (0.25 + 0.75 * dimensionWeights[d.slug].evidenceQuality);
+        return acc + dimensionWeights[d.slug].combinedWeight * (0.25 + 0.75 * dimensionWeights[d.slug].evidenceQuality);
       }, 0);
 
       total = totalWeight > 0 ? Math.round(weightedSum / totalWeight) : 40;
@@ -149,7 +154,12 @@ export class NuvraScoreCalculator {
     return Math.round((averageConfidence * 0.5 + depth * 0.3 + sourceDiversity * 0.2) * 100) / 100;
   }
 
-  private static getObjectiveWeights(objective: string): Record<string, number> {
+  private static getObjectiveWeights(objective: string, profile?: BusinessProfile): Record<string, number> {
+    if (profile) {
+      const raw = Object.fromEntries(Object.entries(profile.areaRelevance).map(([area, relevance]) => [area, relevance.goalRelevance]));
+      const total = Object.values(raw).reduce((sum, value) => sum + value, 0);
+      if (total > 0) return Object.fromEntries(Object.entries(raw).map(([area, value]) => [area, value / total]));
+    }
     const text = objective.toLowerCase();
     if (/volver|recompra|recurren|fideliza|clientes actuales/.test(text)) {
       return { presencia: 0.08, conversion: 0.16, posicionamiento: 0.1, propuesta: 0.1, redes: 0.08, adquisicion: 0.08, retencion: 0.4 };
@@ -169,62 +179,45 @@ export class NuvraScoreCalculator {
   private static calculateDimensions(
     byDimension: Record<string, EvidenceFinding[]>,
     sources: Record<string, any>,
-    objective: string
+    objective: string,
+    profile?: BusinessProfile
   ): NuvraDimension[] {
     const dimensions: NuvraDimension[] = [
-      this.calculatePresenciaDimension(byDimension.presencia || [], sources),
-      this.calculateConversionDimension(byDimension.conversion || [], sources),
-      this.calculatePosicionamientoDimension(byDimension.posicionamiento || [], sources),
-      this.calculatePropuestaDimension(byDimension.propuesta || [], sources),
-      this.calculateRedesDimension(byDimension.redes || [], sources),
-      this.calculateAdquisicionDimension(byDimension.adquisicion || [], sources),
+      this.calculatePresenciaDimension(byDimension.presencia || [], sources, profile),
+      this.calculateConversionDimension(byDimension.conversion || [], sources, profile),
+      this.calculatePosicionamientoDimension(byDimension.posicionamiento || [], sources, profile),
+      this.calculatePropuestaDimension(byDimension.propuesta || [], sources, profile),
+      this.calculateRedesDimension(byDimension.redes || [], sources, profile),
+      this.calculateAdquisicionDimension(byDimension.adquisicion || [], sources, profile),
     ];
 
-    dimensions.push(this.calculateRetentionDimension(byDimension.retencion || []));
+    dimensions.push(this.calculateRetentionDimension(byDimension.retencion || [], profile));
 
     return dimensions;
   }
 
-  private static calculateRetentionDimension(findings: EvidenceFinding[]): NuvraDimension {
+  private static calculateRetentionDimension(findings: EvidenceFinding[], profile?: BusinessProfile): NuvraDimension {
     findings = this.deduplicateSemanticFindings(findings);
     const sources = Array.from(new Set(findings.map((finding) => finding.source)));
-    if (!findings.length) return { name: "Qué hacés para que los clientes vuelvan", slug: "retencion", points: 45, confidence: "INSUFICIENTE", sources, findings: [], message: "Resultado estimado con la información disponible.", estimatedFromLimitedEvidence: true };
-    let score = 45;
-    for (const finding of findings) score += finding.type === "positive" ? 10 : finding.type === "negative" ? (finding.impact === "high" ? -15 : -8) : 0;
+    if (!findings.length) return this.estimateDimension("retencion", "Qué hacés para que los clientes vuelvan", sources, profile);
+    const score = this.scoreObservedFindings(findings);
     return { name: "Qué hacés para que los clientes vuelvan", slug: "retencion", points: Math.max(0, Math.min(100, score)), confidence: this.calculateDimensionConfidence(findings, sources), sources, findings };
   }
 
   private static calculatePresenciaDimension(
     findings: EvidenceFinding[],
-    sources: Record<string, any>
+    sources: Record<string, any>,
+    profile?: BusinessProfile
   ): NuvraDimension {
     const sourceTypes = this.getSourceTypes(findings, sources);
     findings = this.deduplicateSemanticFindings(findings);
     const confidence = this.calculateDimensionConfidence(findings, sourceTypes);
 
     if (findings.length === 0) {
-      return {
-        name: "Qué tan fácil es encontrarte",
-        slug: "presencia",
-        points: 50,
-        confidence: "INSUFICIENTE",
-        sources: sourceTypes,
-        findings: [],
-        message: "Resultado estimado con la información disponible.",
-        estimatedFromLimitedEvidence: true,
-      };
+      return this.estimateDimension("presencia", "Qué tan fácil es encontrarte", sourceTypes, profile);
     }
 
-    let score = 50; // Base más baja para Nuvra Score (no asume presencia)
-    for (const f of findings) {
-      if (f.type === "negative") {
-        if (f.impact === "high") score -= 10;
-        else if (f.impact === "medium") score -= 5;
-        else score -= 2;
-      } else if (f.type === "positive") {
-        score += 8;
-      }
-    }
+    const score = this.scoreObservedFindings(findings);
 
     return {
       name: "Qué tan fácil es encontrarte",
@@ -238,35 +231,18 @@ export class NuvraScoreCalculator {
 
   private static calculateConversionDimension(
     findings: EvidenceFinding[],
-    sources: Record<string, any>
+    sources: Record<string, any>,
+    profile?: BusinessProfile
   ): NuvraDimension {
     const sourceTypes = this.getSourceTypes(findings, sources);
     findings = this.deduplicateSemanticFindings(findings);
     const confidence = this.calculateDimensionConfidence(findings, sourceTypes);
 
     if (findings.length === 0) {
-      return {
-        name: "Qué tan fácil es consultar, reservar o comprar",
-        slug: "conversion",
-        points: 40,
-        confidence: "INSUFICIENTE",
-        sources: sourceTypes,
-        findings: [],
-        message: "Resultado estimado con la información disponible.",
-        estimatedFromLimitedEvidence: true,
-      };
+      return this.estimateDimension("conversion", "Qué tan fácil es consultar, reservar o comprar", sourceTypes, profile);
     }
 
-    let score = 40; // Base más baja
-    for (const f of findings) {
-      if (f.type === "negative") {
-        if (f.impact === "high") score -= 15;
-        else if (f.impact === "medium") score -= 8;
-        else score -= 4;
-      } else if (f.type === "positive") {
-        score += 10;
-      }
-    }
+    const score = this.scoreObservedFindings(findings);
 
     return {
       name: "Qué tan fácil es consultar, reservar o comprar",
@@ -280,35 +256,18 @@ export class NuvraScoreCalculator {
 
   private static calculatePosicionamientoDimension(
     findings: EvidenceFinding[],
-    sources: Record<string, any>
+    sources: Record<string, any>,
+    profile?: BusinessProfile
   ): NuvraDimension {
     const sourceTypes = this.getSourceTypes(findings, sources);
     findings = this.deduplicateSemanticFindings(findings);
     const confidence = this.calculateDimensionConfidence(findings, sourceTypes);
 
     if (findings.length === 0) {
-      return {
-        name: "Qué tanta confianza y diferenciación generás",
-        slug: "posicionamiento",
-        points: 30,
-        confidence: "INSUFICIENTE",
-        sources: sourceTypes,
-        findings: [],
-        message: "Resultado estimado con la información disponible.",
-        estimatedFromLimitedEvidence: true,
-      };
+      return this.estimateDimension("posicionamiento", "Qué tanta confianza y diferenciación generás", sourceTypes, profile);
     }
 
-    let score = 30; // Base muy baja - posicionamiento no se asume
-    for (const f of findings) {
-      if (f.type === "negative") {
-        if (f.impact === "high") score -= 10;
-        else if (f.impact === "medium") score -= 5;
-        else score -= 2;
-      } else if (f.type === "positive") {
-        score += 12; // Signals de posicionamiento valen más
-      }
-    }
+    const score = this.scoreObservedFindings(findings);
 
     return {
       name: "Qué tanta confianza y diferenciación generás",
@@ -322,35 +281,18 @@ export class NuvraScoreCalculator {
 
   private static calculatePropuestaDimension(
     findings: EvidenceFinding[],
-    sources: Record<string, any>
+    sources: Record<string, any>,
+    profile?: BusinessProfile
   ): NuvraDimension {
     const sourceTypes = this.getSourceTypes(findings, sources);
     findings = this.deduplicateSemanticFindings(findings);
     const confidence = this.calculateDimensionConfidence(findings, sourceTypes);
 
     if (findings.length === 0) {
-      return {
-        name: "Qué tan claro queda lo que ofrecés",
-        slug: "propuesta",
-        points: 40,
-        confidence: "INSUFICIENTE",
-        sources: sourceTypes,
-        findings: [],
-        message: "Resultado estimado con la información disponible.",
-        estimatedFromLimitedEvidence: true,
-      };
+      return this.estimateDimension("propuesta", "Qué tan claro queda lo que ofrecés", sourceTypes, profile);
     }
 
-    let score = 40; // Base más baja
-    for (const f of findings) {
-      if (f.type === "negative") {
-        if (f.impact === "high") score -= 15;
-        else if (f.impact === "medium") score -= 8;
-        else score -= 4;
-      } else if (f.type === "positive") {
-        score += 10;
-      }
-    }
+    const score = this.scoreObservedFindings(findings);
 
     return {
       name: "Qué tan claro queda lo que ofrecés",
@@ -364,7 +306,8 @@ export class NuvraScoreCalculator {
 
   private static calculateRedesDimension(
     findings: EvidenceFinding[],
-    sources: Record<string, any>
+    sources: Record<string, any>,
+    profile?: BusinessProfile
   ): NuvraDimension {
     const sourceTypes = this.getSourceTypes(findings, sources);
     findings = this.deduplicateSemanticFindings(findings);
@@ -372,41 +315,14 @@ export class NuvraScoreCalculator {
 
     // Redes requiere fuente de redes
     if (!sourceTypes.includes("instagram") && !sourceTypes.includes("x")) {
-      return {
-        name: "Qué tan útiles están siendo tus redes",
-        slug: "redes",
-        points: 30,
-        confidence: "INSUFICIENTE",
-        sources: sourceTypes,
-        findings,
-        message: "Resultado estimado con la información disponible.",
-        estimatedFromLimitedEvidence: true,
-      };
+      return this.estimateDimension("redes", "Qué tan útiles están siendo tus redes", sourceTypes, profile);
     }
 
     if (findings.length === 0) {
-      return {
-        name: "Qué tan útiles están siendo tus redes",
-        slug: "redes",
-        points: 30,
-        confidence: "INSUFICIENTE",
-        sources: sourceTypes,
-        findings: [],
-        message: "Resultado estimado con la información disponible.",
-        estimatedFromLimitedEvidence: true,
-      };
+      return this.estimateDimension("redes", "Qué tan útiles están siendo tus redes", sourceTypes, profile);
     }
 
-    let score = 30; // Base muy baja
-    for (const f of findings) {
-      if (f.type === "negative") {
-        if (f.impact === "high") score -= 10;
-        else if (f.impact === "medium") score -= 5;
-        else score -= 2;
-      } else if (f.type === "positive") {
-        score += 12;
-      }
-    }
+    const score = this.scoreObservedFindings(findings);
 
     return {
       name: "Qué tan útiles están siendo tus redes",
@@ -420,35 +336,18 @@ export class NuvraScoreCalculator {
 
   private static calculateAdquisicionDimension(
     findings: EvidenceFinding[],
-    sources: Record<string, any>
+    sources: Record<string, any>,
+    profile?: BusinessProfile
   ): NuvraDimension {
     const sourceTypes = this.getSourceTypes(findings, sources);
     findings = this.deduplicateSemanticFindings(findings);
     const confidence = this.calculateDimensionConfidence(findings, sourceTypes);
 
     if (findings.length === 0) {
-      return {
-        name: "Qué capacidad tenés para atraer demanda",
-        slug: "adquisicion",
-        points: 35,
-        confidence: "INSUFICIENTE",
-        sources: sourceTypes,
-        findings: [],
-        message: "Resultado estimado con la información disponible.",
-        estimatedFromLimitedEvidence: true,
-      };
+      return this.estimateDimension("adquisicion", "Qué capacidad tenés para atraer demanda", sourceTypes, profile);
     }
 
-    let score = 35; // Base más baja
-    for (const f of findings) {
-      if (f.type === "negative") {
-        if (f.impact === "high") score -= 12;
-        else if (f.impact === "medium") score -= 6;
-        else score -= 3;
-      } else if (f.type === "positive") {
-        score += 10;
-      }
-    }
+    const score = this.scoreObservedFindings(findings);
 
     return {
       name: "Qué capacidad tenés para atraer demanda",
@@ -466,6 +365,60 @@ export class NuvraScoreCalculator {
       types.add(f.source);
     }
     return Array.from(types);
+  }
+
+  private static scoreObservedFindings(findings: EvidenceFinding[]): number {
+    const impactValue = { high: 18, medium: 12, low: 7 } as const;
+    const confidenceValue = { ALTA: 1, MEDIA: 0.8, BAJA: 0.6 } as const;
+    const score = findings.reduce((total, finding) => {
+      if (finding.type === "neutral") return total;
+      const direction = finding.type === "positive" ? 1 : -1;
+      const evidenceWeight = 0.75 + 0.25 * Math.max(0, Math.min(1, finding.weight));
+      return total + direction * impactValue[finding.impact] * confidenceValue[finding.confidence] * evidenceWeight;
+    }, 50);
+    return Math.max(5, Math.min(95, Math.round(score)));
+  }
+
+  private static estimateDimension(slug: string, name: string, sources: SourceType[], profile?: BusinessProfile): NuvraDimension {
+    const signals: NonNullable<NuvraDimension["scoringSignals"]> = [];
+    const add = (label: string, effect: number, basis: "observed" | "declared" | "contextual") => signals.push({ label, effect, basis });
+    if (profile) {
+      const active = new Set(profile.activeChannels);
+      const declared = profile.declaredSignals;
+      if (slug === "presencia") {
+        if (profile.location) add("Ubicación declarada", 5, "declared");
+        if (active.has("search")) add("Presencia encontrada en búsquedas", 8, "observed");
+        if (active.has("external_mentions")) add("Menciones externas útiles", 4, "observed");
+        if (profile.localDependency === "high" && !profile.location) add("Negocio local sin ubicación declarada", -8, "contextual");
+      } else if (slug === "conversion") {
+        if (profile.contactMethods.length) add(`Formas de contacto identificadas: ${profile.contactMethods.join(", ")}`, Math.min(9, 3 + profile.contactMethods.length * 2), "observed");
+        if (profile.channelDeclarations.web === "absent" && profile.channelDeclarations.instagram === "absent" && !profile.contactMethods.length) add("No hay un canal de avance declarado", -8, "declared");
+        if (declared.some((signal) => signal.type === "demand_pattern")) add("Existe un problema de demanda declarado", -6, "declared");
+      } else if (slug === "posicionamiento") {
+        if (profile.trustSignals.length) add("Señales de confianza observadas", Math.min(10, 4 + profile.trustSignals.length * 2), "observed");
+        if (profile.competitorsDetected > 0) add("Hay alternativas verificadas para contextualizar la elección", 2, "observed");
+        if (!profile.trustSignals.length && profile.commercialModel === "professional") add("Servicio profesional sin prueba observada", -6, "contextual");
+      } else if (slug === "propuesta") {
+        if (profile.offerings.length) add("Oferta explicada por el negocio", Math.min(10, 5 + profile.offerings.length * 2), "declared");
+        if (profile.audienceSignals.length) add("Público indicado", 5, "declared");
+        if (!profile.offerings.length) add("No se aportó una descripción concreta de la oferta", -7, "declared");
+      } else if (slug === "redes") {
+        if (active.has("instagram")) add("Instagram identificado", 4, "observed");
+        if (profile.channelDeclarations.instagram === "absent") add("El negocio declaró no tener Instagram", profile.commercialModel === "commerce" || profile.localDependency === "high" ? -5 : -2, "declared");
+        if (profile.channelDeclarations.instagram === "unknown") add("No se informó ni se confirmó Instagram", -2, "contextual");
+      } else if (slug === "adquisicion") {
+        const discoveryChannels = ["search", "external_mentions", "reviews", "competitor"].filter((source) => active.has(source as SourceType));
+        if (discoveryChannels.length) add(`Canales de descubrimiento observados: ${discoveryChannels.join(", ")}`, Math.min(10, discoveryChannels.length * 3), "observed");
+        if (declared.some((signal) => signal.type === "referrals")) add("Referidos declarados como origen de clientes", 7, "declared");
+        if (!discoveryChannels.length && !declared.some((signal) => signal.type === "referrals" || signal.type === "channel")) add("No se identificó todavía cómo llegan nuevos clientes", -6, "contextual");
+      } else if (slug === "retencion") {
+        if (declared.some((signal) => signal.type === "follow_up")) add("Seguimiento declarado", 9, "declared");
+        if (profile.recurrence === "frequent" || profile.recurrence === "membership" || profile.recurrence === "periodic") add("El modelo admite recurrencia", 3, "contextual");
+        if (!declared.some((signal) => signal.type === "follow_up") && /volver|recompra|renuev|fidel/i.test(profile.goal.text)) add("El objetivo requiere volver a contactar clientes y no se declaró un mecanismo", -8, "contextual");
+      }
+    }
+    const points = Math.max(25, Math.min(75, Math.round(50 + signals.reduce((sum, signal) => sum + signal.effect, 0))));
+    return { name, slug, points, confidence: "INSUFICIENTE", sources, findings: [], message: "Resultado estimado con la información disponible.", estimatedFromLimitedEvidence: true, scoringSignals: signals };
   }
 
   private static deduplicateSemanticFindings(findings: EvidenceFinding[]): EvidenceFinding[] {

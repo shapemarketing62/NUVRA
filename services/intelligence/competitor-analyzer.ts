@@ -59,8 +59,8 @@ export class CompetitorSourceAnalyzer extends SourceAnalyzer {
     const rubro = businessWithGoals.rubro?.toLowerCase() || "";
     const objetivo = businessWithGoals.goals?.[0]?.objetivo?.toLowerCase() || "";
 
-    let weight = 0.1;
-    let relevant = false;
+    let weight = businessWithGoals.ubicacion ? 0.15 : 0.1;
+    let relevant = Boolean(businessWithGoals.nombre && businessWithGoals.rubro);
 
     if (/competidor|posicion|diferencial|ventaja|vs|ranking/i.test(objetivo)) {
       weight = 0.15;
