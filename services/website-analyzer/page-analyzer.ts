@@ -1,5 +1,5 @@
 import * as cheerio from "cheerio";
-import type { PageAnalysisData, RawFinding } from "./types";
+import type { PageActionSignal, PageAnalysisData, PageFormSignal, RawFinding, WebsiteJourneyIntent } from "./types";
 
 const CTA_PATTERNS = [
   /compr/i, /contact/i, /consult/i, /reserv/i, /whatsapp/i, /pedi/i, /orden/i,
@@ -75,9 +75,6 @@ export function analyzePageHtml(url: string, html: string, loadTimeMs?: number):
   if (forms.length > 0) {
     const fields = forms.find("input, textarea, select").length;
     findings.push(makeFinding("conversion", "info", "Formulario detectado", `${forms.length} formulario(s) con ~${fields} campos.`, url, "html", "alta"));
-    if (fields > 8) {
-      findings.push(makeFinding("conversion", "medium", "Formulario extenso", `Formulario con ${fields} campos — puede reducir conversión.`, url, "html", "alta"));
-    }
   }
 
   const textLower = text.toLowerCase();
@@ -116,6 +113,10 @@ export function analyzePageHtml(url: string, html: string, loadTimeMs?: number):
     findings.push(makeFinding("presencia", "info", "Tiempo de carga aceptable", `Carga en ${(loadTimeMs / 1000).toFixed(1)}s.`, url, "playwright", "alta"));
   }
 
+  const actionSignals = collectActionSignals($, url);
+  const formSignals = collectFormSignals($, url);
+  const brandSignals = collectBrandSignals($, html, title, metaDesc);
+
   return {
     url,
     title,
@@ -135,7 +136,83 @@ export function analyzePageHtml(url: string, html: string, loadTimeMs?: number):
     loadTimeMs,
     findings,
     htmlLength: html.length,
+    actionSignals,
+    formSignals,
+    brandSignals,
   };
+}
+
+function inferIntent(text: string, href = ""): WebsiteJourneyIntent | null {
+  const value = `${text} ${href}`.toLowerCase();
+  if (/presupuesto|cotiz|quote/.test(value)) return "quote";
+  if (/turno|agend|appointment/.test(value)) return "appointment";
+  if (/reserv|book|mesa/.test(value)) return "reserve";
+  if (/compr|carrito|checkout|tienda|shop|order|pedido/.test(value)) return "buy";
+  if (/contact|consult|whatsapp|escrib|llam|tel:|mailto:|wa\.me/.test(value)) return "contact";
+  return null;
+}
+
+function collectActionSignals($: cheerio.CheerioAPI, pageUrl: string): PageActionSignal[] {
+  const signals: PageActionSignal[] = [];
+  $("a[href], button, input[type='submit']").each((_, element) => {
+    const node = $(element);
+    const label = (node.text() || node.attr("value") || node.attr("aria-label") || "").replace(/\s+/g, " ").trim();
+    const rawHref = node.attr("href") || null;
+    const intent = inferIntent(label, rawHref || "");
+    if (!intent) return;
+    let href = rawHref;
+    if (href && !/^(?:javascript:|#)/i.test(href)) {
+      try { href = new URL(href, pageUrl).toString(); } catch { href = rawHref; }
+    }
+    const tag = element.tagName?.toLowerCase();
+    const kind: PageActionSignal["kind"] = tag === "a" ? "link" : node.attr("type") === "submit" ? "submit" : "button";
+    const direct = Boolean(href && /^(?:https?:\/\/(?:wa\.me|api\.whatsapp\.com)|tel:|mailto:)/i.test(href));
+    signals.push({ label: label || intent, href, intent, kind, direct });
+  });
+  return uniqueBy(signals, (item) => `${item.intent}:${item.label}:${item.href}`).slice(0, 40);
+}
+
+function collectFormSignals($: cheerio.CheerioAPI, pageUrl: string): PageFormSignal[] {
+  return $("form").map((_, element) => {
+    const form = $(element);
+    const fields = form.find("input:not([type='hidden']), textarea, select");
+    const required = fields.filter("[required], [aria-required='true']");
+    const submit = form.find("button[type='submit'], input[type='submit'], button:not([type])").first();
+    const submitLabel = (submit.text() || submit.attr("value") || submit.attr("aria-label") || "").replace(/\s+/g, " ").trim() || null;
+    const rawAction = form.attr("action") || null;
+    let action = rawAction;
+    if (action) try { action = new URL(action, pageUrl).toString(); } catch { action = rawAction; }
+    const context = `${form.attr("id") || ""} ${form.attr("class") || ""} ${submitLabel || ""} ${fields.map((__, field) => `${$(field).attr("name") || ""} ${$(field).attr("placeholder") || ""}`).get().join(" ")}`;
+    return { action, method: (form.attr("method") || "get").toLowerCase(), fieldCount: fields.length, requiredFieldCount: required.length, submitLabel, intent: inferIntent(context, action || "") || "contact" } satisfies PageFormSignal;
+  }).get();
+}
+
+function collectBrandSignals($: cheerio.CheerioAPI, html: string, title: string, metaDesc: string): PageAnalysisData["brandSignals"] {
+  const logoReferences = $("img, svg, [class*='logo'], [id*='logo']").filter((_, element) => /logo|marca|brand/i.test(`${$(element).attr("alt") || ""} ${$(element).attr("class") || ""} ${$(element).attr("id") || ""} ${$(element).attr("src") || ""}`)).map((_, element) => $(element).attr("src") || $(element).attr("aria-label") || $(element).attr("class") || "logo-inline").get();
+  const colorMatches = html.match(/(?:#[0-9a-f]{3,8}\b|rgba?\([^)]{5,40}\))/gi) || [];
+  const fontMatches = Array.from(html.matchAll(/font-family\s*:\s*([^;}]+)/gi)).map((match) => match[1].replace(/["']/g, "").trim().toLowerCase()).filter(Boolean);
+  const images = $("img");
+  const descriptiveImageCount = images.filter((_, element) => Boolean($(element).attr("alt")?.trim())).length;
+  const toneSamples = [title, metaDesc, ...$("h1, h2").slice(0, 5).map((_, element) => $(element).text().replace(/\s+/g, " ").trim()).get()].filter(Boolean);
+  return {
+    logoReferences: uniqueBy(logoReferences, String).slice(0, 10),
+    colors: mostFrequent(colorMatches.map((item) => item.toLowerCase()), 8),
+    fonts: mostFrequent(fontMatches, 5),
+    imageCount: images.length,
+    descriptiveImageCount,
+    toneSamples: toneSamples.slice(0, 8),
+  };
+}
+
+function uniqueBy<T>(items: T[], key: (item: T) => string) {
+  const seen = new Set<string>();
+  return items.filter((item) => { const value = key(item); if (seen.has(value)) return false; seen.add(value); return true; });
+}
+
+function mostFrequent(items: string[], limit: number) {
+  const counts = new Map<string, number>();
+  for (const item of items) counts.set(item, (counts.get(item) || 0) + 1);
+  return Array.from(counts.entries()).sort((a, b) => b[1] - a[1]).slice(0, limit).map(([item]) => item);
 }
 
 function makeFinding(
@@ -184,7 +261,7 @@ export function discoverInternalLinks(baseUrl: string, html: string, maxLinks = 
     const score = (u: string) => {
       const path = new URL(u).pathname.toLowerCase();
       let s = 0;
-      for (const kw of ["about", "nosotros", "product", "servic", "precio", "pricing", "contact", "shop", "tienda"]) {
+      for (const kw of ["about", "nosotros", "product", "servic", "precio", "pricing", "contact", "shop", "tienda", "reserv", "turno", "pedido", "cart", "checkout", "presupuesto"]) {
         if (path.includes(kw)) s += 10;
       }
       if (path === "/" || path === "") s += 5;

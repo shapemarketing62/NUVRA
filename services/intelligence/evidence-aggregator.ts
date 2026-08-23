@@ -255,6 +255,7 @@ export class EvidenceAggregator {
       redes: [],
       adquisicion: [],
       retencion: [],
+      identidad: [],
     };
 
     for (const f of findings) {
@@ -272,6 +273,8 @@ export class EvidenceAggregator {
         dimensions.adquisicion.push(f);
       } else if (f.category === "retencion") {
         dimensions.retencion.push(f);
+      } else if (f.category === "identidad") {
+        dimensions.identidad.push(f);
       }
     }
 

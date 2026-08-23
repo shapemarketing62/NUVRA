@@ -26,6 +26,8 @@ export interface EvidenceFinding {
   attribution: string; // De dónde vino específicamente
   weight: number; // Cuánto pesa en el score final (0-1)
   confidence: "ALTA" | "MEDIA" | "BAJA";
+  reputationEvidenceConfidence?: number;
+  reputationTopic?: string;
 }
 
 export interface SourceRelevance {

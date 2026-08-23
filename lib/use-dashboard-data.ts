@@ -6,7 +6,7 @@ import { DEMO_BUSINESS, DEMO_SCORE, DEMO_DIAGNOSIS, DEMO_ACTIONS } from "@/lib/d
 import { parseJsonSafe } from "@/lib/utils";
 import { getApiErrorMessage } from "@/lib/api-client";
 
-const AREA_NAMES: Record<string, string> = { presencia: "Presencia Digital", conversion: "Conversión", posicionamiento: "Posicionamiento", propuesta: "Propuesta de Valor", redes: "Redes Sociales", adquisicion: "Adquisición", retencion: "Clientes que vuelven" };
+const AREA_NAMES: Record<string, string> = { presencia: "Presencia Digital", conversion: "Conversión", posicionamiento: "Posicionamiento", propuesta: "Propuesta de Valor", redes: "Redes Sociales", adquisicion: "Adquisición", retencion: "Clientes que vuelven", identidad: "Identidad de marca" };
 const normalizeAreaScores = (dimensions: Array<{ slug: string; name: string; points: number | null | undefined; weight?: number; problems?: string[] }>) =>
   dimensions.filter((dimension) => dimension.points !== null && dimension.points !== undefined && dimension.points >= 0).map((dimension) => ({
     slug: dimension.slug,

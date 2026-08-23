@@ -261,6 +261,7 @@ export async function runFullAnalysis(businessId: string, options: { signal?: Ab
         propuesta: methodologicalWeights.propuesta?.combinedWeight ?? 0,
         redes: methodologicalWeights.redes?.combinedWeight ?? 0,
         adquisicion: methodologicalWeights.adquisicion?.combinedWeight ?? 0,
+        identidad: methodologicalWeights.identidad?.combinedWeight ?? 0,
       },
       allFindings: legacyFindings,
       coverage: biResult.coverage.total,

@@ -7,6 +7,7 @@ import { selectStrategicFrameworks, FRAMEWORKS } from "../frameworks/strategic-f
 import { getPrimaryBusinessStep, hasConstrainedExecution, isRetentionObjective, getLocalMarketLabel, getBudgetFocus, isSpecificBusinessAction } from "./business-action-language.ts";
 import type { BusinessProfile, ContextualFinding } from "../intelligence/business-profile";
 import type { ProblemCandidate } from "../intelligence/commercial-candidates.ts";
+import { StrategicKnowledgeBase, type KnowledgeMatch } from "./strategic-knowledge-base.ts";
 
 // Force recompilation: 2025-01-17T20:25:00Z
 
@@ -50,6 +51,16 @@ export interface StrategyResult extends StrategyOutput {
       metric?: string;
       expectedImpact?: string;
       confidence?: string;
+      knowledgePatternIds?: string[];
+      rejectedKnowledgePatternIds?: string[];
+      knowledgeMatches?: Array<{
+        patternId: string;
+        score: number;
+        applied: boolean;
+        reasons: string[];
+        rejectionReason?: string;
+        intervention?: string;
+      }>;
     }>;
   };
 }
@@ -140,11 +151,26 @@ function actionTextForFinding(profile: BusinessProfile, finding: ContextualFindi
 export function buildProfileStrategy(context: StrategyContext, diagnosis: DiagnosisResult, scoreResult: NuvraScoreResult, profile: BusinessProfile): StrategyResult {
   const constrained = hasConstrainedExecution(context);
   const shortTerm = context.plazoDias <= 60;
-  const candidates: Array<{ problem: ProblemCandidate; intervention: Intervention }> = [];
+  const candidates: Array<{ problem: ProblemCandidate; intervention: Intervention; knowledgeMatches: KnowledgeMatch[] }> = [];
   const rejectedInterventions: Array<{ problem: ProblemCandidate; reason: string }> = [];
   for (const problem of Array.isArray(profile.problemCandidates) ? profile.problemCandidates : []) {
+    if (problem.validationStatus !== "validated") {
+      if (!problem.validationStatus) profile.processingIssues?.push({ stage: "strategy", itemId: problem.id, errorType: "InvalidHypothesisValidation", message: "El candidato no contiene un estado de validación utilizable y fue descartado de forma segura." });
+      rejectedInterventions.push({ problem, reason: problem.validationReason });
+      continue;
+    }
     try {
-      candidates.push({ problem, intervention: interventionFor(profile, problem, context, constrained, shortTerm) });
+      const knowledgeMatches = StrategicKnowledgeBase.retrieve(profile, problem, 5);
+      const applicable = knowledgeMatches.find((match) => !match.rejected);
+      const intervention = interventionFor(profile, problem, context, constrained, shortTerm);
+      if (applicable?.pattern.interventions[0]) {
+        const reference = applicable.pattern.interventions[0];
+        intervention.description = `${intervention.description} Como referencia aplicable, priorizar ${reference.change} en ${reference.where}.`;
+        intervention.cost = reference.cost;
+        intervention.timeframe = reference.timeframe;
+        intervention.metric = reference.kpi.includes("acciones comerciales") ? profile.primaryResult : reference.kpi;
+      }
+      candidates.push({ problem, intervention, knowledgeMatches });
     } catch (error) {
       const reason = error instanceof Error ? error.message.slice(0, 180) : String(error).slice(0, 180);
       rejectedInterventions.push({ problem, reason });
@@ -159,6 +185,7 @@ export function buildProfileStrategy(context: StrategyContext, diagnosis: Diagno
     seen.add(key);
     return true;
   }).slice(0, 5);
+  const strengthBasedAudit: NonNullable<StrategyResult["audit"]>["candidates"] = [];
 
   const actions: StrategyOutput["actions"] = selected.map(({ problem, intervention }, index) => ({
     title: intervention.title,
@@ -185,10 +212,50 @@ export function buildProfileStrategy(context: StrategyContext, diagnosis: Diagno
     justification: `Esta intervención responde a una fricción de ${problem.journeyStage} que afecta el objetivo “${profile.goal.text}”.`,
   })).filter(isSpecificBusinessAction);
 
+  // Si no hay una hipótesis negativa validada, NUVRA puede proponer cómo
+  // aprovechar fortalezas comprobadas. No convierte una señal parcial en falla.
+  if (actions.length < 3) {
+    const strengthFindings = [...profile.contextualFindings]
+      .filter((finding) => finding.type === "strength")
+      .sort((a, b) => b.priorityScore - a.priorityScore);
+    for (const finding of strengthFindings) {
+      if (actions.length >= 3) break;
+      const proposal = actionTextForFinding(profile, finding);
+      if (!proposal || actions.some((action) => action.title === proposal.title)) continue;
+      const action = {
+        title: proposal.title,
+        description: proposal.description,
+        order: actions.length + 1,
+        impact: "medio" as const,
+        difficulty: "baja" as const,
+        estimatedTime: shortTerm ? "14–30 días" : "30–45 días",
+        dependencies: [],
+        indicatorToImprove: proposal.kpi,
+        rationale: `La acción aprovecha una fortaleza observada sin presentar una hipótesis negativa no validada: ${finding.interpretation}`,
+        relatedFindingIds: [finding.findingId],
+        findingIds: [finding.findingId],
+        evidence: finding.evidence,
+        inference: finding.interpretation,
+        dimension: finding.area,
+        framework: "EvidenceStrength",
+        confidence: finding.confidence,
+        problem: "No se detectó un problema comprobable en esta señal; se aprovecha una fortaleza observada.",
+        unlocksContent: false,
+        effort: "baja" as const,
+        timeframe: shortTerm ? "14–30 días" : "30–45 días",
+        kpi: proposal.kpi,
+        justification: `La evidencia favorable es relevante para “${profile.goal.text}”.`,
+      };
+      if (!isSpecificBusinessAction(action)) continue;
+      actions.push(action);
+      strengthBasedAudit.push({ findingId: finding.findingId, title: proposal.title, priority: finding.priorityScore, selected: true, reason: "Seleccionada para aprovechar una fortaleza comprobada sin convertir señales parciales en problemas.", journeyStage: profile.commercialEvidence.find((item) => item.originalFindingId === finding.findingId)?.journeyStage, evidenceIds: [finding.findingId], cause: finding.interpretation, proposedChange: proposal.description, where: actionSourceLabel(finding.source), difficulty: "baja", timeframe: action.estimatedTime, metric: proposal.kpi, expectedImpact: "Aprovechar una base que ya funciona.", confidence: finding.confidence });
+    }
+  }
+
   const primary = selected[0]?.problem;
   let frameworkSelection: FrameworkSelection;
   try {
-    frameworkSelection = selectStrategicFrameworks({ objetivo: context.objetivo, bottleneck: diagnosis.bottleneck.title, dimensionProblems: profile.problemCandidates.map((problem) => problem.journeyStage), score: scoreResult.total, hasWeb: profile.activeChannels.includes("web"), hasInstagram: profile.activeChannels.includes("instagram") });
+    frameworkSelection = selectStrategicFrameworks({ objetivo: context.objetivo, bottleneck: diagnosis.bottleneck.title, dimensionProblems: profile.problemCandidates.filter((problem) => problem.validationStatus === "validated").map((problem) => problem.journeyStage), score: scoreResult.total, hasWeb: profile.activeChannels.includes("web"), hasInstagram: profile.activeChannels.includes("instagram") });
   } catch (error) {
     profile.processingIssues?.push({ stage: "strategy", errorType: error instanceof Error ? error.name : "FrameworkError", message: error instanceof Error ? error.message.slice(0, 180) : String(error).slice(0, 180) });
     frameworkSelection = { primary: "CRO", secondary: [], rationale: "Fallback interno por indisponibilidad de la selección de marcos." };
@@ -222,7 +289,17 @@ export function buildProfileStrategy(context: StrategyContext, diagnosis: Diagno
         metric: candidate.intervention.metric,
         expectedImpact: candidate.intervention.expectedImpact,
         confidence: candidate.problem.confidence,
-      })), ...rejectedInterventions.map(({ problem, reason }) => ({
+        knowledgePatternIds: candidate.knowledgeMatches.filter((match) => !match.rejected).map((match) => match.pattern.id),
+        rejectedKnowledgePatternIds: candidate.knowledgeMatches.filter((match) => match.rejected).map((match) => match.pattern.id),
+        knowledgeMatches: candidate.knowledgeMatches.map((match) => ({
+          patternId: match.pattern.id,
+          score: match.score,
+          applied: !match.rejected,
+          reasons: match.reasons,
+          rejectionReason: match.rejectionReason,
+          intervention: !match.rejected ? match.pattern.interventions[0]?.change : undefined,
+        })),
+      })), ...strengthBasedAudit, ...rejectedInterventions.map(({ problem, reason }) => ({
         findingId: problem.evidenceFor?.[0] || problem.id,
         problemCandidateId: problem.id,
         title: "Intervención descartada",
@@ -271,7 +348,7 @@ function interventionFor(profile: BusinessProfile, problem: ProblemCandidate, co
     retention: profile.primaryResult,
   };
   const base = { where, cost: constrained ? "sin inversión o inversión baja" : "inversión baja", difficulty: constrained ? "baja" as const : "media" as const, timeframe: shortTerm ? "14–30 días" : "30–45 días", metric: metricByStage[problem.journeyStage], expectedImpact: `Reducir la fricción en ${problem.journeyStage} y facilitar ${action}.` };
-  const isPrimary = profile.problemCandidates[0]?.id === problem.id;
+  const isPrimary = profile.problemCandidates.find((candidate) => candidate.validationStatus === "validated")?.id === problem.id;
   const referralSignal = profile.declaredSignals.find((signal) => signal.type === "referrals");
   if (isPrimary && referralSignal) {
     const change = `Convertir las recomendaciones actuales en un paso fácil de repetir y conectado con ${action}.`;

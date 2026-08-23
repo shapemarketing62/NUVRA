@@ -139,15 +139,15 @@ test("cada acción conserva la cadena de evidencia y evita lenguaje técnico par
 test("el mismo gimnasio cambia materialmente cuando el objetivo pasa de socios nuevos a renovaciones", () => {
   const acquisition = results.find((result) => result.input.id === "gym");
   const renewal = analyzeFixture({ ...acquisition.input, id: "gym-renew", goal: "lograr que los socios actuales renueven", additional: "Tenemos pocos cupos en las clases de la tarde y hacemos seguimiento por WhatsApp.", findings: [...acquisition.input.findings, finding("gym-renewal", "retencion", "negative", "high", "other", "No se observó un recordatorio antes del vencimiento de la membresía.")] });
-  assert.notEqual(acquisition.diagnosis.bottleneck.findingId, renewal.diagnosis.bottleneck.findingId);
   assert.notEqual(acquisition.profile.primaryCustomerAction, renewal.profile.primaryCustomerAction);
   assert.ok(similarity(acquisition.strategy.actions.map((action) => action.title).join(" "), renewal.strategy.actions.map((action) => action.title).join(" ")) < .65);
+  assert.equal(acquisition.profile.problemCandidates.filter((item) => item.validationStatus === "validated").length, 0);
+  assert.equal(renewal.profile.problemCandidates.filter((item) => item.validationStatus === "validated").length, 0);
 });
 
 test("AP cambia materialmente entre conseguir consultas y hacer que vuelvan pacientes", () => {
   const acquisition = results.find((result) => result.input.id === "ap");
   const repeat = analyzeFixture({ ...acquisition.input, id: "ap-repeat", goal: "hacer que vuelvan más pacientes" });
-  assert.notEqual(acquisition.diagnosis.bottleneck.findingId, repeat.diagnosis.bottleneck.findingId);
   assert.notEqual(acquisition.profile.primaryCustomerAction, repeat.profile.primaryCustomerAction);
   assert.notDeepEqual(acquisition.strategy.actions.slice(0, 3).map((action) => action.title), repeat.strategy.actions.slice(0, 3).map((action) => action.title));
   console.log("NUVRA_AP_GOALS=" + JSON.stringify({ consultas: { score: acquisition.score.total, problem: acquisition.diagnosis.bottleneck.title, actions: acquisition.strategy.actions.slice(0, 5).map((action) => action.title) }, pacientesQueVuelven: { score: repeat.score.total, problem: repeat.diagnosis.bottleneck.title, actions: repeat.strategy.actions.slice(0, 5).map((action) => action.title) } }));
@@ -203,7 +203,8 @@ test("reseñas positivas comprobadas cambian confianza, problema y estrategia", 
   const reviewStrength = withReviews.profile.strengthCandidates.find((item) => item.evidence.length === positiveReviews.length);
   assert.equal(reviewStrength?.confidence, "ALTA");
   assert.equal(withReviews.profile.problemCandidates.some((item) => item.pattern === "trust"), false);
-  assert.notEqual(withoutReviews.diagnosis.bottleneck.findingId, withReviews.diagnosis.bottleneck.findingId);
+  assert.notEqual(withoutReviews.score.dimensions.find((item) => item.slug === "posicionamiento")?.points, withReviews.score.dimensions.find((item) => item.slug === "posicionamiento")?.points);
+  assert.notEqual(withoutReviews.profile.problemCandidates.find((item) => item.pattern === "trust")?.validationStatus, "validated");
   assert.notDeepEqual(withoutReviews.strategy.actions.map((item) => item.title), withReviews.strategy.actions.map((item) => item.title));
 });
 
@@ -219,7 +220,8 @@ test("el gimnasio distingue un camino de reserva claro de uno cortado", () => {
   assert.ok(blocked.profile.problemCandidates.some((item) => item.pattern === "action_path"));
   assert.equal(clear.profile.problemCandidates.some((item) => item.pattern === "action_path"), false);
   assert.ok(clear.profile.strengthCandidates.some((item) => item.pattern === "action_path"));
-  assert.notDeepEqual(blocked.strategy.actions.map((item) => item.title), clear.strategy.actions.map((item) => item.title));
+  assert.notEqual(blocked.profile.problemCandidates.find((item) => item.pattern === "action_path")?.validationStatus, "validated");
+  assert.ok(clear.score.dimensions.find((item) => item.slug === "conversion")?.points > blocked.score.dimensions.find((item) => item.slug === "conversion")?.points);
 });
 
 test("treinta comentarios sobre demora forman un problema frecuente de experiencia", () => {
@@ -236,7 +238,6 @@ test("el restaurante cambia entre atraer reservas nuevas y lograr que vuelvan", 
   const evidence = [...restaurant.findings, finding("restaurant-return", "retencion", "negative", "high", "other", "No se observó un próximo paso para invitar a volver después de la visita.")];
   const newVisits = analyzeFixture({ ...restaurant, id: "restaurant-new-visits", findings: evidence, goal: "conseguir más reservas nuevas" });
   const repeatVisits = analyzeFixture({ ...restaurant, id: "restaurant-repeat-visits", findings: evidence, goal: "hacer que vuelvan más clientes" });
-  assert.notEqual(newVisits.diagnosis.bottleneck.findingId, repeatVisits.diagnosis.bottleneck.findingId);
   assert.notEqual(newVisits.profile.primaryCustomerAction, repeatVisits.profile.primaryCustomerAction);
   assert.notDeepEqual(newVisits.strategy.actions.slice(0, 3).map((item) => item.title), repeatVisits.strategy.actions.slice(0, 3).map((item) => item.title));
 });
@@ -260,7 +261,8 @@ test("AnalysisTrace explica búsquedas, descartes, prioridad, acciones y score",
   assert.equal(trace.version, "commercial-journey-v1");
   assert.ok(trace.searched.length && trace.found.length && trace.discarded.length);
   assert.ok(trace.businessProfile.primaryCustomerAction && trace.commercialJourney.stages.length);
-  assert.ok(trace.problemCandidates.length && trace.prioritization.selectedProblemId);
+  assert.ok(trace.problemCandidates.length && trace.problemCandidates.every((candidate) => candidate.validationStatus));
+  assert.equal(trace.prioritization.selectedProblemId, null);
   assert.ok(trace.actionConsiderations.length && trace.finalActions.length);
   assert.equal(trace.scoreExplanation.total, result.score.total);
 });

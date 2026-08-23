@@ -43,7 +43,7 @@ export class NuvraScoreCalculator {
     context: { objective?: string; businessProfile?: BusinessProfile } = {}
   ): NuvraScoreResult {
     const findings = aggregatedEvidence.findings;
-    const byDimension = aggregatedEvidence.byDimension;
+    const byDimension = this.filterUnvalidatedProblems(aggregatedEvidence.byDimension, context.businessProfile);
 
     // Las dimensiones mantienen sus propias reglas de evidencia. La cobertura
     // general no debe descartar dimensiones que sí pudieron evaluarse.
@@ -189,11 +189,37 @@ export class NuvraScoreCalculator {
       this.calculatePropuestaDimension(byDimension.propuesta || [], sources, profile),
       this.calculateRedesDimension(byDimension.redes || [], sources, profile),
       this.calculateAdquisicionDimension(byDimension.adquisicion || [], sources, profile),
+      this.calculateIdentityDimension(byDimension.identidad || [], sources, profile),
     ];
 
     dimensions.push(this.calculateRetentionDimension(byDimension.retencion || [], profile));
 
     return dimensions;
+  }
+
+  private static calculateIdentityDimension(findings: EvidenceFinding[], sources: Record<string, any>, profile?: BusinessProfile): NuvraDimension {
+    const sourceTypes = this.getSourceTypes(findings, sources);
+    const brandIdentity = sources.web?.data?.brandIdentity as { score?: number; confidence?: NuvraDimension["confidence"]; limitations?: string[] } | undefined;
+    findings = this.deduplicateSemanticFindings(findings);
+    if (typeof brandIdentity?.score === "number") {
+      return {
+        name: "Qué tan sólida y reconocible es tu marca",
+        slug: "identidad",
+        points: Math.max(0, Math.min(100, Math.round(brandIdentity.score))),
+        confidence: brandIdentity.confidence || this.calculateDimensionConfidence(findings, sourceTypes),
+        sources: sourceTypes.length ? sourceTypes : (["web"] as SourceType[]),
+        findings,
+        message: brandIdentity.limitations?.[0],
+      };
+    }
+    return this.estimateDimension("identidad", "Qué tan sólida y reconocible es tu marca", sourceTypes, profile);
+  }
+
+  private static filterUnvalidatedProblems(byDimension: Record<string, EvidenceFinding[]>, profile?: BusinessProfile) {
+    if (!profile) return byDimension;
+    const rejectedCommercialIds = new Set(profile.problemCandidates.filter((candidate) => candidate.validationStatus !== "validated").flatMap((candidate) => candidate.evidenceFor));
+    const rejectedFindingIds = new Set(profile.commercialEvidence.filter((item) => rejectedCommercialIds.has(item.id)).map((item) => item.originalFindingId).filter((id): id is string => Boolean(id)));
+    return Object.fromEntries(Object.entries(byDimension).map(([slug, findings]) => [slug, findings.filter((finding) => finding.type !== "negative" || !rejectedFindingIds.has(finding.id))]));
   }
 
   private static calculateRetentionDimension(findings: EvidenceFinding[], profile?: BusinessProfile): NuvraDimension {
@@ -415,6 +441,9 @@ export class NuvraScoreCalculator {
         if (declared.some((signal) => signal.type === "follow_up")) add("Seguimiento declarado", 9, "declared");
         if (profile.recurrence === "frequent" || profile.recurrence === "membership" || profile.recurrence === "periodic") add("El modelo admite recurrencia", 3, "contextual");
         if (!declared.some((signal) => signal.type === "follow_up") && /volver|recompra|renuev|fidel/i.test(profile.goal.text)) add("El objetivo requiere volver a contactar clientes y no se declaró un mecanismo", -8, "contextual");
+      } else if (slug === "identidad") {
+        if (profile.activeChannels.includes("web")) add("Existe un sitio donde observar la identidad de marca", 3, "observed");
+        if (profile.activeChannels.includes("instagram")) add("Existe una segunda fuente para contrastar la marca", 3, "observed");
       }
     }
     const points = Math.max(25, Math.min(75, Math.round(50 + signals.reduce((sum, signal) => sum + signal.effect, 0))));

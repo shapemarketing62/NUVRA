@@ -197,6 +197,8 @@ export function getFriendlyDimensionName(slug: string, fallbackName?: string): s
       return "Qué capacidad tenés para atraer demanda";
     case "retencion":
       return "Qué hacés para que los clientes vuelvan";
+    case "identidad":
+      return "Qué tan sólida y reconocible es tu marca";
     default:
       return fallbackName || slug;
   }

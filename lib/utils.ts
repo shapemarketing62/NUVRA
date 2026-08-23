@@ -83,6 +83,7 @@ export const SCORE_DIMENSIONS = [
   { slug: "propuesta", name: "Qué tan claro queda lo que ofrecés" },
   { slug: "redes", name: "Qué tan útiles están siendo tus redes" },
   { slug: "adquisicion", name: "Qué capacidad tenés para atraer demanda" },
+  { slug: "identidad", name: "Qué tan sólida y reconocible es tu marca" },
 ] as const;
 
 export type ScoreDimensionSlug = (typeof SCORE_DIMENSIONS)[number]["slug"];

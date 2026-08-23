@@ -1,6 +1,9 @@
-import { SourceAnalyzer, SourceEvidence, SourceRelevance, SourceType, EvidenceFinding, type SourceAnalysisContext } from "./source-analyzer";
-import { ReviewsProvider, GoogleMapsScrapeProvider, GooglePlacesApiProvider } from "./providers/reviews-provider";
+import { SourceAnalyzer } from "./source-analyzer.ts";
+import type { SourceEvidence, SourceRelevance, SourceType, EvidenceFinding, SourceAnalysisContext } from "./source-analyzer.ts";
+import { GoogleMapsScrapeProvider, GooglePlacesApiProvider } from "./providers/reviews-provider.ts";
+import type { ReviewsProvider } from "./providers/reviews-provider.ts";
 import type { Business } from "@prisma/client";
+import { ReputationIntelligence } from "./reputation-intelligence.ts";
 
 interface BusinessWithGoals extends Business {
   goals?: Array<{ objetivo?: string }>;
@@ -116,153 +119,49 @@ export class ReviewsSourceAnalyzer extends SourceAnalyzer {
         scopeWarning = " (sucursal individual - no representa reputación global de la marca)";
       }
 
-      // Analizar temas recurrentes
-      const themes = this.analyzeThemes(reviews);
+      const reputation = ReputationIntelligence.analyze(reviews.map((review, index) => ({
+        id: `${reviewsData.placeId || "place"}-review-${index}`,
+        source: review.source || "google_maps",
+        url: review.url || reviewsData.placeUrl || null,
+        date: review.date || null,
+        rating: review.rating,
+        text: review.text,
+        author: review.author || null,
+        entityConfidence: entityMatchConfidence ?? (providerUsed === "fallback" ? .6 : 0),
+        entityValidated: (entityMatchConfidence ?? 0) >= .72,
+      })), { objective: businessWithGoals.goals?.[0]?.objetivo });
 
-      // Generar findings
-      const findings: EvidenceFinding[] = [];
+      if (!reputation.accepted.length) return this.unavailable("No se obtuvieron reseñas atribuibles al negocio con suficiente seguridad");
 
-      if (rating !== null) {
-        if (rating >= 4.5) {
-          findings.push(this.generateFinding(
-            "trust",
-            "positive",
-            "high",
-            `El negocio tiene un rating de ${rating.toFixed(1)}/5 en Google Maps${reviewCount ? ` con ${reviewCount} reseñas` : ""}${scopeWarning}.`,
-            `Google Maps: ${nombre} ${rubro}${ciudad ? ` ${ciudad}` : ""}`,
-            0.5,
-            "ALTA"
-          ));
-        } else if (rating >= 4.0) {
-          findings.push(this.generateFinding(
-            "trust",
-            "positive",
-            "medium",
-            `El negocio tiene un rating de ${rating.toFixed(1)}/5 en Google Maps${reviewCount ? ` con ${reviewCount} reseñas` : ""}${scopeWarning}.`,
-            `Google Maps: ${nombre} ${rubro}${ciudad ? ` ${ciudad}` : ""}`,
-            0.5,
-            "MEDIA"
-          ));
-        } else if (rating >= 3.0) {
-          findings.push(this.generateFinding(
-            "trust",
-            "negative",
-            "medium",
-            `El negocio tiene un rating de ${rating.toFixed(1)}/5 en Google Maps, lo que indica problemas de satisfacción${scopeWarning}.`,
-            `Google Maps: ${nombre} ${rubro}${ciudad ? ` ${ciudad}` : ""}`,
-            0.5,
-            "MEDIA"
-          ));
-        } else {
-          findings.push(this.generateFinding(
-            "trust",
-            "negative",
-            "high",
-            `El negocio tiene un rating bajo de ${rating.toFixed(1)}/5 en Google Maps, lo que indica problemas serios de satisfacción${scopeWarning}.`,
-            `Google Maps: ${nombre} ${rubro}${ciudad ? ` ${ciudad}` : ""}`,
-            0.5,
-            "ALTA"
-          ));
-        }
-      }
-
-      if (reviewCount !== null) {
-        if (reviewCount >= 100) {
-          findings.push(this.generateFinding(
-            "presencia",
-            "positive",
-            "high",
-            `El negocio tiene ${reviewCount} reseñas en Google Maps, indicando presencia establecida${scopeWarning}.`,
-            `Google Maps: ${nombre} ${rubro}${ciudad ? ` ${ciudad}` : ""}`,
-            0.3,
-            "ALTA"
-          ));
-        } else if (reviewCount >= 20) {
-          findings.push(this.generateFinding(
-            "presencia",
-            "positive",
-            "medium",
-            `El negocio tiene ${reviewCount} reseñas en Google Maps${scopeWarning}.`,
-            `Google Maps: ${nombre} ${rubro}${ciudad ? ` ${ciudad}` : ""}`,
-            0.3,
-            "MEDIA"
-          ));
-        } else {
-          findings.push(this.generateFinding(
-            "presencia",
-            "negative",
-            "low",
-            `El negocio tiene solo ${reviewCount} reseñas en Google Maps, indicando baja presencia de reseñas${scopeWarning}.`,
-            `Google Maps: ${nombre} ${rubro}${ciudad ? ` ${ciudad}` : ""}`,
-            0.3,
-            "MEDIA"
-          ));
-        }
-      }
-
-      // Temas recurrentes
-      if (themes.strengths.length > 0) {
-        findings.push(this.generateFinding(
-          "propuesta",
-          "positive",
-          "medium",
-          `Fortalezas recurrentes en reseñas: ${themes.strengths.slice(0, 3).join(", ")}.`,
-          `Google Maps: ${nombre} ${rubro}${ciudad ? ` ${ciudad}` : ""}`,
-          0.4,
-          "MEDIA"
-        ));
-      }
-
-      if (themes.problems.length > 0) {
-        findings.push(this.generateFinding(
-          "propuesta",
-          "negative",
-          "medium",
-          `Problemas recurrentes en reseñas: ${themes.problems.slice(0, 3).join(", ")}.`,
-          `Google Maps: ${nombre} ${rubro}${ciudad ? ` ${ciudad}` : ""}`,
-          0.4,
-          "MEDIA"
-        ));
-      }
-
-      // Calcular coverage
-      const coverage = reviews.length >= 5 ? 100 : reviews.length >= 3 ? 70 : reviews.length >= 1 ? 40 : 0;
-      const adjustedCoverage = Math.max(0, coverage - confidenceAdjustment);
-      const confidence = adjustedCoverage >= 70 ? "ALTA" : adjustedCoverage >= 40 ? "MEDIA" : "BAJA";
-
-      return {
-        source: this.type,
-        status: "evaluated",
-        data: {
-          query: `${nombre} ${rubro}${ciudad ? ` ${ciudad}` : ""}`,
-          rating,
-          reviewCount,
-          reviews,
-          themes,
-          scope,
-          entityMatchConfidence,
-          providerUsed,
-        },
-        findings,
-        confidence,
-        coverage: adjustedCoverage,
-        evaluatedAt: new Date(),
-        requiresAuth: false,
-        metadata: {
-          query: `${nombre} ${rubro}${ciudad ? ` ${ciudad}` : ""}`,
-          rating,
-          reviewCount,
-          reviewsCount: reviews.length,
-          strengths: themes.strengths,
-          problems: themes.problems,
-          scope,
-          entityMatchConfidence,
-          providerUsed,
-          placeId: reviewsData.placeId,
-          placeName: reviewsData.placeName,
-          placeAddress: reviewsData.placeAddress,
-        },
+      const reputationFindings: EvidenceFinding[] = [];
+      const commentById = new Map(reputation.accepted.map((comment) => [comment.id, comment]));
+      const addReputationFinding = (finding: EvidenceFinding, topic: typeof reputation.topics[number]) => {
+        finding.reputationEvidenceConfidence = topic.evidenceConfidence;
+        finding.reputationTopic = topic.name;
+        reputationFindings.push(finding);
       };
+      for (const topic of reputation.strengths.slice(0, 5)) {
+        for (const commentId of topic.commentIds.slice(0, 6)) {
+          const comment = commentById.get(commentId); if (!comment) continue;
+          addReputationFinding(this.generateFinding("trust", "positive", topic.commercialImpact >= .7 ? "high" : "medium", `La ${topic.name} aparece como fortaleza en opiniones independientes: “${comment.text.slice(0, 180)}”.`, comment.url || `Google Maps: ${nombre}`, topic.commercialImpact, topic.evidenceConfidence >= .7 ? "ALTA" : topic.evidenceConfidence >= .45 ? "MEDIA" : "BAJA"), topic);
+        }
+      }
+      for (const topic of reputation.problems.slice(0, 5)) {
+        for (const commentId of topic.commentIds.slice(0, 8)) {
+          const comment = commentById.get(commentId); if (!comment) continue;
+          addReputationFinding(this.generateFinding(comment.journeyStage === "action" ? "conversion" : "experiencia", "negative", topic.commercialImpact >= .7 ? "high" : "medium", `Opiniones independientes mencionan ${topic.name}: “${comment.text.slice(0, 180)}”.`, comment.url || `Google Maps: ${nombre}`, topic.commercialImpact, topic.evidenceConfidence >= .7 ? "ALTA" : topic.evidenceConfidence >= .45 ? "MEDIA" : "BAJA"), topic);
+        }
+      }
+      const adjustedCoverage = Math.round(Math.min(100, 20 + Math.min(reputation.coverage.accepted, 20) * 2.5 + Math.min(reputation.coverage.independentAuthors, 15) * 2 + Math.min(reputation.coverage.sources.length, 3) * 5));
+      return {
+        source: this.type, status: "evaluated",
+        data: { query: `${nombre} ${rubro}${ciudad ? ` ${ciudad}` : ""}`, rating, reviewCount, profile: { placeId: reviewsData.placeId, name: reviewsData.placeName, address: reviewsData.placeAddress, category: reviewsData.category, secondaryCategories: reviewsData.secondaryCategories, phone: reviewsData.phone, website: reviewsData.website, openingHours: reviewsData.openingHours, photoCount: reviewsData.photoCount }, reputation, scope, entityMatchConfidence, providerUsed },
+        findings: reputationFindings,
+        confidence: reputation.coverage.independentAuthors >= 5 ? "ALTA" : "MEDIA",
+        coverage: adjustedCoverage, evaluatedAt: new Date(), requiresAuth: false,
+        metadata: { providerUsed, placeId: reviewsData.placeId, entityMatchConfidence, acceptedComments: reputation.accepted.length, duplicatesDiscarded: reputation.duplicates.length, rejectedEntity: reputation.rejectedEntity.length, topics: reputation.topics.map((topic) => topic.name), temporalClaims: reputation.temporalClaims },
+      };
+
     } catch (error) {
       return this.unavailable(error instanceof Error ? error.message : String(error));
     }

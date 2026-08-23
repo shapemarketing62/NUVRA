@@ -8,6 +8,7 @@ export interface DimensionWeights {
   propuesta: number;
   redes: number;
   adquisicion: number;
+  identidad: number;
 }
 
 export type ConfidenceLevel = "ALTA" | "MEDIA" | "BAJA" | "INSUFICIENTE";
@@ -41,12 +42,13 @@ export interface NuvraScoreResult {
 }
 
 const DEFAULT_WEIGHTS: DimensionWeights = {
-  presencia: 0.15,
-  conversion: 0.2,
-  posicionamiento: 0.15,
-  propuesta: 0.15,
-  redes: 0.15,
-  adquisicion: 0.2,
+  presencia: 0.13,
+  conversion: 0.17,
+  posicionamiento: 0.13,
+  propuesta: 0.13,
+  redes: 0.12,
+  adquisicion: 0.17,
+  identidad: 0.15,
 };
 
 const DIMENSION_RULES: Record<ScoreDimensionSlug, { key: string[]; minCriteriaForZero: number; minCriteriaForHigh: number; allowZero?: boolean }> = {
@@ -56,6 +58,7 @@ const DIMENSION_RULES: Record<ScoreDimensionSlug, { key: string[]; minCriteriaFo
   propuesta: { key: ["mensaje", "diferenciacion", "valor", "claridad"], minCriteriaForZero: 3, minCriteriaForHigh: 3 },
   redes: { key: ["redes", "engagement", "consistencia", "conectividad"], minCriteriaForZero: 2, minCriteriaForHigh: 2 },
   adquisicion: { key: ["seo", "trafico", "captacion", "landing"], minCriteriaForZero: 3, minCriteriaForHigh: 3 },
+  identidad: { key: ["logo", "color", "tipografia", "fotografia", "tono", "consistencia"], minCriteriaForZero: 3, minCriteriaForHigh: 4 },
 };
 
 function categorizeFinding(f: RawFinding): ScoreDimensionSlug | null {
@@ -64,6 +67,7 @@ function categorizeFinding(f: RawFinding): ScoreDimensionSlug | null {
   if (category.includes("seo") || /title|meta description|index|seo|canonical|robots|schema|alt text/i.test(f.title + " " + f.evidence)) return "adquisicion";
   if (category.includes("presencia") || /naveg|mobile|estructura|h2|performance|carga|nav|header|ux/i.test(f.title + " " + f.evidence)) return "presencia";
   if (category.includes("propuesta") || /h1|propuesta|valor|mensaje|claridad|diferenci|posicion/i.test(f.title + " " + f.evidence)) return "propuesta";
+  if (category.includes("identidad") || /logo|color|tipograf|fotograf|identidad visual|consistencia de marca/i.test(f.title + " " + f.evidence)) return "identidad";
   if (category.includes("posicionamiento") || /marca|autoridad|posicion|diferenci/i.test(f.title + " " + f.evidence)) return "posicionamiento";
   if (category.includes("redes") || /instagram|social|redes|engagement/i.test(f.title + " " + f.evidence)) return "redes";
   if (category.includes("trust") || /confianza|testimonio|reseña|garant|caso/i.test(f.title + " " + f.evidence)) return "conversion";
@@ -71,7 +75,7 @@ function categorizeFinding(f: RawFinding): ScoreDimensionSlug | null {
 }
 
 function evaluateDimensionCriteria(findingGroups: RawFinding[], slug: ScoreDimensionSlug): { score: number; criteria: string[]; evidence: string[] } {
-  const relevant = findingGroups.filter((f) => categorizeFinding(f) === slug || f.category === slug || /presencia|conversion|propuesta|adquisicion|redes|posicionamiento/.test(f.category));
+  const relevant = findingGroups.filter((f) => categorizeFinding(f) === slug || f.category === slug || /presencia|conversion|propuesta|adquisicion|redes|posicionamiento|identidad/.test(f.category));
   const rule = DIMENSION_RULES[slug];
   const criteria = rule.key.map((key) => {
     const hasSignal = relevant.some((f) => {
@@ -134,16 +138,16 @@ export function getWeightsForObjective(objetivo: string, plazoDias: number): Dim
   const longTerm = plazoDias >= 300;
 
   if (/venta|consult|lead|reserv|conversi/i.test(objetivo) && shortTerm) {
-    return { presencia: 0.1, conversion: 0.3, posicionamiento: 0.1, propuesta: 0.15, redes: 0.1, adquisicion: 0.25 };
+    return { presencia: 0.09, conversion: 0.25, posicionamiento: 0.09, propuesta: 0.13, redes: 0.08, adquisicion: 0.21, identidad: 0.15 };
   }
   if (/reconoc|posicion|marca|tráfico|trafico/i.test(objetivo) && longTerm) {
-    return { presencia: 0.2, conversion: 0.1, posicionamiento: 0.25, propuesta: 0.15, redes: 0.2, adquisicion: 0.1 };
+    return { presencia: 0.15, conversion: 0.08, posicionamiento: 0.2, propuesta: 0.13, redes: 0.15, adquisicion: 0.09, identidad: 0.2 };
   }
   if (/redes|instagram|social/i.test(objetivo)) {
-    return { presencia: 0.15, conversion: 0.15, posicionamiento: 0.15, propuesta: 0.1, redes: 0.3, adquisicion: 0.15 };
+    return { presencia: 0.12, conversion: 0.12, posicionamiento: 0.12, propuesta: 0.09, redes: 0.25, adquisicion: 0.12, identidad: 0.18 };
   }
   if (/lead|consult/i.test(objetivo)) {
-    return { presencia: 0.1, conversion: 0.25, posicionamiento: 0.15, propuesta: 0.15, redes: 0.1, adquisicion: 0.25 };
+    return { presencia: 0.09, conversion: 0.22, posicionamiento: 0.13, propuesta: 0.13, redes: 0.08, adquisicion: 0.22, identidad: 0.13 };
   }
   return DEFAULT_WEIGHTS;
 }
@@ -178,6 +182,7 @@ export function calculateNuvraScore(
     propuesta: [...byCategory("propuesta"), ...responseFindings.filter((f) => f.category === "propuesta")],
     redes: [...byCategory("redes"), ...responseFindings.filter((f) => f.category === "redes")],
     adquisicion: [...byCategory("adquisicion"), ...byCategory("seo"), ...responseFindings.filter((f) => f.category === "adquisicion")],
+    identidad: [...byCategory("identidad"), ...responseFindings.filter((f) => f.category === "identidad")],
   };
 
   const responseCountByDimension: Record<string, number> = {};
@@ -204,6 +209,7 @@ export function calculateNuvraScore(
     scoreDimension("propuesta"),
     scoreDimension("redes"),
     scoreDimension("adquisicion"),
+    scoreDimension("identidad"),
   ];
 
   const evaluableDimensions = dimensions.filter((d) => d.points !== null);
@@ -280,6 +286,7 @@ function getDimensionName(slug: ScoreDimensionSlug): string {
     case "propuesta": return "Propuesta de Valor";
     case "redes": return "Redes Sociales";
     case "adquisicion": return "Adquisición";
+    case "identidad": return "Identidad de marca";
     default: return slug;
   }
 }

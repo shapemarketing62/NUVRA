@@ -4,6 +4,8 @@ import path from "path";
 import { validateAndNormalizeUrl, isSameOrigin } from "./url-validator";
 import { analyzePageHtml, discoverInternalLinks } from "./page-analyzer";
 import type { WebsiteAnalysisResult, ScreenshotData, RawFinding } from "./types";
+import { journeyFindings, validateWebsiteJourneys } from "./website-journey-validator.ts";
+import { BrandIdentityAnalyzer } from "./brand-identity-analyzer.ts";
 
 const MAX_PAGES = Math.max(1, Math.min(Number(process.env.MAX_CRAWL_PAGES || 10), 15));
 const TIMEOUT_MS = Math.max(10_000, Math.min(Number(process.env.ANALYSIS_TIMEOUT_MS || 90_000), 120_000));
@@ -171,7 +173,13 @@ export async function analyzeWebsite(inputUrl: string, options: WebsiteAnalysisO
       null as (typeof pages)[0] | null
     );
 
-    const dedupedFindings = dedupeFindings(allFindings);
+    const journeys = validateWebsiteJourneys(pages, allFindings);
+    const brandIdentity = BrandIdentityAnalyzer.analyze(pages);
+    const dedupedFindings = dedupeFindings([
+      ...allFindings,
+      ...journeyFindings(journeys),
+      ...BrandIdentityAnalyzer.findings(brandIdentity, baseUrl),
+    ]);
 
     return {
       baseUrl,
@@ -185,6 +193,8 @@ export async function analyzeWebsite(inputUrl: string, options: WebsiteAnalysisO
         slowestPage: slowest?.url || null,
       },
       crawledUrls: Array.from(visited),
+      journeys,
+      brandIdentity,
       analyzedAt: new Date().toISOString(),
       errorMessage: pages.length === 0 ? "No se pudo analizar ninguna página" : undefined,
     };
@@ -200,6 +210,8 @@ export async function analyzeWebsite(inputUrl: string, options: WebsiteAnalysisO
       screenshots: [],
       performanceSummary: { avgLoadTimeMs: 0, slowestPage: null },
       crawledUrls: [],
+      journeys: [],
+      brandIdentity: BrandIdentityAnalyzer.analyze([]),
       errorMessage: err instanceof Error ? err.message : String(err),
       analyzedAt: new Date().toISOString(),
     };

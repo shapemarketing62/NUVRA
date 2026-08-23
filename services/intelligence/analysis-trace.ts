@@ -4,6 +4,7 @@ import type { DiscoveryResult } from "../discovery/business-discovery-service.ts
 import type { DiagnosisResult } from "../diagnostic/diagnostic-engine.ts";
 import type { StrategyResult } from "../strategy/strategy-engine.ts";
 import type { NuvraScoreResult } from "./nuvra-score-calculator.ts";
+import { STRATEGIC_PATTERNS } from "../strategy/strategic-knowledge-base.ts";
 
 export interface AnalysisTrace {
   version: "commercial-journey-v1";
@@ -16,6 +17,23 @@ export interface AnalysisTrace {
   problemCandidates: BusinessProfile["problemCandidates"];
   strengthCandidates: BusinessProfile["strengthCandidates"];
   processingIssues: BusinessProfile["processingIssues"];
+  reputation: {
+    commentsObtained: number;
+    accepted: number;
+    duplicatesDiscarded: number;
+    rejectedEntity: number;
+    topics: string[];
+    temporalClaims: unknown[];
+    strengths: string[];
+    problems: string[];
+  } | null;
+  knowledgeBase: {
+    consultedPatternIds: string[];
+    rejectedPatternIds: string[];
+    unusedPatternIds: string[];
+    evaluations: Array<{ patternId: string; applied: boolean; score: number; reasons: string[]; rejectionReason?: string; intervention?: string }>;
+    selectedInterventions: Array<{ action: string; patternIds: string[] }>;
+  };
   prioritization: {
     selectedProblemId: string | null;
     rule: string;
@@ -45,7 +63,11 @@ export function buildAnalysisTrace(input: {
     ...Object.entries(input.aggregated.sources).filter(([, evidence]) => evidence.status !== "evaluated").map(([source, evidence]) => ({ item: source, reason: String(evidence.metadata?.reason || `Fuente ${evidence.status}.`) })),
   ];
   const problemCandidates = Array.isArray(input.profile.problemCandidates) ? input.profile.problemCandidates : [];
-  const selectedProblem = problemCandidates.find((candidate) => Array.isArray(candidate?.evidenceFor) && candidate.evidenceFor.includes(input.diagnosis?.bottleneck?.findingId || "")) || problemCandidates[0];
+  const selectedProblem = problemCandidates.find((candidate) => candidate.validationStatus === "validated" && Array.isArray(candidate?.evidenceFor) && candidate.evidenceFor.includes(input.diagnosis?.bottleneck?.findingId || "")) || problemCandidates.find((candidate) => candidate.validationStatus === "validated");
+  const reputation = (input.aggregated.sources.reviews?.data as any)?.reputation;
+  const actionCandidates = input.strategy.audit?.candidates || [];
+  const knowledgeEvaluations = actionCandidates.flatMap((candidate) => candidate.knowledgeMatches || []);
+  const consultedPatternIds = Array.from(new Set(knowledgeEvaluations.map((match) => match.patternId)));
   return {
     version: "commercial-journey-v1",
     createdAt: new Date().toISOString(),
@@ -73,12 +95,29 @@ export function buildAnalysisTrace(input: {
     problemCandidates,
     strengthCandidates: Array.isArray(input.profile.strengthCandidates) ? input.profile.strengthCandidates : [],
     processingIssues: input.profile.processingIssues || [],
+    reputation: reputation ? {
+      commentsObtained: reputation.comments?.length || 0,
+      accepted: reputation.accepted?.length || 0,
+      duplicatesDiscarded: reputation.duplicates?.length || 0,
+      rejectedEntity: reputation.rejectedEntity?.length || 0,
+      topics: (reputation.topics || []).map((topic: any) => topic.name),
+      temporalClaims: reputation.temporalClaims || [],
+      strengths: (reputation.strengths || []).map((topic: any) => topic.name),
+      problems: (reputation.problems || []).map((topic: any) => topic.name),
+    } : null,
+    knowledgeBase: {
+      consultedPatternIds,
+      rejectedPatternIds: Array.from(new Set(actionCandidates.flatMap((candidate: any) => candidate.rejectedKnowledgePatternIds || []))),
+      unusedPatternIds: STRATEGIC_PATTERNS.map((pattern) => pattern.id).filter((id) => !consultedPatternIds.includes(id)),
+      evaluations: knowledgeEvaluations,
+      selectedInterventions: actionCandidates.filter((candidate: any) => candidate.selected && candidate.knowledgePatternIds?.length).map((candidate: any) => ({ action: candidate.title, patternIds: candidate.knowledgePatternIds })),
+    },
     prioritization: {
       selectedProblemId: selectedProblem?.id || null,
-      rule: "fuerza de evidencia × impacto sobre objetivo × relevancia comercial × frecuencia × posibilidad de solución, con descuento por evidencia contradictoria",
-      explanation: selectedProblem ? `${selectedProblem.hypothesis} obtuvo prioridad ${selectedProblem.priorityScore}/100 y conserva ${Array.isArray(selectedProblem.evidenceAgainst) ? selectedProblem.evidenceAgainst.length : 0} evidencia(s) contradictoria(s).` : "No se seleccionó un problema sin evidencia negativa suficiente.",
+      rule: "señal → hipótesis → evidencia que confirma → evidencia que contradice → validación; luego impacto sobre objetivo × relevancia comercial × posibilidad de solución",
+      explanation: selectedProblem ? `${selectedProblem.hypothesis} quedó validada con fuerza ${selectedProblem.evidenceStrength}, contradicción ${selectedProblem.contradictionStrength} y prioridad ${selectedProblem.priorityScore}/100.` : "No se seleccionó un problema sin una hipótesis validada.",
     },
-    actionConsiderations: input.strategy.audit?.candidates || [],
+    actionConsiderations: actionCandidates,
     finalActions: (Array.isArray(input.strategy.actions) ? input.strategy.actions : []).map((action) => ({ title: action.title, problem: action.problem, evidenceIds: action.findingIds, metric: action.kpi || action.indicatorToImprove, confidence: action.confidence })),
     scoreExplanation: {
       total: input.score.total,

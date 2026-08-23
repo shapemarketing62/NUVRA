@@ -1,6 +1,7 @@
 import type { BusinessProfile } from "./business-profile.ts";
 import type { CommercialEvidence, CommercialJourneyStageId, CommercialProcessingIssue } from "./commercial-evidence.ts";
 import type { CommercialJourney } from "./commercial-journey-engine.ts";
+import { HypothesisValidationEngine, type HypothesisValidationStatus } from "./hypothesis-validation-engine.ts";
 
 export type CommercialProblemPattern = "visibility" | "offer_clarity" | "trust" | "decision_information" | "action_path" | "experience" | "retention" | "demand_pattern" | "other";
 
@@ -21,6 +22,15 @@ export interface ProblemCandidate {
   scope: "single_touchpoint" | "multi_channel" | "business_wide";
   priorityScore: number;
   causalExplanation: string;
+  evidenceStrength: number;
+  contradictionStrength: number;
+  supportingIndependentSignals: number;
+  contradictingIndependentSignals: number;
+  supportingSourceCount: number;
+  contradictingSourceCount: number;
+  validationStatus: HypothesisValidationStatus;
+  validationReason: string;
+  reputationEvidenceConfidence?: number;
 }
 
 export interface StrengthCandidate {
@@ -105,18 +115,21 @@ export function buildProblemCandidates(profile: BusinessProfile, journey: Commer
       const pattern = patternFor(first);
       const stage = first.journeyStage;
       const against = positives.filter((item) => item.journeyStage === stage && patternFor(item) === pattern);
-      const evidenceStrength = Math.min(1, items.reduce((sum, item) => sum + (item.confidence === "ALTA" ? 1 : item.confidence === "MEDIA" ? .7 : .4), 0) / 2);
       const goalImpact = stageImportance(journey, stage);
       const retentionGoal = /volv|vuelv|recompra|renov|recurren|fideliza|clientes actuales|socios actuales/i.test(String(profile.goal?.text || ""));
       const commercialRelevance = retentionGoal
         ? stage === "retention" ? 1 : stage === "experience" ? .9 : .25
         : stage === "action" ? 1 : stage === "decision" || stage === "evaluation" ? .85 : .7;
       const solvability = solvabilityFor(pattern, profile);
-      const contradictionPenalty = Math.min(.35, against.length * .12);
       const frequency = items.length;
       const frequencyFactor = Math.min(1, .55 + frequency * .15);
-      const priorityScore = Math.round(evidenceStrength * goalImpact * commercialRelevance * frequencyFactor * solvability * (1 - contradictionPenalty) * 100);
       const causal = hypothesis(pattern, profile);
+      const validation = HypothesisValidationEngine.validate({ pattern, journeyStage: stage }, items, against);
+      const reputationValues = items.map((item) => item.reputationEvidenceConfidence).filter((value): value is number => typeof value === "number");
+      const reputationEvidenceConfidence = reputationValues.length ? reputationValues.reduce((sum, value) => sum + value, 0) / reputationValues.length : undefined;
+      const validationStatus = reputationEvidenceConfidence !== undefined && reputationEvidenceConfidence < .55 && validation.status === "validated" ? "partially_validated" : validation.status;
+      const validationFactor = validationStatus === "validated" ? 1 : validationStatus === "partially_validated" ? .35 : 0;
+      const priorityScore = Math.round(validation.evidenceStrength * goalImpact * commercialRelevance * frequencyFactor * solvability * (1 - validation.contradictionStrength) * validationFactor * 100);
       candidates.push({
         id: `problem:${stage}:${pattern}`,
         pattern,
@@ -134,6 +147,15 @@ export function buildProblemCandidates(profile: BusinessProfile, journey: Commer
         scope: sourceScope(items),
         priorityScore,
         causalExplanation: `${causal} La hipótesis se apoya en ${items.length} señal(es) y considera ${against.length} señal(es) que podrían contradecirla.`,
+        evidenceStrength: validation.evidenceStrength,
+        contradictionStrength: validation.contradictionStrength,
+        supportingIndependentSignals: validation.supportingIndependentSignals,
+        contradictingIndependentSignals: validation.contradictingIndependentSignals,
+        supportingSourceCount: validation.supportingSourceCount,
+        contradictingSourceCount: validation.contradictingSourceCount,
+        validationStatus,
+        validationReason: validationStatus !== validation.status ? "El patrón existe, pero la diversidad reputacional todavía no alcanza para presentarlo como problema principal." : validation.reason,
+        reputationEvidenceConfidence,
       });
     } catch (error) {
       issues.push({ stage: "problem_candidates", itemId: items[0]?.id, errorType: error instanceof Error ? error.name : "CandidateError", message: error instanceof Error ? error.message.slice(0, 180) : String(error).slice(0, 180) });

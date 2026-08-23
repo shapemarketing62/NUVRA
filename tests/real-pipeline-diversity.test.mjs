@@ -67,7 +67,12 @@ test("Mokka, Contable Norte, Distrito Barber y Noma atraviesan el pipeline y pro
   const results = await Promise.all(fixtures.map((fixture) => analyzeFixture(fixture)));
   const fingerprints = results.map((result) => result.intelligenceScore.dimensions.map((area) => area.points).join("-"));
   assert.equal(new Set(fingerprints).size, fixtures.length, fingerprints.join("\n"));
-  assert.equal(new Set(results.map((result) => result.diagnosis.bottleneck.title)).size, fixtures.length);
+  const diagnosisFingerprints = results.map((result) => `${result.diagnosis.bottleneck.title}|${result.diagnosis.bottleneck.explanation}|${result.strategy.actions.slice(0, 3).map((action) => action.title).join("|")}`);
+  assert.equal(new Set(diagnosisFingerprints).size, fixtures.length, diagnosisFingerprints.join("\n"));
+  for (const result of results) {
+    const selectedId = result.diagnosis.bottleneck.findingId;
+    if (selectedId) assert.ok(result.profile.problemCandidates.some((candidate) => candidate.validationStatus === "validated" && candidate.evidenceFor.includes(selectedId)));
+  }
   assert.equal(new Set(results.map((result) => result.strategy.actions.slice(0, 3).map((action) => action.title).join("|"))).size, fixtures.length);
   console.log("NUVRA_REAL_PIPELINE_COMPARISON=" + JSON.stringify(results.map((result) => ({ business: result.business.nombre, score: result.intelligenceScore.total, areas: Object.fromEntries(result.intelligenceScore.dimensions.map((area) => [area.slug, area.points])), strength: result.diagnosis.strengths[0]?.evidence || null, problem: result.diagnosis.bottleneck.title, opportunities: result.diagnosis.opportunities, actions: result.strategy.actions.slice(0, 5).map((action) => action.title) }))));
 });
@@ -91,7 +96,8 @@ test("un cambio contrafactual de evidencia cambia el área afectada sin números
   const baseConversion = base.intelligenceScore.dimensions.find((area) => area.slug === "conversion").points;
   const changedConversion = changed.intelligenceScore.dimensions.find((area) => area.slug === "conversion").points;
   assert.ok(changedConversion > baseConversion, `${baseConversion} -> ${changedConversion}`);
-  assert.notEqual(base.diagnosis.bottleneck.title, changed.diagnosis.bottleneck.title);
+  assert.notEqual(base.profile.problemCandidates.find((candidate) => candidate.pattern === "decision_information")?.validationStatus, "validated");
+  assert.equal(changed.profile.problemCandidates.some((candidate) => candidate.evidenceFor.includes("observed:n-shipping")), false);
 });
 
 test("un objetivo distinto cambia prioridad y acciones con la misma evidencia", async () => {

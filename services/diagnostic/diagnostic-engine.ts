@@ -44,7 +44,7 @@ export async function runDiagnosticEngine(business: BusinessContext, scoreResult
 }
 
 export function buildProfileDiagnosis(business: BusinessContext, scoreResult: NuvraScoreResult, profile: BusinessProfile): DiagnosisResult {
-  const problems = [...profile.problemCandidates].sort((a, b) => b.priorityScore - a.priorityScore);
+  const problems = [...profile.problemCandidates].filter((candidate) => candidate.validationStatus === "validated").sort((a, b) => b.priorityScore - a.priorityScore);
   const strengthsFound = [...profile.strengthCandidates].sort((a, b) => b.priorityScore - a.priorityScore);
   const primary = problems[0];
   const primaryStrength = strengthsFound[0];

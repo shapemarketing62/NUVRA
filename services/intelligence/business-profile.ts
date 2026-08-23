@@ -82,6 +82,7 @@ const categoryToArea = (category: string): string => {
   if (/redes/.test(category)) return "redes";
   if (/adquisicion|seo/.test(category)) return "adquisicion";
   if (/retencion/.test(category)) return "retencion";
+  if (/identidad|brand/.test(category)) return "identidad";
   return "presencia";
 };
 

@@ -4,7 +4,7 @@ import { NuvraScoreCalculator } from "../services/intelligence/nuvra-score-calcu
 import { getPrimaryBusinessStep, getBudgetFocus, isRetentionObjective, isSpecificBusinessAction } from "../services/strategy/business-action-language.ts";
 import fs from "node:fs";
 
-const dimensions = ["presencia", "conversion", "posicionamiento", "propuesta", "redes", "adquisicion"];
+const dimensions = ["presencia", "conversion", "posicionamiento", "propuesta", "redes", "adquisicion", "identidad"];
 const finding = (category, source, type, impact, evidence) => ({
   id: `${category}-${source}-${evidence}`,
   source,
@@ -127,8 +127,8 @@ test("manifestaciones del mismo obstáculo se penalizan una sola vez", () => {
     finding("conversion", "web", "negative", "medium", "El contacto está poco visible"),
     finding("conversion", "web", "negative", "medium", "Es difícil avanzar hacia una consulta"),
   ] });
-  assert.equal(one.dimensions.length, 7);
-  assert.equal(repeated.dimensions.length, 7);
+  assert.equal(one.dimensions.length, 8);
+  assert.equal(repeated.dimensions.length, 8);
   assert.equal(one.methodology.dimensionWeights.conversion.evidenceQuality, repeated.methodology.dimensionWeights.conversion.evidenceQuality);
 });
 

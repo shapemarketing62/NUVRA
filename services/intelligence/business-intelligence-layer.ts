@@ -291,6 +291,7 @@ export class BusinessIntelligenceLayer {
       adquisicion: "adquisicion",
       seo: "adquisicion",
       retencion: "retencion",
+      identidad: "identidad",
     };
     return mapping[category] || "presencia";
   }

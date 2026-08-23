@@ -81,7 +81,7 @@ export class WebSourceAnalyzer extends SourceAnalyzer {
       // Convertir RawFinding a EvidenceFinding
       const findings = analysisResult.findings.map((f: RawFinding) => {
         // Asegurar que siempre haya confidence
-        const confidence = f.confidence || this.deriveConfidence(f);
+        const confidence = this.normalizeConfidence(f.confidence) || this.deriveConfidence(f);
         
         return {
           id: `web-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
@@ -111,6 +111,8 @@ export class WebSourceAnalyzer extends SourceAnalyzer {
         metadata: {
           pagesAnalyzed: analysisResult.pagesAnalyzed,
           status: analysisResult.status,
+          journeys: analysisResult.journeys,
+          brandIdentity: analysisResult.brandIdentity,
           ...(analysisResult.errorMessage ? { reason: analysisResult.errorMessage } : {}),
         },
       };
@@ -158,5 +160,10 @@ export class WebSourceAnalyzer extends SourceAnalyzer {
       return "MEDIA"; // Problemas medios tienen confianza media
     }
     return "BAJA"; // Low severity o casos no evidentes tienen baja confianza
+  }
+
+  private normalizeConfidence(value: string | undefined): "ALTA" | "MEDIA" | "BAJA" | null {
+    const normalized = String(value || "").toUpperCase();
+    return normalized === "ALTA" || normalized === "MEDIA" || normalized === "BAJA" ? normalized : null;
   }
 }

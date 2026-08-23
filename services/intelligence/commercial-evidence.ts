@@ -27,6 +27,8 @@ export interface CommercialEvidence {
   disallowsClaims: string[];
   attribution: string;
   originalFindingId?: string;
+  reputationEvidenceConfidence?: number;
+  reputationTopic?: string;
 }
 
 type BusinessInput = Business & { goals?: Array<{ objetivo?: string; plazoDias?: number; plazoLabel?: string; magnitud?: number | null }> };
@@ -111,6 +113,8 @@ function observedEvidence(business: BusinessInput, aggregated: AggregatedEvidenc
         disallowsClaims: claims.disallows,
         attribution: normalizedFinding.attribution,
         originalFindingId: normalizedFinding.id,
+        reputationEvidenceConfidence: typeof finding.reputationEvidenceConfidence === "number" ? finding.reputationEvidenceConfidence : undefined,
+        reputationTopic: typeof finding.reputationTopic === "string" ? finding.reputationTopic : undefined,
       });
     } catch (error) {
       issues.push(processingIssue("commercial_evidence", itemId, error));
