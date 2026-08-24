@@ -62,7 +62,10 @@ function evidenceValue(item: CommercialEvidence, direction: "support" | "contrad
         : direction === "support" && /no (?:se )?(?:puede|completa|funciona)|error|bloque|falla|impide|redirige mal/i.test(item.text)
           ? .9
           : .72;
-  return confidence * kind * directness;
+  const sourceQuality = item.sourceQuality?.score ?? .58;
+  const independence = item.lineage?.independence ?? 1;
+  const snippetCeiling = item.acquisitionMethod === "search_index" ? .58 : 1;
+  return Math.min(snippetCeiling, confidence * kind * directness * (.55 + sourceQuality * .45) * independence);
 }
 
 function evidenceSetStrength(items: CommercialEvidence[], direction: "support" | "contradiction") {
@@ -83,6 +86,7 @@ function evidenceSetStrength(items: CommercialEvidence[], direction: "support" |
 }
 
 function independenceKey(item: CommercialEvidence) {
+  if (item.lineage?.originId) return item.lineage.originId;
   const attribution = item.attribution.toLowerCase().replace(/[?#].*$/, "").replace(/\/$/, "");
   const journeyIntent = item.text.toLowerCase().match(/(?:para|al|hasta) (comprar|reservar|consultar|pedir (?:turno|presupuesto)|solicitar|contactar)/)?.[1] || "";
   // Comentarios o menciones previamente deduplicados representan voces públicas

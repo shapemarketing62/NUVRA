@@ -2,6 +2,7 @@ import type { BusinessProfile } from "./business-profile.ts";
 import type { CommercialEvidence, CommercialJourneyStageId, CommercialProcessingIssue } from "./commercial-evidence.ts";
 import type { CommercialJourney } from "./commercial-journey-engine.ts";
 import { HypothesisValidationEngine, type HypothesisValidationStatus } from "./hypothesis-validation-engine.ts";
+import { calculateEvidenceSufficiency, type EvidenceSufficiencyResult } from "./evidence/evidence-sufficiency.ts";
 
 export type CommercialProblemPattern = "visibility" | "offer_clarity" | "trust" | "decision_information" | "action_path" | "experience" | "retention" | "demand_pattern" | "other";
 
@@ -31,6 +32,8 @@ export interface ProblemCandidate {
   validationStatus: HypothesisValidationStatus;
   validationReason: string;
   reputationEvidenceConfidence?: number;
+  evidenceSufficiency: EvidenceSufficiencyResult;
+  conclusionConfidence: number;
 }
 
 export interface StrengthCandidate {
@@ -44,6 +47,8 @@ export interface StrengthCandidate {
   confidence: "ALTA" | "MEDIA" | "BAJA";
   exploitability: number;
   priorityScore: number;
+  evidenceSufficiency: EvidenceSufficiencyResult;
+  conclusionConfidence: number;
 }
 
 const normalize = (value: unknown) => String(value ?? "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -125,11 +130,14 @@ export function buildProblemCandidates(profile: BusinessProfile, journey: Commer
       const frequencyFactor = Math.min(1, .55 + frequency * .15);
       const causal = hypothesis(pattern, profile);
       const validation = HypothesisValidationEngine.validate({ pattern, journeyStage: stage }, items, against);
+      const evidenceSufficiency = calculateEvidenceSufficiency(items, against, goalImpact);
       const reputationValues = items.map((item) => item.reputationEvidenceConfidence).filter((value): value is number => typeof value === "number");
       const reputationEvidenceConfidence = reputationValues.length ? reputationValues.reduce((sum, value) => sum + value, 0) / reputationValues.length : undefined;
-      const validationStatus = reputationEvidenceConfidence !== undefined && reputationEvidenceConfidence < .55 && validation.status === "validated" ? "partially_validated" : validation.status;
+      const lacksSufficiency = !["sufficient", "strong"].includes(evidenceSufficiency.status);
+      const validationStatus = (reputationEvidenceConfidence !== undefined && reputationEvidenceConfidence < .55 || lacksSufficiency) && validation.status === "validated" ? "partially_validated" : validation.status;
       const validationFactor = validationStatus === "validated" ? 1 : validationStatus === "partially_validated" ? .35 : 0;
-      const priorityScore = Math.round(validation.evidenceStrength * goalImpact * commercialRelevance * frequencyFactor * solvability * (1 - validation.contradictionStrength) * validationFactor * 100);
+      const conclusionConfidence = Math.min(1, evidenceSufficiency.score * .55 + validation.evidenceStrength * .25 + goalImpact * .12 + (1 - validation.contradictionStrength) * .08);
+      const priorityScore = Math.round(validation.evidenceStrength * goalImpact * commercialRelevance * frequencyFactor * solvability * (1 - validation.contradictionStrength) * validationFactor * (.45 + evidenceSufficiency.score * .55) * 100);
       candidates.push({
         id: `problem:${stage}:${pattern}`,
         pattern,
@@ -154,8 +162,10 @@ export function buildProblemCandidates(profile: BusinessProfile, journey: Commer
         supportingSourceCount: validation.supportingSourceCount,
         contradictingSourceCount: validation.contradictingSourceCount,
         validationStatus,
-        validationReason: validationStatus !== validation.status ? "El patrón existe, pero la diversidad reputacional todavía no alcanza para presentarlo como problema principal." : validation.reason,
+        validationReason: validationStatus !== validation.status ? evidenceSufficiency.reasons.join(" ") : validation.reason,
         reputationEvidenceConfidence,
+        evidenceSufficiency,
+        conclusionConfidence: Math.round(conclusionConfidence * 100) / 100,
       });
     } catch (error) {
       issues.push({ stage: "problem_candidates", itemId: items[0]?.id, errorType: error instanceof Error ? error.name : "CandidateError", message: error instanceof Error ? error.message.slice(0, 180) : String(error).slice(0, 180) });
@@ -195,7 +205,9 @@ export function buildStrengthCandidates(profile: BusinessProfile, journey: Comme
       const impact = stageImportance(journey, stage);
       const exploitability = ["trust", "visibility", "offer_clarity"].includes(pattern) ? .9 : .75;
       const frequency = items.length;
-      const candidate = { id: `strength:${stage}:${pattern}`, pattern, statement: strengthStatement(pattern, profile), journeyStage: stage, evidence: items.map((item) => item.id), frequency, commercialImpact: impact, confidence: confidenceOf(items), exploitability, priorityScore: Math.round(Math.min(1, .55 + frequency * .15) * impact * exploitability * 100) } satisfies StrengthCandidate;
+      const evidenceSufficiency = calculateEvidenceSufficiency(items, [], impact);
+      const conclusionConfidence = Math.min(1, evidenceSufficiency.score * .72 + impact * .18 + exploitability * .1);
+      const candidate = { id: `strength:${stage}:${pattern}`, pattern, statement: strengthStatement(pattern, profile), journeyStage: stage, evidence: items.map((item) => item.id), frequency, commercialImpact: impact, confidence: confidenceOf(items), exploitability, priorityScore: Math.round(Math.min(1, .4 + frequency * .12) * impact * exploitability * (.45 + evidenceSufficiency.score * .55) * 100), evidenceSufficiency, conclusionConfidence: Math.round(conclusionConfidence * 100) / 100 } satisfies StrengthCandidate;
       if (candidate.priorityScore >= 25) candidates.push(candidate);
     } catch (error) {
       issues.push({ stage: "strength_candidates", itemId: items[0]?.id, errorType: error instanceof Error ? error.name : "CandidateError", message: error instanceof Error ? error.message.slice(0, 180) : String(error).slice(0, 180) });

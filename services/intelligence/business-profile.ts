@@ -5,6 +5,7 @@ import { getGoalAdjustedAction, getGoalAreaRelevance, selectBusinessPlaybook, ty
 import { buildCommercialEvidence, type CommercialEvidence, type CommercialProcessingIssue } from "./commercial-evidence.ts";
 import { CommercialJourneyEngine, type CommercialJourney } from "./commercial-journey-engine.ts";
 import { buildProblemCandidates, buildStrengthCandidates, type ProblemCandidate, type StrengthCandidate } from "./commercial-candidates.ts";
+import { EvidenceCorroborationEngine, type EvidenceConflict } from "./evidence/evidence-corroboration-engine.ts";
 
 type GoalInput = { objetivo?: string; magnitud?: number | null; plazoDias?: number; plazoLabel?: string };
 type BusinessWithGoal = Business & { goals?: GoalInput[] };
@@ -72,6 +73,7 @@ export interface BusinessProfile {
   commercialJourney: CommercialJourney;
   problemCandidates: ProblemCandidate[];
   strengthCandidates: StrengthCandidate[];
+  evidenceConflicts: EvidenceConflict[];
   processingIssues: CommercialProcessingIssue[];
 }
 
@@ -254,9 +256,12 @@ export function buildBusinessProfile(business: BusinessWithGoal, aggregated: Agg
     commercialJourney: null as unknown as CommercialJourney,
     problemCandidates: [] as ProblemCandidate[],
     strengthCandidates: [] as StrengthCandidate[],
+    evidenceConflicts: [] as EvidenceConflict[],
     processingIssues,
   } satisfies BusinessProfile;
-  profile.commercialEvidence = buildCommercialEvidence({ business, aggregated, inferences: inferenceTrace }, processingIssues);
+  const qualityResult = EvidenceCorroborationEngine.enrich(buildCommercialEvidence({ business, aggregated, inferences: inferenceTrace }, processingIssues));
+  profile.commercialEvidence = qualityResult.evidence;
+  profile.evidenceConflicts = qualityResult.conflicts;
   try {
     profile.commercialJourney = CommercialJourneyEngine.build(profile, profile.commercialEvidence);
   } catch (error) {

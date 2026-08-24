@@ -1,6 +1,6 @@
 import type { BrandIdentityAnalysis, BrandIdentityAspect, BrandIdentitySourceEvidence, PageAnalysisData, RawFinding } from "./types.ts";
 
-const EXPECTED_SOURCES = ["web", "instagram", "tiktok", "google_business_profile", "facebook", "linkedin", "youtube"];
+const EXPECTED_SOURCES = ["web", "instagram", "tiktok", "google_business_profile", "facebook", "linkedin", "youtube", "x"];
 const ALL_ASPECTS: BrandIdentityAspect[] = ["logo", "colors", "typography", "photography", "tone", "crossChannelConsistency", "visualRecognition", "differentiation", "proposalCoherence", "temporalConsistency"];
 
 export class BrandIdentityAnalyzer {

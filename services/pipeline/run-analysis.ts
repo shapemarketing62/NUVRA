@@ -272,9 +272,10 @@ export async function runFullAnalysis(businessId: string, options: { signal?: Ab
     currentStage = "score_persist";
     const scoreId = randomUUID();
     const scorePersistStarted = Date.now();
+    const persistedScoreWeights = { scoreMethodologyVersion: biResult.nuvraScore.scoreMethodologyVersion, ...scoreResult.weights };
     await prisma.$executeRaw`
       INSERT INTO "NuvraScore" ("id", "businessId", "total", "objetivo", "plazoDias", "weights", "createdAt")
-      VALUES (${scoreId}, ${businessId}, ${scoreResult.total ?? null}, ${goal.objetivo}, ${goal.plazoDias}, ${JSON.stringify(scoreResult.weights)}, ${new Date()})
+      VALUES (${scoreId}, ${businessId}, ${scoreResult.total ?? null}, ${goal.objetivo}, ${goal.plazoDias}, ${JSON.stringify(persistedScoreWeights)}, ${new Date()})
     `;
     stageLog("6_score_persist", { businessId, scoreId, total: scoreResult.total, objective: goal.objetivo, plazoDias: goal.plazoDias }, { startedAt: scorePersistStarted, endedAt: Date.now(), durationMs: Date.now() - scorePersistStarted, id: scoreId });
 
@@ -464,6 +465,7 @@ export async function runFullAnalysis(businessId: string, options: { signal?: Ab
         INSERT INTO "AnalysisHistory" ("id", "businessId", "scoreId", "diagnosisId", "strategyId", "websiteAnalysisId", "nuvraScoreTotal", "snapshot", "createdAt")
         VALUES (${historyId}, ${businessId}, ${scoreId}, ${diagnosis.id}, ${strategyId}, ${websiteAnalysis?.id || null}, ${scoreResult.total ?? null}, ${JSON.stringify({
           score: scoreResult.total,
+          scoreMethodologyVersion: biResult.nuvraScore.scoreMethodologyVersion,
           dimensions: biResult.nuvraScore.dimensions.map((d) => ({ slug: d.slug, points: d.points, findings: d.findings.map((finding) => finding.id), scoringSignals: d.scoringSignals || [], weight: biResult.nuvraScore.methodology.dimensionWeights[d.slug] })),
           pagesAnalyzed: analysisResult.pagesAnalyzed,
           intelligence: {

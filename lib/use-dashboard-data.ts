@@ -119,7 +119,7 @@ export interface DashboardData {
     problem?: string;
     indicatorToImprove?: string;
   }>;
-  history: Array<{ nuvraScoreTotal: number | null; createdAt: string }>;
+  history: Array<{ nuvraScoreTotal: number | null; createdAt: string; scoreMethodologyVersion: string }>;
   loading: boolean;
   error: string | null;
 }
@@ -261,10 +261,14 @@ export function useDashboardData(): DashboardData {
             problem: a.problem,
             indicatorToImprove: a.indicatorToImprove,
           })),
-          history: (data.analysisHistory || []).map((h: { nuvraScoreTotal: number | null; createdAt: string }) => ({
-            nuvraScoreTotal: h.nuvraScoreTotal,
-            createdAt: h.createdAt,
-          })),
+          history: (data.analysisHistory || []).map((h: { nuvraScoreTotal: number | null; createdAt: string; snapshot?: string | null }) => {
+            const historySnapshot = parseJsonSafe<Record<string, any> | null>(h.snapshot, null);
+            return {
+              nuvraScoreTotal: h.nuvraScoreTotal,
+              createdAt: h.createdAt,
+              scoreMethodologyVersion: historySnapshot?.scoreMethodologyVersion || "LEGACY_UNVERSIONED",
+            };
+          }),
           loading: false,
           error: null,
         });

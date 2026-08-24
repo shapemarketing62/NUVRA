@@ -4,12 +4,14 @@ import type { CommercialJourneyStageId } from "./commercial-evidence.ts";
 export interface PublicCommentInput {
   id?: string; source: string; url?: string | null; date?: string | Date | null; rating?: number | null;
   text: string; author?: string | null; entityConfidence?: number; entityValidated?: boolean;
+  acquisitionMethod?: "official_api" | "authenticated_integration" | "public_page" | "search_index" | "declared_by_user";
 }
 export interface ReputationComment {
   id: string; source: string; url: string | null; date: string | null; rating: number | null; text: string;
   author: string | null; entityValidated: boolean; entityConfidence: number; topics: string[];
   sentiment: "positive" | "negative" | "neutral" | "unknown"; intensity: number; confidence: number;
   duplicate: boolean; experienceType: string; journeyStage: CommercialJourneyStageId;
+  acquisitionMethod?: PublicCommentInput["acquisitionMethod"];
 }
 export interface ReputationTopic {
   name: string; frequency: number; independentAuthors: number; recency: number; intensity: number; consistency: number;
@@ -22,13 +24,13 @@ export interface ReputationTopic {
 export interface ReputationAnalysis {
   comments: ReputationComment[]; accepted: ReputationComment[]; duplicates: ReputationComment[]; rejectedEntity: ReputationComment[];
   topics: ReputationTopic[]; strengths: ReputationTopic[]; problems: ReputationTopic[];
-  platformDifferences: Array<{ source: string; leadingTopics: string[] }>;
+  platformDifferences: Array<{ topic: string; positiveSources: string[]; negativeSources: string[]; recent: boolean; confidence: number; evidence: string }>;
   temporalClaims: Array<{ topic: string; trend: ReputationTopic["trend"]; evidence: string }>;
   coverage: { total: number; accepted: number; independentAuthors: number; dated: number; sources: string[]; evidenceConfidence: number };
 }
 
 const SEEDS: Array<[string, RegExp]> = [
-  ["atención", /atenci[oó]n|amable|trato|personal|equipo/], ["precio", /precio|car[oa]|econ[oó]mic|valor/],
+  ["atención", /atenci[oó]n|atiend|amable|trato|personal|equipo/], ["precio", /precio|car[oa]|econ[oó]mic|valor/],
   ["calidad", /calidad|excelente|delicios|rico|fresco|terminaci[oó]n/], ["demora", /demora|tard|espera|lento/],
   ["ubicación", /ubicaci[oó]n|cerca|direcci[oó]n|acceso/], ["limpieza", /limpi|suci|higiene/],
   ["profesionales", /profesional|especialista|m[eé]dic|docente|asesor/], ["producto", /producto|material|caf[eé]|comida|servicio/],
@@ -44,19 +46,23 @@ export class ReputationIntelligence {
     const threshold = context.entityThreshold ?? .72;
     const now = context.now || new Date();
     const seen = new Map<string, string>();
+    const seenComments: Array<{ normalized: string; author: string; date: string | null }> = [];
     const prepared = (Array.isArray(input) ? input : []).filter((item) => typeof item?.text === "string" && item.text.trim().length >= 8).map((item, index) => {
       const normalized = normalize(item.text);
       const fingerprint = createHash("sha256").update(normalized).digest("hex").slice(0, 20);
-      const duplicate = seen.has(fingerprint);
+      const normalizedAuthor = normalize(item.author || "");
+      const itemDate = validDate(item.date);
+      const duplicate = seen.has(fingerprint) || seenComments.some((previous) => normalizedAuthor && previous.author === normalizedAuthor && datesNear(previous.date, itemDate, 3) && tokenSimilarity(previous.normalized, normalized) >= .82);
       if (!duplicate) seen.set(fingerprint, item.id || `comment-${index}`);
+      if (!duplicate) seenComments.push({ normalized, author: normalizedAuthor, date: itemDate });
       const sentiment = sentimentOf(item.text, item.rating);
       return {
         id: item.id || `${item.source}-${index}-${fingerprint.slice(0, 6)}`, source: item.source, url: item.url || null,
-        date: validDate(item.date), rating: validRating(item.rating), text: item.text.trim(), author: item.author || null,
+        date: itemDate, rating: validRating(item.rating), text: item.text.trim(), author: item.author || null,
         entityValidated: item.entityValidated !== false && (item.entityConfidence ?? 1) >= threshold,
         entityConfidence: clamp(item.entityConfidence ?? 1), topics: topicsOf(item.text), sentiment,
         intensity: intensityOf(item.text, item.rating), confidence: commentConfidence(item), duplicate,
-        experienceType: experienceTypeOf(item.text), journeyStage: stageOf(item.text),
+        experienceType: experienceTypeOf(item.text), journeyStage: stageOf(item.text), acquisitionMethod: item.acquisitionMethod,
       } satisfies ReputationComment;
     });
     const rejectedEntity = prepared.filter((item) => !item.entityValidated);
@@ -67,7 +73,7 @@ export class ReputationIntelligence {
       comments: prepared, accepted, duplicates, rejectedEntity, topics,
       strengths: topics.filter((topic) => topic.polarity === "positive" && topic.independentAuthors >= 3 && topic.consistency >= .6 && topic.evidenceConfidence >= .4),
       problems: topics.filter((topic) => topic.polarity === "negative" && topic.independentAuthors >= 3 && topic.commercialImpact >= .5 && topic.goalRelevance >= .65 && topic.contradictionRatio <= .35 && topic.evidenceConfidence >= .45 && (topic.recency >= .2 || topic.temporalDiversity >= .35 || topic.trend === "deteriorating")),
-      platformDifferences: Array.from(new Set(accepted.map((item) => item.source))).map((source) => ({ source, leadingTopics: topics.filter((topic) => topic.sourceDistribution[source]).sort((a, b) => (b.sourceDistribution[source] || 0) - (a.sourceDistribution[source] || 0)).slice(0, 3).map((topic) => topic.name) })),
+      platformDifferences: platformDifferences(accepted, topics, now),
       temporalClaims: topics.filter((topic) => topic.trend !== "insufficient_temporal_evidence" && topic.trend !== "stable").map((topic) => ({ topic: topic.name, trend: topic.trend, evidence: temporalEvidence(topic) })),
       coverage: { total: prepared.length, accepted: accepted.length, independentAuthors: new Set(accepted.map((item) => item.author || item.id)).size, dated: accepted.filter((item) => item.date).length, sources: Array.from(new Set(accepted.map((item) => item.source))), evidenceConfidence: topics.length ? average(topics.slice(0, 8).map((topic) => topic.evidenceConfidence)) : 0 },
     };
@@ -98,7 +104,7 @@ function aggregateTopics(comments: ReputationComment[], duplicates: ReputationCo
     const recentNegRatio = recent.filter((item) => item.sentiment === "negative").length / Math.max(recent.length, 1);
     const recentPosRatio = recent.filter((item) => item.sentiment === "positive").length / Math.max(recent.length, 1);
     const contradictionRatio = trend === "deteriorating" && polarity === "negative" ? 1 - recentNegRatio : trend === "improving" && polarity === "positive" ? 1 - recentPosRatio : polarity === "negative" ? positive / items.length : polarity === "positive" ? negative / items.length : Math.min(1, Math.min(positive, negative) / Math.max(1, Math.max(positive, negative)));
-    const independentAuthors = new Set(items.map((item) => item.author || item.id)).size;
+    const independentAuthors = new Set(items.map((item) => item.author || (item.acquisitionMethod === "search_index" ? `unknown-search:${item.source}` : item.id))).size;
     const recency = dated.length ? recent.length / dated.length : 0;
     const consistency = trend === "deteriorating" ? recentNegRatio : trend === "improving" ? recentPosRatio : Math.max(positive, negative) / items.length;
     const evidenceConfidence = clamp(Math.min(1, independentAuthors / 30) * .25 + sourceDiversity * .2 + temporalDiversity * .2 + recency * .12 + consistency * .1 + entityConfidence * .1 + (1 - duplicationRate) * .03);
@@ -125,3 +131,27 @@ function validRating(value?: number | null) { return typeof value === "number" &
 function normalize(value: string) { return value.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim(); }
 function average(values: number[]) { return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0; }
 function clamp(value: number) { return Math.max(0, Math.min(1, value)); }
+function datesNear(a: string | null, b: string | null, days: number) { if (!a || !b) return false; return Math.abs(new Date(a).getTime() - new Date(b).getTime()) <= days * 86400000; }
+function tokenSimilarity(a: string, b: string) { const left = new Set(a.split(" ").filter(Boolean)); const right = new Set(b.split(" ").filter(Boolean)); if (!left.size || !right.size) return 0; const shared = Array.from(left).filter((item) => right.has(item)).length; return shared / Math.max(left.size, right.size); }
+
+function platformDifferences(comments: ReputationComment[], topics: ReputationTopic[], now: Date): ReputationAnalysis["platformDifferences"] {
+  const result: ReputationAnalysis["platformDifferences"] = [];
+  for (const topic of topics) {
+    const related = comments.filter((item) => item.topics.includes(topic.name));
+    const sources = Array.from(new Set(related.map((item) => item.source)));
+    const positiveSources: string[] = []; const negativeSources: string[] = [];
+    for (const source of sources) {
+      const items = related.filter((item) => item.source === source);
+      if (items.length < 3) continue;
+      const positive = items.filter((item) => item.sentiment === "positive").length / items.length;
+      const negative = items.filter((item) => item.sentiment === "negative").length / items.length;
+      if (positive >= .65) positiveSources.push(source);
+      if (negative >= .65) negativeSources.push(source);
+    }
+    if (!positiveSources.length || !negativeSources.length) continue;
+    const recentNegative = related.filter((item) => negativeSources.includes(item.source) && item.date && now.getTime() - new Date(item.date).getTime() <= 120 * 86400000).length;
+    const confidence = clamp(Math.min(1, related.length / 30) * .4 + Math.min(1, sources.length / 3) * .35 + topic.entityConfidence * .15 + topic.temporalDiversity * .1);
+    result.push({ topic: topic.name, positiveSources, negativeSources, recent: recentNegative >= 3, confidence, evidence: `La percepción sobre “${topic.name}” es favorable en ${positiveSources.join(", ")} y desfavorable en ${negativeSources.join(", ")}${recentNegative >= 3 ? " en comentarios recientes" : ""}.` });
+  }
+  return result;
+}

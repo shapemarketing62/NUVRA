@@ -19,6 +19,11 @@ export interface DiagnosisResult extends Omit<DiagnosisOutput, "opportunities" |
   engineType: "deterministic" | "ai";
   opportunities: string[];
   risks: string[];
+  conclusionAudit?: {
+    mainProblem: { candidateId: string | null; conclusionConfidence: number | null; evidenceSufficiency: string | null };
+    strengths: Array<{ candidateId: string; conclusionConfidence: number }>;
+    opportunities: Array<{ text: string; conclusionConfidence: number; basedOn: string }>;
+  };
 }
 
 const sourceLabel = (source: string) => ({ web: "el sitio web", instagram: "Instagram", search: "Google", reviews: "las reseñas", competitor: "los negocios similares", external_mentions: "las menciones externas", other: "la información aportada" }[source] || "la evidencia encontrada");
@@ -45,7 +50,7 @@ export async function runDiagnosticEngine(business: BusinessContext, scoreResult
 
 export function buildProfileDiagnosis(business: BusinessContext, scoreResult: NuvraScoreResult, profile: BusinessProfile): DiagnosisResult {
   const problems = [...profile.problemCandidates].filter((candidate) => candidate.validationStatus === "validated").sort((a, b) => b.priorityScore - a.priorityScore);
-  const strengthsFound = [...profile.strengthCandidates].sort((a, b) => b.priorityScore - a.priorityScore);
+  const strengthsFound = [...profile.strengthCandidates].filter((candidate) => ["sufficient", "strong"].includes(candidate.evidenceSufficiency?.status || "limited")).sort((a, b) => b.priorityScore - a.priorityScore);
   const primary = problems[0];
   const primaryStrength = strengthsFound[0];
   const score = scoreResult.total ?? 40;
@@ -67,6 +72,11 @@ export function buildProfileDiagnosis(business: BusinessContext, scoreResult: Nu
     opportunities,
     risks,
     priorities,
+    conclusionAudit: {
+      mainProblem: { candidateId: primary?.id || null, conclusionConfidence: primary?.conclusionConfidence ?? null, evidenceSufficiency: primary?.evidenceSufficiency.status || null },
+      strengths: strengthsFound.slice(0, 4).map((candidate) => ({ candidateId: candidate.id, conclusionConfidence: candidate.conclusionConfidence })),
+      opportunities: opportunities.map((text, index) => ({ text, conclusionConfidence: problems[index]?.conclusionConfidence ?? strengthsFound[0]?.conclusionConfidence ?? .35, basedOn: problems[index]?.id || strengthsFound[0]?.id || "declared_context" })),
+    },
   };
 }
 

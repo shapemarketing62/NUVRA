@@ -31,7 +31,10 @@ export default function EvolucionPage() {
     );
   }
 
-  if (history.length === 1) {
+  const currentMethodologyVersion = history[0].scoreMethodologyVersion;
+  const comparableHistory = history.filter((item) => item.scoreMethodologyVersion === currentMethodologyVersion);
+
+  if (comparableHistory.length === 1) {
     return (
       <div>
         <div style={{ marginBottom: 32 }}>
@@ -52,18 +55,18 @@ export default function EvolucionPage() {
         }}>
           <h3 style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>Primer análisis completado</h3>
           <p style={{ color: COLORS.inkSoft, marginBottom: 16 }}>
-            Tu Nuvra Score actual es: <strong>{history[0].nuvraScoreTotal || "N/A"}</strong>
+            Tu Nuvra Score actual es: <strong>{comparableHistory[0].nuvraScoreTotal || "N/A"}</strong>
           </p>
           <p style={{ fontSize: 13, color: COLORS.inkFaint }}>
-            Realizá un nuevo análisis en el futuro para ver la evolución y comparar mejoras.
+            Realizá un nuevo análisis para comparar resultados calculados con la misma metodología.
           </p>
         </div>
       </div>
     );
   }
 
-  const firstScore = history[history.length - 1].nuvraScoreTotal || 0;
-  const lastScore = history[0].nuvraScoreTotal || 0;
+  const firstScore = comparableHistory[comparableHistory.length - 1].nuvraScoreTotal || 0;
+  const lastScore = comparableHistory[0].nuvraScoreTotal || 0;
   const change = lastScore - firstScore;
   const changePercent = firstScore > 0 ? Math.round((change / firstScore) * 100) : 0;
 

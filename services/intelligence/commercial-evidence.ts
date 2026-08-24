@@ -29,13 +29,18 @@ export interface CommercialEvidence {
   originalFindingId?: string;
   reputationEvidenceConfidence?: number;
   reputationTopic?: string;
+  acquisitionMethod?: "official_api" | "authenticated_integration" | "public_page" | "search_index" | "declared_by_user";
+  lineage?: import("./evidence/source-quality-model.ts").EvidenceLineage & { independence: number };
+  sourceQuality?: import("./evidence/source-quality-model.ts").SourceQualityAssessment;
+  corroboration?: import("./evidence/evidence-corroboration-engine.ts").EvidenceCorroboration;
 }
 
 type BusinessInput = Business & { goals?: Array<{ objetivo?: string; plazoDias?: number; plazoLabel?: string; magnitud?: number | null }> };
 
 const normalize = (value: unknown) => String(value ?? "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 const validStages = new Set<CommercialJourneyStageId>(["discovery", "evaluation", "decision", "action", "experience", "retention"]);
-const validSources = new Set<SourceType>(["web", "instagram", "search", "reviews", "competitor", "x", "external_mentions", "other"]);
+const validSources = new Set<SourceType>(["web", "instagram", "search", "reviews", "competitor", "x", "tiktok", "reddit", "facebook", "linkedin", "youtube", "external_mentions", "other"]);
+const defaultAcquisitionMethod = (source: SourceType): CommercialEvidence["acquisitionMethod"] => source === "search" || source === "competitor" || source === "external_mentions" ? "search_index" : source === "other" ? undefined : "public_page";
 
 function processingIssue(stage: CommercialProcessingIssue["stage"], itemId: string | undefined, error: unknown): CommercialProcessingIssue {
   return {
@@ -50,11 +55,12 @@ export function inferJourneyStage(text: string, source: string, category = ""): 
   const value = normalize(`${text} ${category}`);
   if (/pocas (reservas|visitas|ventas|consultas)|baja demanda|lunes|martes|miercoles|jueves|temporada baja/.test(value)) return "action";
   if (/retencion|recompra|volver|renov|seguimiento|recordatorio|fidel|post.?venta|clientes actuales|proximo paso|despues de cada/.test(value)) return "retention";
+  if (/posicionamiento|propuesta/.test(normalize(category))) return "evaluation";
   if (/entrega|recibi|experiencia|atencion|demora|rapidez|calidad del servicio|respuesta del negocio/.test(value)) return "experience";
   if (/whatsapp|boton|cta|formulario|checkout|carrito|reserv|turno|pedir|comprar|llamar|contactar|inscrib/.test(value)) return "action";
   if (/precio|pago|envio|horario|ubicacion|direccion|disponibilidad|cuota|condicion|presupuesto/.test(value)) return "decision";
   if (/resena|opinion|testimonio|confianza|caso|trabajo|producto|servicio|especializ|propuesta|bio/.test(value)) return "evaluation";
-  if (["search", "external_mentions", "instagram", "x"].includes(source) || /google|busqueda|encontr|aparece|visibilidad|mencion/.test(value)) return "discovery";
+  if (["search", "external_mentions", "instagram", "x", "tiktok", "reddit", "facebook", "linkedin", "youtube"].includes(source) || /google|busqueda|encontr|aparece|visibilidad|mencion/.test(value)) return "discovery";
   return "evaluation";
 }
 
@@ -63,6 +69,7 @@ function observedClaims(finding: EvidenceFinding): { allows: string[]; disallows
   const allows = [`Afirmar que se observó esta señal en ${finding.attribution}.`, `Usar la señal para analizar la etapa ${stage}.`];
   const disallows = ["No permite afirmar resultados comerciales, ventas o reservas que la fuente no informó.", "No permite generalizar esta observación a todos los clientes."];
   if (finding.source === "instagram") disallows.push("No permite inferir alcance, interacción o ventas privadas.");
+  if (["x", "tiktok", "reddit", "facebook", "linkedin", "youtube"].includes(finding.source)) disallows.push("No permite inferir alcance privado, atribución comercial ni representar a toda la audiencia.");
   if (finding.source === "reviews") disallows.push("No permite atribuir la opinión a toda la clientela ni inventar temas no repetidos.");
   if (finding.source === "search") disallows.push("No permite afirmar una posición estable en Google ni tráfico propio.");
   return { allows, disallows };
@@ -115,6 +122,7 @@ function observedEvidence(business: BusinessInput, aggregated: AggregatedEvidenc
         originalFindingId: normalizedFinding.id,
         reputationEvidenceConfidence: typeof finding.reputationEvidenceConfidence === "number" ? finding.reputationEvidenceConfidence : undefined,
         reputationTopic: typeof finding.reputationTopic === "string" ? finding.reputationTopic : undefined,
+        acquisitionMethod: finding.acquisitionMethod || defaultAcquisitionMethod(source),
       });
     } catch (error) {
       issues.push(processingIssue("commercial_evidence", itemId, error));
@@ -152,6 +160,7 @@ function declaredEvidence(business: BusinessInput): CommercialEvidence[] {
     allowsClaims: ["Permite afirmar que el negocio declaró este dato y usarlo como contexto de decisión."],
     disallowsClaims: ["No permite afirmar que el dato fue verificado externamente.", "No debe convertirse por sí solo en una evaluación de desempeño."],
     attribution: "Onboarding del negocio",
+    acquisitionMethod: "declared_by_user",
   }));
 }
 

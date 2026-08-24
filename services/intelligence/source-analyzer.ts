@@ -1,6 +1,6 @@
 import type { Business } from "@prisma/client";
 
-export type SourceType = "web" | "instagram" | "search" | "reviews" | "competitor" | "x" | "external_mentions" | "other";
+export type SourceType = "web" | "instagram" | "search" | "reviews" | "competitor" | "x" | "tiktok" | "reddit" | "facebook" | "linkedin" | "youtube" | "external_mentions" | "other";
 
 export type SourceStatus = "evaluated" | "unavailable" | "not_relevant" | "requires_auth";
 
@@ -28,6 +28,7 @@ export interface EvidenceFinding {
   confidence: "ALTA" | "MEDIA" | "BAJA";
   reputationEvidenceConfidence?: number;
   reputationTopic?: string;
+  acquisitionMethod?: "official_api" | "authenticated_integration" | "public_page" | "search_index" | "declared_by_user";
 }
 
 export interface SourceRelevance {

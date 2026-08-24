@@ -11,6 +11,11 @@ import type { DiscoveryResult } from "@/services/discovery/business-discovery-se
 import type { Business } from "@prisma/client";
 import { IntegrationSourceAnalyzer } from "@/services/integrations/integration-source-analyzer";
 import { buildBusinessProfile, type BusinessProfile } from "./business-profile";
+import { SocialPlatformSourceAnalyzer } from "./social/social-source-analyzer.ts";
+import { createDefaultSocialProviders } from "./social/social-providers.ts";
+import { enrichCrossSourceReputation } from "./social/cross-source-reputation.ts";
+import { enrichMultisourceBrandIdentity } from "./social/multisource-brand-identity.ts";
+import { buildInstagramDiscoveredAccess } from "./social/instagram-access.ts";
 
 export interface BusinessIntelligenceResult {
   aggregatedEvidence: AggregatedEvidence;
@@ -38,7 +43,7 @@ export class BusinessIntelligenceLayer {
     this.aggregator.registerSource(new ExternalMentionsSourceAnalyzer());
     this.aggregator.registerSource(new CompetitorSourceAnalyzer());
     this.aggregator.registerSource(new IntegrationSourceAnalyzer("instagram", "instagram"));
-    this.aggregator.registerSource(new IntegrationSourceAnalyzer("x", "x"));
+    for (const provider of createDefaultSocialProviders()) this.aggregator.registerSource(new SocialPlatformSourceAnalyzer(provider));
   }
 
   registerSource(analyzer: SourceAnalyzer): void {
@@ -62,6 +67,9 @@ export class BusinessIntelligenceLayer {
       this.enrichEvidenceWithDiscovery(aggregatedEvidence, discoveryResult);
     }
     this.enrichEvidenceWithDeclaredContext(aggregatedEvidence, targetBusiness, objectiveFromBusiness(targetBusiness));
+    const objective = objectiveFromBusiness(targetBusiness);
+    enrichCrossSourceReputation(aggregatedEvidence, objective);
+    enrichMultisourceBrandIdentity(aggregatedEvidence);
     const businessProfile = buildBusinessProfile(targetBusiness as Business & { goals?: Array<{ objetivo?: string; magnitud?: number | null; plazoDias?: number; plazoLabel?: string }> }, aggregatedEvidence);
 
     console.log("[BI_LAYER] Evidence aggregated:", {
@@ -85,7 +93,6 @@ export class BusinessIntelligenceLayer {
     const digitalScore = DigitalScoreCalculator.calculate(webEvidence);
 
     // 5. Calcular Nuvra Score (basado en evidence agregada)
-    const objective = (targetBusiness as Business & { goals?: Array<{ objetivo?: string }> }).goals?.[0]?.objetivo;
     const nuvraScore = NuvraScoreCalculator.calculate(aggregatedEvidence, coverage, { objective, businessProfile });
     console.log("[BI_LAYER] Nuvra Score calculated:", {
       total: nuvraScore.total,
@@ -139,6 +146,7 @@ export class BusinessIntelligenceLayer {
     if (discovery.primaryInstagram && (!aggregated.sources.instagram || aggregated.sources.instagram.status !== "evaluated")) {
       const candidate = discovery.allCandidates.find((item) => item.type === "instagram" && item.url === discovery.primaryInstagram);
       const declared = Boolean(discovery.target.declaredInstagram);
+      const instagramAccess = buildInstagramDiscoveredAccess({ url: discovery.primaryInstagram, title: candidate?.title, snippet: candidate?.snippet, declared });
       const confidence: "ALTA" | "MEDIA" = declared || candidate?.status === "confirmed" ? "ALTA" : "MEDIA";
       const publicFinding: EvidenceFinding = {
         id: `instagram-public-${Buffer.from(discovery.primaryInstagram).toString("base64url").slice(0, 20)}`,
@@ -150,20 +158,24 @@ export class BusinessIntelligenceLayer {
         attribution: candidate?.title || "Perfil aportado o descubierto públicamente",
         weight: 0.25,
         confidence,
+        acquisitionMethod: declared ? "declared_by_user" : "search_index",
       };
       aggregated.sources.instagram = {
         source: "instagram",
-        status: "evaluated",
-        data: { url: discovery.primaryInstagram, title: candidate?.title, publicDescription: candidate?.snippet || null, publicOnly: true },
+        status: "unavailable",
+        data: instagramAccess.data,
         findings: [publicFinding],
-        confidence,
-        coverage: candidate?.snippet ? 45 : 30,
+        confidence: "INSUFICIENTE",
+        coverage: 0,
         evaluatedAt: new Date(),
         requiresAuth: true,
         metadata: {
-          reason: "Perfil público identificado; las métricas privadas requieren autorización.",
+          reason: instagramAccess.limitation,
           discoveredUrl: discovery.primaryInstagram,
           privateMetricsAvailable: false,
+          finalStatus: "discovered",
+          acquisitionMethods: [instagramAccess.acquisitionMethod],
+          sourceCoverage: instagramAccess.sourceCoverage,
         },
       };
       if (candidate?.snippet) {
@@ -178,6 +190,7 @@ export class BusinessIntelligenceLayer {
           attribution: discovery.primaryInstagram,
           weight: hasDirectStep ? 0.55 : 0.3,
           confidence,
+          acquisitionMethod: declared ? "declared_by_user" : "search_index",
         };
         aggregated.sources.instagram.findings.push(bioFinding);
         aggregated.findings.push(bioFinding);

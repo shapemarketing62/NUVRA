@@ -15,6 +15,8 @@ export interface AggregatedEvidence {
   byDimension: Record<string, EvidenceFinding[]>;
   deduplicated: EvidenceFinding[];
   evaluatedAt: Date;
+  crossSourceReputation?: import("./reputation-intelligence.ts").ReputationAnalysis;
+  multisourceBrandIdentity?: import("../website-analyzer/types.ts").BrandIdentityAnalysis;
 }
 
 export interface SourceCoverage {
@@ -290,7 +292,12 @@ function defaultPolicy(source: SourceType): SourceExecutionPolicy {
     competitor: { timeoutMs: 24_000, retries: 1, backoffMs: 350 },
     external_mentions: { timeoutMs: 22_000, retries: 1, backoffMs: 300 },
     instagram: { timeoutMs: 12_000, retries: 0, backoffMs: 0 },
-    x: { timeoutMs: 12_000, retries: 0, backoffMs: 0 },
+    x: { timeoutMs: 10_000, retries: 1, backoffMs: 250 },
+    tiktok: { timeoutMs: 10_000, retries: 1, backoffMs: 250 },
+    reddit: { timeoutMs: 10_000, retries: 1, backoffMs: 250 },
+    facebook: { timeoutMs: 10_000, retries: 1, backoffMs: 250 },
+    linkedin: { timeoutMs: 10_000, retries: 1, backoffMs: 250 },
+    youtube: { timeoutMs: 10_000, retries: 1, backoffMs: 250 },
     other: { timeoutMs: 15_000, retries: 1, backoffMs: 250 },
   };
   return policies[source];

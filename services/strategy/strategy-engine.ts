@@ -51,6 +51,7 @@ export interface StrategyResult extends StrategyOutput {
       metric?: string;
       expectedImpact?: string;
       confidence?: string;
+      conclusionConfidence?: number;
       knowledgePatternIds?: string[];
       rejectedKnowledgePatternIds?: string[];
       knowledgeMatches?: Array<{
@@ -104,7 +105,7 @@ export async function runStrategyEngine(
   return buildDeterministicStrategy(context, diagnosis, scoreResult, findings);
 }
 
-const actionSourceLabel = (source: string) => ({ web: "el sitio web", instagram: "Instagram", search: "Google", reviews: "las reseñas", competitor: "la comparación con negocios similares", external_mentions: "las menciones externas", other: "la información aportada" }[source] || "el canal observado");
+const actionSourceLabel = (source: string) => ({ web: "el sitio web", instagram: "Instagram", search: "Google", reviews: "las reseñas", competitor: "la comparación con negocios similares", x: "X", tiktok: "TikTok", reddit: "Reddit", facebook: "Facebook", linkedin: "LinkedIn", youtube: "YouTube", external_mentions: "las menciones externas", other: "la información aportada" }[source] || "el canal observado");
 
 function businessDecisionFocus(profile: BusinessProfile): string {
   if (profile.commercialModel === "appointments") return "el servicio o tratamiento que más aporta al objetivo";
@@ -210,13 +211,15 @@ export function buildProfileStrategy(context: StrategyContext, diagnosis: Diagno
     timeframe: intervention.timeframe,
     kpi: intervention.metric,
     justification: `Esta intervención responde a una fricción de ${problem.journeyStage} que afecta el objetivo “${profile.goal.text}”.`,
+    conclusionConfidence: problem.conclusionConfidence,
   })).filter(isSpecificBusinessAction);
 
   // Si no hay una hipótesis negativa validada, NUVRA puede proponer cómo
   // aprovechar fortalezas comprobadas. No convierte una señal parcial en falla.
   if (actions.length < 3) {
+    const sufficientStrengthEvidence = new Set(profile.strengthCandidates.filter((candidate) => ["limited", "sufficient", "strong"].includes(candidate.evidenceSufficiency?.status || "limited")).flatMap((candidate) => candidate.evidence));
     const strengthFindings = [...profile.contextualFindings]
-      .filter((finding) => finding.type === "strength")
+      .filter((finding) => finding.type === "strength" && (finding.findingId.startsWith("declared:") || sufficientStrengthEvidence.has(`observed:${finding.findingId}`)))
       .sort((a, b) => b.priorityScore - a.priorityScore);
     for (const finding of strengthFindings) {
       if (actions.length >= 3) break;
@@ -245,11 +248,31 @@ export function buildProfileStrategy(context: StrategyContext, diagnosis: Diagno
         timeframe: shortTerm ? "14–30 días" : "30–45 días",
         kpi: proposal.kpi,
         justification: `La evidencia favorable es relevante para “${profile.goal.text}”.`,
+        conclusionConfidence: profile.strengthCandidates.find((candidate) => candidate.evidence.includes(`observed:${finding.findingId}`))?.conclusionConfidence ?? .4,
       };
       if (!isSpecificBusinessAction(action)) continue;
       actions.push(action);
-      strengthBasedAudit.push({ findingId: finding.findingId, title: proposal.title, priority: finding.priorityScore, selected: true, reason: "Seleccionada para aprovechar una fortaleza comprobada sin convertir señales parciales en problemas.", journeyStage: profile.commercialEvidence.find((item) => item.originalFindingId === finding.findingId)?.journeyStage, evidenceIds: [finding.findingId], cause: finding.interpretation, proposedChange: proposal.description, where: actionSourceLabel(finding.source), difficulty: "baja", timeframe: action.estimatedTime, metric: proposal.kpi, expectedImpact: "Aprovechar una base que ya funciona.", confidence: finding.confidence });
+      strengthBasedAudit.push({ findingId: finding.findingId, title: proposal.title, priority: finding.priorityScore, selected: true, reason: "Seleccionada para aprovechar una fortaleza comprobada sin convertir señales parciales en problemas.", journeyStage: profile.commercialEvidence.find((item) => item.originalFindingId === finding.findingId)?.journeyStage, evidenceIds: [finding.findingId], cause: finding.interpretation, proposedChange: proposal.description, where: actionSourceLabel(finding.source), difficulty: "baja", timeframe: action.estimatedTime, metric: proposal.kpi, expectedImpact: "Aprovechar una base que ya funciona.", confidence: finding.confidence, conclusionConfidence: action.conclusionConfidence });
     }
+  }
+
+  // Con evidencia parcial puede existir una acción segura sin inventar un
+  // problema: medir el paso comercial principal en un canal ya observado.
+  if (actions.length === 0 && profile.primaryChannel) {
+    const where = actionSourceLabel(profile.primaryChannel);
+    const evidenceIds = profile.commercialEvidence.filter((item) => item.source === profile.primaryChannel).slice(0, 3).map((item) => item.id);
+    const title = `Medir cómo las personas pasan de ${where} a ${profile.primaryCustomerAction}`;
+    const action = {
+      title,
+      description: `Registrar durante dos semanas cuántas personas llegan desde ${where}, intentan ${profile.primaryCustomerAction} y completan ese paso. No cambiar el recorrido hasta confirmar dónde se pierde el avance.`,
+      order: 1, impact: "medio" as const, difficulty: "baja" as const, estimatedTime: "14 días", dependencies: [],
+      indicatorToImprove: profile.primaryResult, rationale: "La información disponible orienta el canal, pero no alcanza para afirmar una fricción. Primero conviene medir el recorrido real.",
+      relatedFindingIds: evidenceIds, findingIds: evidenceIds, evidence: evidenceIds.map((id) => profile.commercialEvidence.find((item) => item.id === id)?.text).filter(Boolean).join(" · ") || `Se observó ${where} como canal del negocio.`,
+      inference: "La evidencia es limitada; esta acción valida la hipótesis antes de intervenir.", dimension: "commercial_journey", framework: "EvidenceValidation", confidence: "BAJA", problem: "No existe todavía un problema principal con evidencia suficiente.", unlocksContent: false,
+      effort: "baja" as const, timeframe: "14 días", kpi: profile.primaryResult, justification: `Permite decidir con datos si el recorrido hacia ${profile.primaryCustomerAction} necesita cambios.`, conclusionConfidence: .28,
+    };
+    actions.push(action);
+    strengthBasedAudit.push({ findingId: evidenceIds[0] || `channel:${profile.primaryChannel}`, title, priority: 20, selected: true, reason: "Acción de validación elegida porque ninguna conclusión alcanzó suficiencia para justificar una intervención.", journeyStage: "action", evidenceIds, proposedChange: action.description, where, difficulty: "baja", timeframe: "14 días", metric: profile.primaryResult, expectedImpact: "Obtener evidencia suficiente antes de cambiar el negocio.", confidence: "BAJA", conclusionConfidence: .28 });
   }
 
   const primary = selected[0]?.problem;
@@ -289,6 +312,7 @@ export function buildProfileStrategy(context: StrategyContext, diagnosis: Diagno
         metric: candidate.intervention.metric,
         expectedImpact: candidate.intervention.expectedImpact,
         confidence: candidate.problem.confidence,
+        conclusionConfidence: candidate.problem.conclusionConfidence,
         knowledgePatternIds: candidate.knowledgeMatches.filter((match) => !match.rejected).map((match) => match.pattern.id),
         rejectedKnowledgePatternIds: candidate.knowledgeMatches.filter((match) => match.rejected).map((match) => match.pattern.id),
         knowledgeMatches: candidate.knowledgeMatches.map((match) => ({
@@ -309,6 +333,7 @@ export function buildProfileStrategy(context: StrategyContext, diagnosis: Diagno
         journeyStage: problem.journeyStage,
         evidenceIds: problem.evidenceFor,
         confidence: problem.confidence,
+        conclusionConfidence: problem.conclusionConfidence,
       }))],
     },
   };

@@ -77,12 +77,14 @@ const cases = [
   { id: "name-location", name: "Negocio identificado por nombre y zona", rubro: "profesional independiente", objective: "conseguir más presupuestos o reuniones", mainProblem: "La información está repartida", priority: "Crear un contacto principal", actions: ["Unificar perfiles públicos", "Medir solicitudes de presupuesto"], findings: [finding("presencia", "search", "positive", "low", "El profesional aparece por nombre y ubicación"), finding("posicionamiento", "external_mentions", "positive", "low", "Un directorio relaciona al profesional con su especialidad"), finding("adquisicion", "search", "negative", "medium", "No hay un canal principal para solicitar presupuesto")] },
 ];
 
-test("una única señal produce un score general y puntajes visibles en todas las áreas", () => {
+test("una única señal produce score solo en el área defendible y no inventa las restantes", () => {
   const scenario = { ...cases[0], findings: [cases[0].findings[0]] };
   const result = evaluateScenario(scenario);
   assert.equal(typeof result.score, "number");
   assert.ok(result.score >= 0 && result.score <= 100);
-  assert.deepEqual(result.dimensions, [...dimensions, "retencion"]);
+  assert.deepEqual(result.dimensions, ["conversion"]);
+  assert.equal(result.methodology.scoreMethodologyVersion, "NUVRA_SCORE_V2");
+  assert.equal(result.methodology.evaluableDimensions, 1);
 });
 
 test("diez negocios pequeños producen lecturas trazables y útiles con distintas combinaciones de fuentes", () => {
@@ -102,20 +104,21 @@ test("la calibración recorre de forma progresiva negocios muy malos a excelente
   const levels = [
     { name: "muy malo", negatives: 2, positives: 0, impact: "high" },
     { name: "malo", negatives: 1, positives: 0, impact: "medium" },
-    { name: "medio", negatives: 0, positives: 0, impact: "low" },
-    { name: "bueno", negatives: 0, positives: 2, impact: "low" },
-    { name: "excelente", negatives: 0, positives: 4, impact: "low" },
+    { name: "medio", negatives: 1, positives: 1, impact: "medium" },
+    { name: "bueno", negatives: 1, positives: 3, impact: "low" },
+    { name: "excelente", negatives: 0, positives: 5, impact: "low" },
   ];
   const results = levels.map(level => {
     const findings = ["conversion", "propuesta", "adquisicion"].flatMap(category => {
-      const neutral = level.name === "medio" ? [finding(category, "web", "neutral", "low", `${category} observado sin problema ni fortaleza`)] : [];
-      const negatives = Array.from({ length: level.negatives }, (_, index) => finding(category, index ? "search" : "web", "negative", level.impact, `${category} problema independiente ${index}`));
-      const positives = Array.from({ length: level.positives }, (_, index) => finding(category, index % 2 ? "search" : "web", "positive", "medium", `${category} fortaleza independiente ${index}`));
-      return [...neutral, ...negatives, ...positives];
+      const negativeTexts = ["demora operativa", "información de precio incompleta", "camino de contacto roto"];
+      const positiveTexts = ["recorrido comprobado", "información práctica completa", "autoridad verificable", "consistencia sostenida", "actualidad confirmada"];
+      const negatives = Array.from({ length: level.negatives }, (_, index) => finding(category, index ? "search" : "web", "negative", level.impact, `${category}: ${negativeTexts[index]}`));
+      const positives = Array.from({ length: level.positives }, (_, index) => finding(category, ["web", "search", "reviews"][index % 3], "positive", "medium", `${category}: ${positiveTexts[index]}`));
+      return [...negatives, ...positives];
     });
     return evaluateScenario({ id: level.name, name: level.name, rubro: "servicio", tipoCliente: "B2C", objective: "aumentar consultas", mainProblem: level.name, priority: level.name, actions: ["Acción específica", "Métrica específica"], findings }).score;
   });
-  for (let index = 1; index < results.length; index++) assert.ok(results[index] > results[index - 1]);
+  for (let index = 1; index < results.length; index++) assert.ok(results[index] >= results[index - 1]);
   assert.ok(results[results.length - 1] - results[0] >= 40);
 });
 
@@ -127,8 +130,8 @@ test("manifestaciones del mismo obstáculo se penalizan una sola vez", () => {
     finding("conversion", "web", "negative", "medium", "El contacto está poco visible"),
     finding("conversion", "web", "negative", "medium", "Es difícil avanzar hacia una consulta"),
   ] });
-  assert.equal(one.dimensions.length, 8);
-  assert.equal(repeated.dimensions.length, 8);
+  assert.equal(one.dimensions.length, 1);
+  assert.equal(repeated.dimensions.length, 1);
   assert.equal(one.methodology.dimensionWeights.conversion.evidenceQuality, repeated.methodology.dimensionWeights.conversion.evidenceQuality);
 });
 

@@ -11,6 +11,18 @@ export interface AnalysisTrace {
   createdAt: string;
   searched: Array<{ source: string; purpose: string; status: string }>;
   found: Array<{ evidenceId: string; kind: string; source: string; stage: string; text: string; confidence: string }>;
+  evidenceQuality: Array<{
+    evidenceId: string;
+    originId: string | null;
+    acquisitionMethod: string;
+    sourceQuality: number | null;
+    independence: number;
+    recency: number | null;
+    corroboration: number | null;
+    claimKey: string | null;
+    contribution: string;
+  }>;
+  evidenceConflicts: BusinessProfile["evidenceConflicts"];
   discarded: Array<{ item: string; reason: string }>;
   businessProfile: Record<string, unknown>;
   commercialJourney: BusinessProfile["commercialJourney"];
@@ -26,7 +38,26 @@ export interface AnalysisTrace {
     temporalClaims: unknown[];
     strengths: string[];
     problems: string[];
+    platformDifferences: unknown[];
   } | null;
+  socialSources: Array<{
+    source: string;
+    status: string;
+    priority?: string;
+    relevanceReasons: string[];
+    entityConfidence: number;
+    accountsFound: number;
+    acceptedContent: number;
+    rejectedContent: number;
+    comments: number;
+    limitations: string[];
+    errors: unknown[];
+    brandIdentityUsed: boolean;
+    acquisitionMethods: string[];
+    sourceCoverage?: unknown;
+    queriesUsed: number;
+    durationMs: number;
+  }>;
   knowledgeBase: {
     consultedPatternIds: string[];
     rejectedPatternIds: string[];
@@ -41,11 +72,18 @@ export interface AnalysisTrace {
   };
   actionConsiderations: NonNullable<StrategyResult["audit"]>["candidates"];
   finalActions: Array<{ title: string; problem: string | undefined; evidenceIds: string[] | undefined; metric: string | undefined; confidence: string | undefined }>;
+  conclusionContributions: {
+    problems: Array<{ id: string; confidence: number; sufficiency: string; evidenceIds: string[] }>;
+    strengths: Array<{ id: string; confidence: number; sufficiency: string; evidenceIds: string[] }>;
+    opportunities: NonNullable<DiagnosisResult["conclusionAudit"]>["opportunities"];
+    recommendations: Array<{ title: string; confidence: number | null; evidenceIds: string[] }>;
+  };
   scoreExplanation: {
+    scoreMethodologyVersion: NuvraScoreResult["scoreMethodologyVersion"];
     total: number | null;
     signalsThatAdded: string[];
     signalsThatSubtracted: string[];
-    dimensions: Array<{ slug: string; points: number | null; weight: number; findingIds: string[] }>;
+    dimensions: Array<{ slug: string; applicable: boolean; points: number | null; performanceScore: number | null; evidenceConfidence: number; evidenceCeiling: number; weight: number; findingIds: string[]; contributions: NuvraScoreResult["dimensions"][number]["contributions"] }>;
     methodology: NuvraScoreResult["methodology"];
   };
 }
@@ -64,7 +102,8 @@ export function buildAnalysisTrace(input: {
   ];
   const problemCandidates = Array.isArray(input.profile.problemCandidates) ? input.profile.problemCandidates : [];
   const selectedProblem = problemCandidates.find((candidate) => candidate.validationStatus === "validated" && Array.isArray(candidate?.evidenceFor) && candidate.evidenceFor.includes(input.diagnosis?.bottleneck?.findingId || "")) || problemCandidates.find((candidate) => candidate.validationStatus === "validated");
-  const reputation = (input.aggregated.sources.reviews?.data as any)?.reputation;
+  const reputation = input.aggregated.crossSourceReputation || (input.aggregated.sources.reviews?.data as any)?.reputation;
+  const socialSourceNames = ["instagram", "x", "tiktok", "reddit", "facebook", "linkedin", "youtube"] as const;
   const actionCandidates = input.strategy.audit?.candidates || [];
   const knowledgeEvaluations = actionCandidates.flatMap((candidate) => candidate.knowledgeMatches || []);
   const consultedPatternIds = Array.from(new Set(knowledgeEvaluations.map((match) => match.patternId)));
@@ -73,6 +112,18 @@ export function buildAnalysisTrace(input: {
     createdAt: new Date().toISOString(),
     searched: Object.entries(input.aggregated.sources).map(([source, evidence]) => ({ source, purpose: `Obtener evidencia comercial para ${input.profile.primaryCustomerAction}.`, status: evidence.status })),
     found: (Array.isArray(input.profile.commercialEvidence) ? input.profile.commercialEvidence : []).map((evidence) => ({ evidenceId: evidence.id, kind: evidence.kind, source: evidence.source, stage: evidence.journeyStage, text: evidence.text, confidence: evidence.confidence })),
+    evidenceQuality: (Array.isArray(input.profile.commercialEvidence) ? input.profile.commercialEvidence : []).map((evidence) => ({
+      evidenceId: evidence.id,
+      originId: evidence.lineage?.originId || null,
+      acquisitionMethod: evidence.acquisitionMethod || "unknown",
+      sourceQuality: evidence.sourceQuality?.score ?? null,
+      independence: evidence.lineage?.independence ?? 1,
+      recency: evidence.sourceQuality?.recency ?? null,
+      corroboration: evidence.corroboration?.strength ?? null,
+      claimKey: evidence.corroboration?.claimKey || null,
+      contribution: evidence.corroboration?.conflict ? "Contribuye con conflicto explícito; no decide la conclusión por sí sola." : evidence.sourceQuality?.maxClaimStrength === "strong" ? "Puede contribuir a una conclusión fuerte si la suficiencia total lo permite." : "Contribución limitada por calidad, contexto o cobertura.",
+    })),
+    evidenceConflicts: input.profile.evidenceConflicts || [],
     discarded,
     businessProfile: {
       businessId: input.profile.businessId,
@@ -104,7 +155,16 @@ export function buildAnalysisTrace(input: {
       temporalClaims: reputation.temporalClaims || [],
       strengths: (reputation.strengths || []).map((topic: any) => topic.name),
       problems: (reputation.problems || []).map((topic: any) => topic.name),
+      platformDifferences: reputation.platformDifferences || [],
     } : null,
+    socialSources: [...socialSourceNames.map((source) => {
+      const evidence = input.aggregated.sources[source]; const metadata = evidence?.metadata || {}; const planner = metadata.planner as any;
+      const acquisitionReport = metadata.acquisitionReport as any;
+      return { source, status: String(metadata.finalStatus || evidence?.status || "not_considered"), priority: planner?.priority, relevanceReasons: Array.isArray(planner?.reasons) ? planner.reasons : [], entityConfidence: Number(metadata.entityConfidence || 0), accountsFound: Number(metadata.accountsFound || ((evidence?.data as any)?.profileDiscovered ? 1 : 0)), acceptedContent: Number(metadata.acceptedContent || 0), rejectedContent: Number(metadata.rejectedContent || 0), comments: Number(metadata.comments || 0), limitations: Array.isArray(metadata.limitations) ? metadata.limitations as string[] : [], errors: Array.isArray(metadata.errors) ? metadata.errors : [], brandIdentityUsed: Boolean((evidence?.data as any)?.brandIdentityEvidence), acquisitionMethods: Array.isArray(metadata.acquisitionMethods) ? metadata.acquisitionMethods as string[] : [], sourceCoverage: metadata.sourceCoverage, queriesUsed: Number(acquisitionReport?.queryCount || 0), durationMs: Number(acquisitionReport?.durationMs || 0) };
+    }), (() => {
+      const reviews = input.aggregated.sources.reviews; const metadata = reviews?.metadata || {}; const data = reviews?.data as any;
+      return { source: "google_business_profile", status: reviews?.status || "not_considered", relevanceReasons: ["Ficha, ubicación y reseñas oficiales cuando Google Places está configurado."], entityConfidence: Number(metadata.entityMatchConfidence || data?.entityMatchConfidence || 0), accountsFound: data?.profile?.placeId ? 1 : 0, acceptedContent: Number(metadata.acceptedComments || 0), rejectedContent: Number(metadata.rejectedEntity || 0), comments: Number(metadata.acceptedComments || 0), limitations: [metadata.providerUsed === "google_places_api" ? "Cobertura obtenida mediante Google Places API." : "Sin GOOGLE_PLACES_API_KEY solo se conserva el fallback público experimental cuando puede validarse."], errors: [], brandIdentityUsed: false, acquisitionMethods: [metadata.providerUsed === "google_places_api" ? "official_api" : "public_page"], sourceCoverage: { profile: Boolean(data?.profile), bio: false, content: "none", comments: metadata.acceptedComments ? "partial" : "none", mentions: "none", metrics: data?.rating != null ? "public" : "none" }, queriesUsed: 0, durationMs: Number((metadata.execution as any)?.durationMs || 0) };
+    })()],
     knowledgeBase: {
       consultedPatternIds,
       rejectedPatternIds: Array.from(new Set(actionCandidates.flatMap((candidate: any) => candidate.rejectedKnowledgePatternIds || []))),
@@ -119,11 +179,18 @@ export function buildAnalysisTrace(input: {
     },
     actionConsiderations: actionCandidates,
     finalActions: (Array.isArray(input.strategy.actions) ? input.strategy.actions : []).map((action) => ({ title: action.title, problem: action.problem, evidenceIds: action.findingIds, metric: action.kpi || action.indicatorToImprove, confidence: action.confidence })),
+    conclusionContributions: {
+      problems: problemCandidates.map((candidate) => ({ id: candidate.id, confidence: candidate.conclusionConfidence ?? (candidate.confidence === "ALTA" ? .8 : candidate.confidence === "MEDIA" ? .6 : .4), sufficiency: candidate.evidenceSufficiency?.status || "legacy_unrated", evidenceIds: candidate.evidenceFor })),
+      strengths: (input.profile.strengthCandidates || []).map((candidate) => ({ id: candidate.id, confidence: candidate.conclusionConfidence ?? (candidate.confidence === "ALTA" ? .8 : candidate.confidence === "MEDIA" ? .6 : .4), sufficiency: candidate.evidenceSufficiency?.status || "legacy_unrated", evidenceIds: candidate.evidence })),
+      opportunities: input.diagnosis.conclusionAudit?.opportunities || [],
+      recommendations: (input.strategy.audit?.candidates || []).filter((candidate) => candidate.selected).map((candidate) => ({ title: candidate.title, confidence: candidate.conclusionConfidence ?? null, evidenceIds: candidate.evidenceIds || [] })),
+    },
     scoreExplanation: {
+      scoreMethodologyVersion: input.score.scoreMethodologyVersion,
       total: input.score.total,
       signalsThatAdded: (Array.isArray(input.profile.commercialEvidence) ? input.profile.commercialEvidence : []).filter((evidence) => evidence.polarity === "positive").map((evidence) => evidence.id),
       signalsThatSubtracted: (Array.isArray(input.profile.commercialEvidence) ? input.profile.commercialEvidence : []).filter((evidence) => evidence.polarity === "negative").map((evidence) => evidence.id),
-      dimensions: (Array.isArray(input.score.dimensions) ? input.score.dimensions : []).map((dimension) => ({ slug: dimension.slug, points: dimension.points, weight: input.score.methodology.dimensionWeights[dimension.slug]?.combinedWeight || 0, findingIds: (Array.isArray(dimension.findings) ? dimension.findings : []).map((finding) => finding.id) })),
+      dimensions: (Array.isArray(input.score.dimensions) ? input.score.dimensions : []).map((dimension) => ({ slug: dimension.slug, applicable: dimension.applicable, points: dimension.points, performanceScore: dimension.performanceScore, evidenceConfidence: dimension.evidenceConfidence, evidenceCeiling: dimension.evidenceCeiling, weight: input.score.methodology.dimensionWeights[dimension.slug]?.combinedWeight || 0, findingIds: (Array.isArray(dimension.findings) ? dimension.findings : []).map((finding) => finding.id), contributions: dimension.contributions })),
       methodology: input.score.methodology,
     },
   };

@@ -86,7 +86,7 @@ export class ReviewsSourceAnalyzer extends SourceAnalyzer {
     try {
       // Intentar con provider primario (Google Places API si key existe, sino GoogleMapsScrape)
       let reviewsData;
-      let providerUsed = "primary";
+      let providerUsed = this.primaryProvider instanceof GooglePlacesApiProvider ? "google_places_api" : "google_maps_public_page";
 
       try {
         reviewsData = await this.primaryProvider.getReviews(business, undefined, { signal: context?.signal });
@@ -97,7 +97,7 @@ export class ReviewsSourceAnalyzer extends SourceAnalyzer {
         // Fallback a GoogleMapsScrapeProvider
         try {
           reviewsData = await this.fallbackProvider.getReviews(business, undefined, { signal: context?.signal });
-          providerUsed = "fallback";
+          providerUsed = "google_maps_public_page";
         } catch (fallbackError) {
           if (context?.signal?.aborted) throw fallbackError;
           console.warn("[REVIEWS_ANALYZER] Fallback provider also failed:", fallbackError instanceof Error ? fallbackError.message : String(fallbackError));
@@ -127,8 +127,9 @@ export class ReviewsSourceAnalyzer extends SourceAnalyzer {
         rating: review.rating,
         text: review.text,
         author: review.author || null,
-        entityConfidence: entityMatchConfidence ?? (providerUsed === "fallback" ? .6 : 0),
+        entityConfidence: entityMatchConfidence ?? (providerUsed === "google_maps_public_page" ? .6 : 0),
         entityValidated: (entityMatchConfidence ?? 0) >= .72,
+        acquisitionMethod: providerUsed === "google_places_api" ? "official_api" : "public_page",
       })), { objective: businessWithGoals.goals?.[0]?.objetivo });
 
       if (!reputation.accepted.length) return this.unavailable("No se obtuvieron reseñas atribuibles al negocio con suficiente seguridad");
@@ -138,6 +139,7 @@ export class ReviewsSourceAnalyzer extends SourceAnalyzer {
       const addReputationFinding = (finding: EvidenceFinding, topic: typeof reputation.topics[number]) => {
         finding.reputationEvidenceConfidence = topic.evidenceConfidence;
         finding.reputationTopic = topic.name;
+        finding.acquisitionMethod = providerUsed === "google_places_api" ? "official_api" : "public_page";
         reputationFindings.push(finding);
       };
       for (const topic of reputation.strengths.slice(0, 5)) {
@@ -159,7 +161,7 @@ export class ReviewsSourceAnalyzer extends SourceAnalyzer {
         findings: reputationFindings,
         confidence: reputation.coverage.independentAuthors >= 5 ? "ALTA" : "MEDIA",
         coverage: adjustedCoverage, evaluatedAt: new Date(), requiresAuth: false,
-        metadata: { providerUsed, placeId: reviewsData.placeId, entityMatchConfidence, acceptedComments: reputation.accepted.length, duplicatesDiscarded: reputation.duplicates.length, rejectedEntity: reputation.rejectedEntity.length, topics: reputation.topics.map((topic) => topic.name), temporalClaims: reputation.temporalClaims },
+        metadata: { providerUsed, acquisitionMethods: [providerUsed === "google_places_api" ? "official_api" : "public_page"], finalStatus: providerUsed === "google_places_api" ? "analyzed" : "partial", sourceCoverage: { profile: Boolean(reviewsData.placeName || reviewsData.placeAddress), bio: false, content: "none", comments: providerUsed === "google_places_api" ? "partial" : "partial", mentions: "none", metrics: rating != null || reviewCount != null ? "public" : "none" }, placeId: reviewsData.placeId, entityMatchConfidence, acceptedComments: reputation.accepted.length, duplicatesDiscarded: reputation.duplicates.length, rejectedEntity: reputation.rejectedEntity.length, topics: reputation.topics.map((topic) => topic.name), temporalClaims: reputation.temporalClaims },
       };
 
     } catch (error) {

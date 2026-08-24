@@ -51,6 +51,7 @@ export class StrategicKnowledgeBase {
   static readonly patterns = STRATEGIC_PATTERNS;
   static retrieve(profile: BusinessProfile, problem: ProblemCandidate, limit = 3): KnowledgeMatch[] {
     if (problem.validationStatus !== "validated") return [];
+    if (problem.evidenceSufficiency && !["sufficient", "strong"].includes(problem.evidenceSufficiency.status)) return [];
     if (problem.reputationEvidenceConfidence !== undefined && problem.reputationEvidenceConfidence < .55) return [];
     const archetype = inferArchetype(profile);
     return STRATEGIC_PATTERNS.map((pattern) => {
