@@ -83,7 +83,7 @@ test("una única señal produce score solo en el área defendible y no inventa l
   assert.equal(typeof result.score, "number");
   assert.ok(result.score >= 0 && result.score <= 100);
   assert.deepEqual(result.dimensions, ["conversion"]);
-  assert.equal(result.methodology.scoreMethodologyVersion, "NUVRA_SCORE_V2");
+  assert.equal(result.methodology.scoreMethodologyVersion, "NUVRA_SCORE_V3");
   assert.equal(result.methodology.evaluableDimensions, 1);
 });
 

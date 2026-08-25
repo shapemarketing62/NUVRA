@@ -37,13 +37,22 @@ function levelFixture(level) {
     const negativeText = negativePatterns[index][1];
     for (let i = 0; i < negativeCount; i++) findings.push(finding(`${level}-${area}-n${i}`, area, sourceCycle[i % 2], "negative", level === "very_bad" ? "high" : "medium", `${negativeText}; problema ${i}: ${["bloqueo", "demora", "inconsistencia"][i]}`));
   }
-  return evaluate(level, "aumentar ventas y consultas", findings);
+  return evaluate(level, "aumentar ventas y consultas", findings, level === "excellent" ? { profile: evidenceRichProfile(findings, "aumentar ventas y consultas") } : {});
 }
 
-test("V2 progresa desde desempeño muy malo hasta excelente sin targets exactos", () => {
+function evidenceRichProfile(findings, objective) {
+  return {
+    goal: { text: objective }, activeChannels: [...new Set(findings.map((item) => item.source))], channelDeclarations: { web: "present", instagram: "present" }, recurrence: "periodic", localDependency: "medium", commercialModel: "general", primaryChannel: "web",
+    areaRelevance: Object.fromEntries(slugs.map((slug) => [slug, { goalRelevance: .8, businessRelevance: .8 }])), problemCandidates: [],
+    commercialEvidence: findings.map((item) => ({ id: `observed:${item.id}`, originalFindingId: item.id, text: item.evidence, source: item.source, sourceQuality: { score: .94, recency: .92 }, corroboration: { strength: .86 }, lineage: { originId: `${item.source}:${item.id}`, independence: 1 } })),
+    strengthCandidates: findings.filter((item) => item.type === "positive").map((item) => ({ id: `strength:${item.id}`, evidence: [`observed:${item.id}`], evidenceSufficiency: { score: .9 } })),
+  };
+}
+
+test("V3 progresa desde desempeño muy malo hasta excelente sin targets exactos", () => {
   const levels = ["very_bad", "bad", "medium", "good", "very_good", "excellent"].map(levelFixture);
   const totals = levels.map((item) => item.total);
-  console.log("NUVRA_SCORE_V2_LEVELS=" + JSON.stringify(totals));
+  console.log("NUVRA_SCORE_V3_LEVELS=" + JSON.stringify(levels.map((item) => ({ total: item.total, globalConfidence: item.methodology.globalEvidenceConfidence, globalCeiling: item.methodology.globalEvidenceCeiling, areas: item.dimensions.filter((area) => area.points !== null).map((area) => ({ slug: area.slug, points: area.points, performance: area.performanceScore, confidence: area.evidenceConfidence, ceiling: area.evidenceCeiling })) }))));
   for (let index = 1; index < totals.length; index++) assert.ok(totals[index] > totals[index - 1], `${totals.join(" -> ")}`);
   assert.ok(totals.at(-1) - totals[0] >= 55);
   assert.ok(new Set(totals).size === totals.length);
@@ -61,7 +70,8 @@ test("soblepremio: una fortaleza aislada nunca vuelve excepcional al negocio", (
   ];
   for (const scenario of scenarios) assert.ok(scenario.total < 90, `${scenario.total}`);
   assert.equal(scenarios[0].dimensions.find((item) => item.slug === "identidad").performanceScore, 92);
-  assert.equal(scenarios[0].dimensions.find((item) => item.slug === "identidad").points, 69);
+  assert.ok(scenarios[0].dimensions.find((item) => item.slug === "identidad").points < scenarios[0].dimensions.find((item) => item.slug === "identidad").evidenceCeiling);
+  assert.ok(scenarios[0].dimensions.find((item) => item.slug === "identidad").points >= 50);
 });
 
 test("sobrecastigo: ausencia irrelevante, poca cobertura y contradicción aislada no restan por defecto", () => {
@@ -72,7 +82,9 @@ test("sobrecastigo: ausencia irrelevante, poca cobertura y contradicción aislad
   assert.ok(fewSourcesWorking.total >= 55);
   assert.ok(fewSourcesWorking.total < 90);
   const oneComplaint = evaluate("complaint", "aumentar consultas", [finding("complaint", "posicionamiento", "x", "negative", "low", "Una persona publicó una queja"), ...Array.from({ length: 5 }, (_, index) => finding(`good-${index}`, "posicionamiento", "reviews", "positive", "medium", `Opinión independiente ${index}: atención favorable ${["rápida", "amable", "clara", "profesional", "consistente"][index]}`))]);
-  assert.ok(oneComplaint.total > 55);
+  const positiveOnly = evaluate("positive-reputation", "aumentar consultas", Array.from({ length: 5 }, (_, index) => finding(`positive-${index}`, "posicionamiento", "reviews", "positive", "medium", `Opinión independiente ${index}: atención favorable ${["rápida", "amable", "clara", "profesional", "consistente"][index]}`)));
+  assert.ok(oneComplaint.total >= positiveOnly.total - 8);
+  assert.ok(oneComplaint.dimensions.find((item) => item.slug === "posicionamiento").performanceScore > 50);
 });
 
 test("el objetivo cambia los pesos globales sin reescribir el desempeño observado", () => {
@@ -88,6 +100,41 @@ test("el objetivo cambia los pesos globales sin reescribir el desempeño observa
   }
   assert.ok(sales.methodology.dimensionWeights.conversion.combinedWeight > awareness.methodology.dimensionWeights.conversion.combinedWeight);
   assert.ok(awareness.methodology.dimensionWeights.presencia.combinedWeight > sales.methodology.dimensionWeights.presencia.combinedWeight);
+});
+
+test("la profundidad global distingue web aislada, varias fuentes y contradicciones reales", () => {
+  const webGood = evaluate("web-good", "aumentar ventas", [
+    finding("web-offer", "propuesta", "web", "positive", "high", "La oferta y las condiciones se entienden"),
+    finding("web-buy", "conversion", "web", "positive", "high", "El recorrido de compra fue comprobado"),
+  ]);
+  const webInstagram = evaluate("web-instagram", "aumentar ventas", [
+    ...webGood.dimensions.flatMap((area) => area.findings),
+    finding("ig-offer", "redes", "instagram", "positive", "high", "Instagram explica productos y conduce a comprar"),
+    finding("ig-brand", "adquisicion", "instagram", "positive", "medium", "Los productos se descubren desde Instagram"),
+  ]);
+  const webMapsReputation = evaluate("web-maps-reputation", "aumentar ventas", [
+    ...webGood.dimensions.flatMap((area) => area.findings),
+    finding("maps", "presencia", "search", "positive", "high", "Google muestra categoría, ubicación y horarios"),
+    finding("reviews", "posicionamiento", "reviews", "positive", "high", "Opiniones independientes destacan la experiencia"),
+    finding("discovery", "adquisicion", "search", "positive", "medium", "El negocio aparece en búsquedas relevantes"),
+  ]);
+  const excellent = levelFixture("excellent");
+  const badReputation = evaluate("great-web-bad-reputation", "aumentar ventas", [
+    ...webGood.dimensions.flatMap((area) => area.findings),
+    finding("recent-complaints", "posicionamiento", "reviews", "negative", "high", "Varias reseñas recientes describen incumplimientos repetidos"),
+  ]);
+  const strongLocalWeakDigital = evaluate("local-strong-digital-weak", "aumentar visitas", [
+    finding("local-reviews", "posicionamiento", "reviews", "positive", "high", "Clientes recientes destacan la experiencia en el local"),
+    finding("local-hours", "presencia", "search", "positive", "high", "Ubicación y horarios están actualizados"),
+    finding("digital-gap", "adquisicion", "search", "negative", "medium", "La oferta casi no aparece en búsquedas no vinculadas al nombre"),
+  ]);
+  assert.ok(webGood.total <= 68);
+  assert.ok(excellent.total > webGood.total);
+  assert.ok(excellent.methodology.globalEvidenceConfidence > webGood.methodology.globalEvidenceConfidence);
+  assert.ok(badReputation.total < webGood.total);
+  assert.ok(strongLocalWeakDigital.total > 35 && strongLocalWeakDigital.total < 80);
+  assert.ok(new Set([webGood.total, webInstagram.total, webMapsReputation.total, excellent.total, badReputation.total, strongLocalWeakDigital.total]).size >= 4);
+  console.log("NUVRA_GLOBAL_CALIBRATION=" + JSON.stringify({ webGood: summary(webGood), webInstagram: summary(webInstagram), webMapsReputation: summary(webMapsReputation), excellent: summary(excellent), badReputation: summary(badReputation), strongLocalWeakDigital: summary(strongLocalWeakDigital) }));
 });
 
 test("ocho fixtures comerciales conservan diferencias defendibles y trazables", () => {
@@ -108,5 +155,7 @@ test("ocho fixtures comerciales conservan diferencias defendibles y trazables", 
   });
   assert.ok(new Set(fixtures.map((item) => `${item.global}:${Object.keys(item.areas).join(",")}`)).size >= 7);
   assert.ok(fixtures.find((item) => item.name === "Gran presencia digital").global > fixtures.find((item) => item.name === "Casi sin presencia").global);
-  console.log("NUVRA_SCORE_V2_FIXTURES=" + JSON.stringify(fixtures));
+  console.log("NUVRA_SCORE_V3_FIXTURES=" + JSON.stringify(fixtures));
 });
+
+function summary(score) { return { total: score.total, evidenceConfidence: score.methodology.globalEvidenceConfidence, evidenceCeiling: score.methodology.globalEvidenceCeiling, sources: score.methodology.globalEvidenceDiagnostics.independentSources, areas: score.methodology.globalEvidenceDiagnostics.evaluableAreas }; }

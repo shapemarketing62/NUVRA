@@ -1,6 +1,7 @@
 import type { Business } from "@prisma/client";
 import type { AggregatedEvidence } from "./evidence-aggregator.ts";
 import type { EvidenceFinding, SourceType } from "./source-analyzer.ts";
+import { GoalInterpreter } from "./goal-interpreter.ts";
 
 export type CommercialEvidenceKind = "ObservedEvidence" | "DeclaredEvidence" | "InferredEvidence";
 export type CommercialJourneyStageId = "discovery" | "evaluation" | "decision" | "action" | "experience" | "retention";
@@ -133,6 +134,7 @@ function observedEvidence(business: BusinessInput, aggregated: AggregatedEvidenc
 
 function declaredEvidence(business: BusinessInput): CommercialEvidence[] {
   const goal = business.goals?.[0];
+  const goalInterpretation = GoalInterpreter.interpret(goal?.objetivo || "");
   const declarations: Array<{ id: string; text?: string | number | null; stage: CommercialJourneyStageId; impact: "high" | "medium" | "low"; polarity?: "positive" | "negative" | "neutral" }> = [
     { id: "industry", text: business.rubro, stage: "evaluation", impact: "medium" },
     { id: "description", text: business.descripcion, stage: "evaluation", impact: "medium" },
@@ -143,7 +145,7 @@ function declaredEvidence(business: BusinessInput): CommercialEvidence[] {
     { id: "additional", text: business.otrosCanales, stage: inferJourneyStage(business.otrosCanales || "", "onboarding"), impact: "high", polarity: /pocas (reservas|visitas|ventas|consultas)|demora|queja|sin seguimiento|no (tenemos|hacemos)/i.test(business.otrosCanales || "") ? "negative" : /recomendaci|llega por|funciona|destaca/i.test(business.otrosCanales || "") ? "positive" : "neutral" },
     { id: "capacity", text: business.empleados || business.tamano, stage: "experience", impact: "high" },
     { id: "budget", text: business.inversionMarketing, stage: "action", impact: "medium" },
-    { id: "goal", text: goal?.objetivo, stage: /volv|vuelv|recompra|renov|clientes actuales/i.test(goal?.objetivo || "") ? "retention" : "action", impact: "high" },
+    { id: "goal", text: goal?.objetivo, stage: goalInterpretation.goalType === "retention" ? "retention" : goalInterpretation.goalType === "awareness" ? "discovery" : "action", impact: "high" },
     { id: "timeframe", text: goal?.plazoLabel, stage: "action", impact: "medium" },
   ];
   return declarations.filter((item) => item.text !== null && item.text !== undefined && String(item.text).trim()).map((item) => ({

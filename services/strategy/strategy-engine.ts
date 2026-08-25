@@ -5,9 +5,10 @@ import type { FrameworkSelection } from "../frameworks/strategic-framework-engin
 import { createAIService, strategySchema, type StrategyOutput } from "../ai/ai-service.ts";
 import { selectStrategicFrameworks, FRAMEWORKS } from "../frameworks/strategic-framework-engine.ts";
 import { getPrimaryBusinessStep, hasConstrainedExecution, isRetentionObjective, getLocalMarketLabel, getBudgetFocus, isSpecificBusinessAction } from "./business-action-language.ts";
-import type { BusinessProfile, ContextualFinding } from "../intelligence/business-profile";
+import type { BusinessProfile } from "../intelligence/business-profile";
 import type { ProblemCandidate } from "../intelligence/commercial-candidates.ts";
 import { StrategicKnowledgeBase, type KnowledgeMatch } from "./strategic-knowledge-base.ts";
+import { ActionOpportunityEngine } from "./action-opportunity-engine.ts";
 
 // Force recompilation: 2025-01-17T20:25:00Z
 
@@ -107,48 +108,6 @@ export async function runStrategyEngine(
 
 const actionSourceLabel = (source: string) => ({ web: "el sitio web", instagram: "Instagram", search: "Google", reviews: "las reseñas", competitor: "la comparación con negocios similares", x: "X", tiktok: "TikTok", reddit: "Reddit", facebook: "Facebook", linkedin: "LinkedIn", youtube: "YouTube", external_mentions: "las menciones externas", other: "la información aportada" }[source] || "el canal observado");
 
-function businessDecisionFocus(profile: BusinessProfile): string {
-  if (profile.commercialModel === "appointments") return "el servicio o tratamiento que más aporta al objetivo";
-  if (profile.commercialModel === "reservations") return "la reserva, el pedido, los horarios y la ubicación";
-  if (profile.commercialModel === "commerce") return "el producto, la entrega, el pago y la compra";
-  if (profile.commercialModel === "membership") return "la prueba, los horarios, los cupos y la membresía";
-  if (profile.commercialModel === "professional") return "la especialización, la experiencia y la solicitud de reunión";
-  return "la oferta y el próximo paso del cliente";
-}
-
-function actionTextForFinding(profile: BusinessProfile, finding: ContextualFinding): { title: string; description: string; kpi: string } | null {
-  const where = actionSourceLabel(finding.source);
-  const action = profile.primaryCustomerAction;
-  const focus = businessDecisionFocus(profile);
-  if (finding.findingId === "declared:referrals") return { title: "Convertir las recomendaciones actuales en un paso fácil de repetir", description: `Después de una experiencia satisfactoria, pedir una recomendación con un mensaje breve y un enlace directo para que la nueva persona pueda ${action}. Hacerlo desde el canal que el negocio ya usa.`, kpi: "nuevos clientes que llegan recomendados" };
-  if (finding.findingId === "declared:demand_pattern") return { title: "Trabajar específicamente los momentos con menos demanda", description: `Usar el dato aportado para mostrar disponibilidad y una propuesta concreta en los días u horarios señalados, sin cambiar lo que ya funciona en los momentos de mayor demanda.`, kpi: "reservas o ventas en los momentos señalados" };
-  if (finding.findingId === "declared:capacity") return { title: "Ordenar la demanda según los cupos realmente disponibles", description: `Mostrar disponibilidad real y ofrecer una lista de espera o una alternativa antes de atraer más consultas que el equipo no pueda atender.`, kpi: "cupos ocupados sin consultas rechazadas" };
-  if (finding.findingId === "declared:follow_up") return { title: `Usar el seguimiento existente para que más clientes puedan ${action}`, description: `Separar a los clientes según lo que compraron o recibieron y enviar un próximo paso útil en el momento adecuado, usando la información que el negocio ya registra.`, kpi: profile.primaryResult };
-  if (finding.findingId === "declared:channel") return { title: `Hacer que el canal informado conduzca directamente a ${action}`, description: `Revisar el mensaje inicial, la respuesta y el enlace del canal mencionado por el negocio para que una persona entienda ${focus} y pueda avanzar sin cambiar de medio.`, kpi: profile.primaryResult };
-
-  if (finding.type === "problem") {
-    if (finding.area === "conversion") return { title: `Facilitar ${action} desde ${where}`, description: `Cambiar el primer paso visible en ${where} para que lleve directamente a ${action}. Mantener cerca la información necesaria sobre ${focus}.`, kpi: profile.primaryResult };
-    if (finding.area === "propuesta") return { title: `Explicar mejor ${focus} en ${where}`, description: `Reescribir el mensaje principal de ${where} para decir qué ofrece el negocio, para quién es y qué debe hacer una persona para ${action}.`, kpi: profile.primaryResult };
-    if (finding.area === "posicionamiento") return { title: `Dar una razón comprobable para elegir el negocio en ${where}`, description: `Mostrar en ${where} una prueba real —reseña, caso, profesional o forma de trabajo observada— junto al paso para ${action}.`, kpi: profile.primaryResult };
-    if (finding.area === "redes") return { title: `Hacer que Instagram ayude a ${action}`, description: `Ajustar la bio, el enlace y la publicación fijada para explicar ${focus} y llevar a una única forma de ${action}.`, kpi: profile.primaryResult };
-    if (finding.area === "adquisicion") return { title: `Conectar lo que una persona encuentra en ${where} con ${action}`, description: `Actualizar el resultado o perfil observado para mostrar ${focus}, la ubicación cuando corresponda y un enlace directo para ${action}.`, kpi: profile.primaryResult };
-    if (finding.area === "retencion") return { title: `Crear un próximo paso para que los clientes puedan ${action}`, description: `Después de la experiencia actual, indicar cuándo y por qué conviene volver, y facilitar ese paso desde el canal que el negocio ya utiliza.`, kpi: profile.primaryResult };
-    return { title: `Corregir la información observada en ${where}`, description: `Actualizar en ${where} los datos concretos señalados por la evidencia y comprobar que conduzcan a ${action}.`, kpi: profile.primaryResult };
-  }
-
-  if (finding.type === "strength") {
-    if (finding.source === "reviews") return { title: `Usar las buenas reseñas para dar confianza antes de ${action}`, description: `Mostrar una selección verificable de las reseñas observadas cerca del lugar donde una persona decide ${action}, sin cambiar ni exagerar su contenido.`, kpi: profile.primaryResult };
-    if (finding.source === "instagram") return { title: `Convertir la presencia ya lograda en Instagram en ${profile.primaryResult}`, description: `Conservar lo que ya funciona en el perfil y agregar un recorrido directo desde la bio o una publicación fijada hacia ${action}.`, kpi: profile.primaryResult };
-    if (finding.source === "search") return { title: `Aprovechar la visibilidad encontrada en Google para facilitar ${action}`, description: `Mantener la información que ya ayuda a encontrar el negocio y sumar un paso claro desde ese resultado hacia ${action}.`, kpi: profile.primaryResult };
-    if (finding.area === "propuesta") return { title: `Mantener claro ${focus} y conectarlo con ${action}`, description: `Conservar el mensaje favorable observado en ${where} y conectarlo con un paso directo para ${action}.`, kpi: profile.primaryResult };
-    if (finding.area === "posicionamiento") return { title: `Llevar la prueba favorable de ${where} al momento de ${action}`, description: `Conservar la señal de confianza encontrada y mostrarla cerca del lugar donde una persona decide ${action}.`, kpi: profile.primaryResult };
-    if (finding.area === "presencia") return { title: `Usar la información visible en ${where} para facilitar ${action}`, description: `Mantener los datos que ya están claros y agregar desde allí un camino directo para ${action}.`, kpi: profile.primaryResult };
-    if (finding.area === "conversion") return { title: `Conservar el paso claro para ${action} y medir su resultado`, description: `Mantener el recorrido favorable observado en ${where} y registrar cuántas personas logran ${action}.`, kpi: profile.primaryResult };
-    return { title: `Aprovechar la fortaleza observada en ${where}`, description: `Conservar la señal favorable encontrada y ubicarla cerca del momento en que una persona decide ${action}.`, kpi: profile.primaryResult };
-  }
-  return null;
-}
-
 export function buildProfileStrategy(context: StrategyContext, diagnosis: DiagnosisResult, scoreResult: NuvraScoreResult, profile: BusinessProfile): StrategyResult {
   const constrained = hasConstrainedExecution(context);
   const shortTerm = context.plazoDias <= 60;
@@ -186,94 +145,50 @@ export function buildProfileStrategy(context: StrategyContext, diagnosis: Diagno
     seen.add(key);
     return true;
   }).slice(0, 5);
-  const strengthBasedAudit: NonNullable<StrategyResult["audit"]>["candidates"] = [];
-
-  const actions: StrategyOutput["actions"] = selected.map(({ problem, intervention }, index) => ({
-    title: intervention.title,
-    description: intervention.description,
+  const opportunities = ActionOpportunityEngine.generate(profile, { businessName: context.nombre, industry: context.rubro, location: context.ubicacion, budget: context.presupuesto, capacity: context.capacidad, timeframeDays: context.plazoDias });
+  const selectedOpportunityIds = new Set(opportunities.selected.map((item) => item.id));
+  const actions: StrategyOutput["actions"] = opportunities.selected.map((opportunity, index) => ({
+    title: opportunity.title,
+    description: `${opportunity.description} Para qué: ${opportunity.purpose}`,
     order: index + 1,
-    impact: (problem.priorityScore >= 55 ? "alto" : problem.priorityScore >= 30 ? "medio" : "bajo") as "alto" | "medio" | "bajo",
-    difficulty: intervention.difficulty,
-    estimatedTime: intervention.timeframe,
-    dependencies: problem.dependencies,
-    indicatorToImprove: intervention.metric,
-    rationale: `${problem.causalExplanation} Por eso conviene intervenir en ${intervention.where}.`,
-    relatedFindingIds: problem.evidenceFor,
-    findingIds: problem.evidenceFor,
-    evidence: evidenceForProblem(profile, problem),
-    inference: problem.causalExplanation,
-    dimension: problem.journeyStage,
-    framework: "CommercialJourney",
-    confidence: problem.confidence,
-    problem: problem.hypothesis,
+    impact: opportunity.impact,
+    difficulty: opportunity.difficulty,
+    estimatedTime: opportunity.timeframe,
+    dependencies: opportunity.dependencies,
+    indicatorToImprove: opportunity.metric,
+    rationale: opportunity.inference,
+    relatedFindingIds: opportunity.evidenceIds,
+    findingIds: opportunity.evidenceIds,
+    evidence: opportunity.evidence,
+    inference: opportunity.inference,
+    dimension: opportunity.lever,
+    framework: opportunity.type === "corrective" ? "CorrectiveAction" : opportunity.type === "growth" ? "GrowthAction" : "EvidenceValidation",
+    confidence: opportunity.conclusionConfidence >= .72 ? "ALTA" : opportunity.conclusionConfidence >= .5 ? "MEDIA" : "BAJA",
+    problem: opportunity.problem,
     unlocksContent: false,
-    effort: intervention.difficulty,
-    timeframe: intervention.timeframe,
-    kpi: intervention.metric,
-    justification: `Esta intervención responde a una fricción de ${problem.journeyStage} que afecta el objetivo “${profile.goal.text}”.`,
-    conclusionConfidence: problem.conclusionConfidence,
+    effort: opportunity.difficulty,
+    timeframe: opportunity.timeframe,
+    kpi: opportunity.metric,
+    justification: `${opportunity.type === "corrective" ? "Corrige una fricción validada" : opportunity.type === "growth" ? "Aprovecha una oportunidad respaldada" : "Mide antes de ampliar la intervención"} para “${profile.goal.goalOriginalText}”.`,
   })).filter(isSpecificBusinessAction);
-
-  // Si no hay una hipótesis negativa validada, NUVRA puede proponer cómo
-  // aprovechar fortalezas comprobadas. No convierte una señal parcial en falla.
-  if (actions.length < 3) {
-    const sufficientStrengthEvidence = new Set(profile.strengthCandidates.filter((candidate) => ["limited", "sufficient", "strong"].includes(candidate.evidenceSufficiency?.status || "limited")).flatMap((candidate) => candidate.evidence));
-    const strengthFindings = [...profile.contextualFindings]
-      .filter((finding) => finding.type === "strength" && (finding.findingId.startsWith("declared:") || sufficientStrengthEvidence.has(`observed:${finding.findingId}`)))
-      .sort((a, b) => b.priorityScore - a.priorityScore);
-    for (const finding of strengthFindings) {
-      if (actions.length >= 3) break;
-      const proposal = actionTextForFinding(profile, finding);
-      if (!proposal || actions.some((action) => action.title === proposal.title)) continue;
-      const action = {
-        title: proposal.title,
-        description: proposal.description,
-        order: actions.length + 1,
-        impact: "medio" as const,
-        difficulty: "baja" as const,
-        estimatedTime: shortTerm ? "14–30 días" : "30–45 días",
-        dependencies: [],
-        indicatorToImprove: proposal.kpi,
-        rationale: `La acción aprovecha una fortaleza observada sin presentar una hipótesis negativa no validada: ${finding.interpretation}`,
-        relatedFindingIds: [finding.findingId],
-        findingIds: [finding.findingId],
-        evidence: finding.evidence,
-        inference: finding.interpretation,
-        dimension: finding.area,
-        framework: "EvidenceStrength",
-        confidence: finding.confidence,
-        problem: "No se detectó un problema comprobable en esta señal; se aprovecha una fortaleza observada.",
-        unlocksContent: false,
-        effort: "baja" as const,
-        timeframe: shortTerm ? "14–30 días" : "30–45 días",
-        kpi: proposal.kpi,
-        justification: `La evidencia favorable es relevante para “${profile.goal.text}”.`,
-        conclusionConfidence: profile.strengthCandidates.find((candidate) => candidate.evidence.includes(`observed:${finding.findingId}`))?.conclusionConfidence ?? .4,
-      };
-      if (!isSpecificBusinessAction(action)) continue;
-      actions.push(action);
-      strengthBasedAudit.push({ findingId: finding.findingId, title: proposal.title, priority: finding.priorityScore, selected: true, reason: "Seleccionada para aprovechar una fortaleza comprobada sin convertir señales parciales en problemas.", journeyStage: profile.commercialEvidence.find((item) => item.originalFindingId === finding.findingId)?.journeyStage, evidenceIds: [finding.findingId], cause: finding.interpretation, proposedChange: proposal.description, where: actionSourceLabel(finding.source), difficulty: "baja", timeframe: action.estimatedTime, metric: proposal.kpi, expectedImpact: "Aprovechar una base que ya funciona.", confidence: finding.confidence, conclusionConfidence: action.conclusionConfidence });
-    }
-  }
-
-  // Con evidencia parcial puede existir una acción segura sin inventar un
-  // problema: medir el paso comercial principal en un canal ya observado.
-  if (actions.length === 0 && profile.primaryChannel) {
-    const where = actionSourceLabel(profile.primaryChannel);
-    const evidenceIds = profile.commercialEvidence.filter((item) => item.source === profile.primaryChannel).slice(0, 3).map((item) => item.id);
-    const title = `Medir cómo las personas pasan de ${where} a ${profile.primaryCustomerAction}`;
-    const action = {
-      title,
-      description: `Registrar durante dos semanas cuántas personas llegan desde ${where}, intentan ${profile.primaryCustomerAction} y completan ese paso. No cambiar el recorrido hasta confirmar dónde se pierde el avance.`,
-      order: 1, impact: "medio" as const, difficulty: "baja" as const, estimatedTime: "14 días", dependencies: [],
-      indicatorToImprove: profile.primaryResult, rationale: "La información disponible orienta el canal, pero no alcanza para afirmar una fricción. Primero conviene medir el recorrido real.",
-      relatedFindingIds: evidenceIds, findingIds: evidenceIds, evidence: evidenceIds.map((id) => profile.commercialEvidence.find((item) => item.id === id)?.text).filter(Boolean).join(" · ") || `Se observó ${where} como canal del negocio.`,
-      inference: "La evidencia es limitada; esta acción valida la hipótesis antes de intervenir.", dimension: "commercial_journey", framework: "EvidenceValidation", confidence: "BAJA", problem: "No existe todavía un problema principal con evidencia suficiente.", unlocksContent: false,
-      effort: "baja" as const, timeframe: "14 días", kpi: profile.primaryResult, justification: `Permite decidir con datos si el recorrido hacia ${profile.primaryCustomerAction} necesita cambios.`, conclusionConfidence: .28,
-    };
-    actions.push(action);
-    strengthBasedAudit.push({ findingId: evidenceIds[0] || `channel:${profile.primaryChannel}`, title, priority: 20, selected: true, reason: "Acción de validación elegida porque ninguna conclusión alcanzó suficiencia para justificar una intervención.", journeyStage: "action", evidenceIds, proposedChange: action.description, where, difficulty: "baja", timeframe: "14 días", metric: profile.primaryResult, expectedImpact: "Obtener evidencia suficiente antes de cambiar el negocio.", confidence: "BAJA", conclusionConfidence: .28 });
-  }
+  const opportunityAudit: NonNullable<StrategyResult["audit"]>["candidates"] = opportunities.considered.map((opportunity) => ({
+    findingId: opportunity.evidenceIds[0] || opportunity.id,
+    title: opportunity.title,
+    priority: opportunity.priority,
+    selected: selectedOpportunityIds.has(opportunity.id),
+    reason: selectedOpportunityIds.has(opportunity.id) ? `Seleccionada como ${opportunity.type} y como palanca distinta (${opportunity.lever}).` : "Descartada por menor prioridad o por duplicar la intención de otra intervención.",
+    journeyStage: opportunity.lever,
+    evidenceIds: opportunity.evidenceIds,
+    cause: opportunity.inference,
+    proposedChange: opportunity.description,
+    where: opportunity.where,
+    difficulty: opportunity.difficulty,
+    timeframe: opportunity.timeframe,
+    metric: opportunity.metric,
+    expectedImpact: opportunity.purpose,
+    confidence: opportunity.conclusionConfidence >= .72 ? "ALTA" : opportunity.conclusionConfidence >= .5 ? "MEDIA" : "BAJA",
+    conclusionConfidence: opportunity.conclusionConfidence,
+  }));
 
   const primary = selected[0]?.problem;
   let frameworkSelection: FrameworkSelection;
@@ -323,7 +238,7 @@ export function buildProfileStrategy(context: StrategyContext, diagnosis: Diagno
           rejectionReason: match.rejectionReason,
           intervention: !match.rejected ? match.pattern.interventions[0]?.change : undefined,
         })),
-      })), ...strengthBasedAudit, ...rejectedInterventions.map(({ problem, reason }) => ({
+      })), ...opportunityAudit, ...rejectedInterventions.map(({ problem, reason }) => ({
         findingId: problem.evidenceFor?.[0] || problem.id,
         problemCandidateId: problem.id,
         title: "Intervención descartada",
@@ -349,10 +264,6 @@ interface Intervention {
   timeframe: string;
   metric: string;
   expectedImpact: string;
-}
-
-function evidenceForProblem(profile: BusinessProfile, problem: ProblemCandidate): string {
-  return problem.evidenceFor.map((id) => profile.commercialEvidence.find((item) => item.id === id)?.text).filter(Boolean).join(" · ");
 }
 
 function interventionLocation(profile: BusinessProfile, problem: ProblemCandidate): string {

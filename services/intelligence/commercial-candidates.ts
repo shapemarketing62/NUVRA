@@ -121,7 +121,7 @@ export function buildProblemCandidates(profile: BusinessProfile, journey: Commer
       const stage = first.journeyStage;
       const against = positives.filter((item) => item.journeyStage === stage && patternFor(item) === pattern);
       const goalImpact = stageImportance(journey, stage);
-      const retentionGoal = /volv|vuelv|recompra|renov|recurren|fideliza|clientes actuales|socios actuales/i.test(String(profile.goal?.text || ""));
+      const retentionGoal = profile.goal.interpretation?.goalType === "retention";
       const commercialRelevance = retentionGoal
         ? stage === "retention" ? 1 : stage === "experience" ? .9 : .25
         : stage === "action" ? 1 : stage === "decision" || stage === "evaluation" ? .85 : .7;

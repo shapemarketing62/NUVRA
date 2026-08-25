@@ -3,7 +3,7 @@ import type { EvidenceFinding, SourceType } from "./source-analyzer.ts";
 import type { BusinessProfile } from "./business-profile.ts";
 import type { CommercialEvidence, CommercialJourneyStageId } from "./commercial-evidence.ts";
 
-export const SCORE_METHODOLOGY_VERSION = "NUVRA_SCORE_V2" as const;
+export const SCORE_METHODOLOGY_VERSION = "NUVRA_SCORE_V3" as const;
 export type NuvraScoreStatus = "pending" | "preliminary" | "complete";
 
 export interface ScoreContribution {
@@ -37,6 +37,8 @@ export interface NuvraScoreResult {
     evaluableDimensions: number; applicableDimensions: string[]; nonApplicableDimensions: string[];
     effectiveDimensionDiversity: number; objectiveRelevanceCovered: number;
     evidenceQuality: number; readiness: number;
+    globalEvidenceConfidence: number; globalEvidenceCeiling: number;
+    globalEvidenceDiagnostics: { independentSources: number; evaluableAreas: number; strongAreas: number; materialFrictions: number; averageCorroboration: number };
     dimensionWeights: Record<string, { applicable: boolean; objectiveRelevance: number; businessRelevance: number; evidenceQuality: number; combinedWeight: number }>;
     totalContribution: Array<{ slug: string; points: number; weight: number; weightedPoints: number; ceiling: number; confidence: number }>;
   };
@@ -69,11 +71,13 @@ export class NuvraScoreCalculator {
     const evaluableWeight = evaluable.reduce((sum, dimension) => sum + rawWeights[dimension.slug], 0);
     const normalized = Object.fromEntries(dimensions.map((dimension) => [dimension.slug, evaluableWeight > 0 && dimension.points !== null ? rawWeights[dimension.slug] / evaluableWeight : 0]));
     const totalContribution = evaluable.map((dimension) => ({ slug: dimension.slug, points: dimension.points as number, weight: round(normalized[dimension.slug]), weightedPoints: round((dimension.points as number) * normalized[dimension.slug]), ceiling: dimension.evidenceCeiling, confidence: dimension.evidenceConfidence }));
-    const total = totalContribution.length ? Math.round(totalContribution.reduce((sum, item) => sum + item.weightedPoints, 0)) : null;
     const shares = totalContribution.map((item) => item.weight).filter(Boolean);
     const diversity = shares.length ? 1 / shares.reduce((sum, value) => sum + value * value, 0) : 0;
     const objectiveRelevanceCovered = dimensions.reduce((sum, dimension) => sum + (dimension.points !== null ? normalized[dimension.slug] : 0), 0);
     const evidenceQuality = totalContribution.length ? totalContribution.reduce((sum, item) => sum + item.confidence * item.weight, 0) : 0;
+    const globalEvidence = calculateGlobalEvidence(evaluable, evidenceQuality);
+    const rawTotal = totalContribution.length ? Math.round(totalContribution.reduce((sum, item) => sum + item.weightedPoints, 0)) : null;
+    const total = rawTotal === null ? null : rawTotal >= 50 ? Math.min(rawTotal, globalEvidence.ceiling) : rawTotal;
     const readiness = clamp(objectiveRelevanceCovered * evidenceQuality * Math.min(1, diversity / 3));
     const dimensionWeights = Object.fromEntries(dimensions.map((dimension) => [dimension.slug, { applicable: dimension.applicable, objectiveRelevance: dimension.goalRelevance, businessRelevance: dimension.businessRelevance, evidenceQuality: dimension.evidenceConfidence, combinedWeight: round(normalized[dimension.slug]) }]));
     const confidence = confidenceLabel(evidenceQuality, evaluable.length);
@@ -86,12 +90,12 @@ export class NuvraScoreCalculator {
       requiresMoreSources: !complete, reason, evaluatedAt: new Date(), scoreMethodologyVersion: SCORE_METHODOLOGY_VERSION,
       methodology: {
         scoreMethodologyVersion: SCORE_METHODOLOGY_VERSION,
-        formula: "performance por balance de grupos independientes; score visible = min(performance, evidenceCeiling) para desempeño favorable; global ponderado solo por áreas aplicables, negocio y objetivo",
+        formula: "performance por balance de grupos independientes; score visible proyectado según certeza y limitado por evidenceCeiling; global ponderado por áreas aplicables y limitado por globalEvidenceCeiling",
         evaluableDimensions: evaluable.length,
         applicableDimensions: dimensions.filter((dimension) => dimension.applicable).map((dimension) => dimension.slug),
         nonApplicableDimensions: dimensions.filter((dimension) => !dimension.applicable).map((dimension) => dimension.slug),
         effectiveDimensionDiversity: round(diversity), objectiveRelevanceCovered: round(objectiveRelevanceCovered),
-        evidenceQuality: round(evidenceQuality), readiness: round(readiness), dimensionWeights, totalContribution,
+        evidenceQuality: round(evidenceQuality), readiness: round(readiness), globalEvidenceConfidence: globalEvidence.confidence, globalEvidenceCeiling: globalEvidence.ceiling, globalEvidenceDiagnostics: globalEvidence.diagnostics, dimensionWeights, totalContribution,
       },
     };
   }
@@ -107,7 +111,7 @@ function calculateDimension(spec: DimensionSpec, rawFindings: EvidenceFinding[],
       const evidenceConfidence = clamp(Number(identity.evidenceConfidence || 0));
       const evidenceCeiling = clampScore(Number(identity.evidenceCeiling ?? ceilingFor("identidad", evidenceConfidence, Number(identity.coverage?.independentSourceCount || 1))));
       const performanceScore = clampScore(identity.performanceScore);
-      const points = performanceScore >= 50 ? Math.min(performanceScore, evidenceCeiling) : performanceScore;
+      const points = evidenceAdjustedScore(performanceScore, evidenceConfidence, evidenceCeiling);
       const findings = deduplicate(rawFindings);
       return { ...baseDimension(spec, businessRelevance, goalRelevance), points, performanceScore, evidenceConfidence: round(evidenceConfidence), evidenceCeiling, applicable: true, evidenceSufficiency: sufficiencyLabel(evidenceConfidence), confidence: confidenceLabel(evidenceConfidence, findings.length || 1), sources: uniqueSources(findings).length ? uniqueSources(findings) : ["web"], findings, message: identity.limitations?.[0], contributions: [{ id: "identity:analysis", groupId: "identity:multisource", label: "Evaluación consolidada de identidad", direction: performanceScore >= 50 ? "positive" : "negative", impact: Math.abs(performanceScore - 50) / 50, sourceQuality: evidenceConfidence, evidenceSufficiency: evidenceConfidence, corroboration: Math.min(1, Number(identity.coverage?.independentSourceCount || 1) / 3), independence: 1, recency: .7, businessRelevance, goalRelevance, effectiveStrength: round(Math.abs(performanceScore - 50) / 50 * evidenceConfidence), source: "brand_identity_analyzer", evidenceIds: findings.map((finding) => finding.id) }] };
     }
@@ -127,9 +131,10 @@ function calculateDimension(spec: DimensionSpec, rawFindings: EvidenceFinding[],
   const diversity = Math.min(1, sources.size / sourceTarget(spec.slug));
   const depth = Math.min(1, origins.size / originTarget(spec.slug));
   const corroboration = contributions.reduce((sum, item) => sum + item.corroboration, 0) / contributions.length;
-  const evidenceConfidence = clamp(weightedQuality * .34 + averageSufficiency * .28 + diversity * .16 + depth * .12 + corroboration * .1);
-  const evidenceCeiling = ceilingFor(spec.slug, evidenceConfidence, sources.size, hasValidatedJourney(contributions, profile), origins.size);
-  const points = performanceScore >= 50 ? Math.min(performanceScore, evidenceCeiling) : performanceScore;
+  const directJourney = hasValidatedJourney(contributions, profile);
+  const evidenceConfidence = clamp(Math.max(directJourney ? .68 : 0, weightedQuality * .34 + averageSufficiency * .28 + diversity * .16 + depth * .12 + corroboration * .1));
+  const evidenceCeiling = ceilingFor(spec.slug, evidenceConfidence, sources.size, directJourney, origins.size);
+  const points = evidenceAdjustedScore(performanceScore, evidenceConfidence, evidenceCeiling);
   return { ...baseDimension(spec, businessRelevance, goalRelevance), points, performanceScore, evidenceConfidence: round(evidenceConfidence), evidenceCeiling, applicable: true, evidenceSufficiency: sufficiencyLabel(evidenceConfidence), confidence: confidenceLabel(evidenceConfidence, contributions.length), sources: uniqueSources(findings), findings, estimatedFromLimitedEvidence: evidenceConfidence < .6, message: evidenceConfidence < .55 ? "Este resultado se calcula con evidencia limitada y puede ajustarse al incorporar más información." : undefined, scoringSignals: contributions.map((item) => ({ label: item.label, effect: Math.round((item.direction === "positive" ? 1 : -1) * item.effectiveStrength * 20), basis: "observed" as const })), contributions };
 }
 
@@ -205,6 +210,38 @@ function ceilingFor(slug: string, confidence: number, sourceCount: number, direc
   if (sourceCount <= 1 && !directJourney) ceiling = Math.min(ceiling, slug === "conversion" ? (independentGroups >= 2 ? 83 : 80) : slug === "propuesta" ? (independentGroups >= 2 ? 81 : 78) : independentGroups >= 2 ? 78 : 74);
   if (directJourney && slug === "conversion") ceiling = Math.max(ceiling, 84);
   return ceiling;
+}
+
+function evidenceAdjustedScore(performanceScore: number, evidenceConfidence: number, evidenceCeiling: number) {
+  // 50 funciona únicamente como punto de indeterminación: no es una base que
+  // reciba el negocio. Cuanto menor es la certeza, menos extrema puede ser la
+  // afirmación visible, tanto para fortalezas como para problemas.
+  const certainty = Math.pow(clamp(evidenceConfidence), 1.8);
+  const defensible = 50 + (performanceScore - 50) * certainty;
+  return clampScore(Math.min(defensible, evidenceCeiling));
+}
+
+function calculateGlobalEvidence(dimensions: NuvraDimension[], evidenceQuality: number) {
+  const sources = new Set(dimensions.flatMap((dimension) => dimension.contributions.map((item) => item.source)));
+  const contributions = dimensions.flatMap((dimension) => dimension.contributions);
+  const averageCorroboration = contributions.length ? contributions.reduce((sum, item) => sum + item.corroboration, 0) / contributions.length : 0;
+  const strongAreas = dimensions.filter((dimension) => (dimension.performanceScore ?? 0) >= 75 && dimension.evidenceConfidence >= .62).length;
+  const materialFrictions = contributions.filter((item) => item.direction === "negative" && item.effectiveStrength >= .24).length;
+  const areaBreadth = Math.min(1, dimensions.length / 5);
+  const sourceBreadth = Math.min(1, sources.size / 4);
+  const strongBreadth = Math.min(1, strongAreas / 4);
+  const confidence = clamp(evidenceQuality * .38 + areaBreadth * .2 + sourceBreadth * .2 + averageCorroboration * .12 + strongBreadth * .1);
+  let ceiling = confidence < .35 ? 58 : confidence < .45 ? 64 : confidence < .55 ? 70 : confidence < .67 ? 76 : confidence < .78 ? 84 : confidence < .88 ? 92 : 100;
+  if (sources.size <= 1) ceiling = Math.min(ceiling, 68);
+  if (sources.size === 2) ceiling = Math.min(ceiling, 76);
+  if (dimensions.length < 3) ceiling = Math.min(ceiling, 70);
+  if (strongAreas < 3) ceiling = Math.min(ceiling, 79);
+  if (materialFrictions >= 2) ceiling = Math.min(ceiling, 84);
+  return {
+    confidence: round(confidence),
+    ceiling,
+    diagnostics: { independentSources: sources.size, evaluableAreas: dimensions.length, strongAreas, materialFrictions, averageCorroboration: round(averageCorroboration) },
+  };
 }
 
 function hasValidatedJourney(contributions: ScoreContribution[], profile?: BusinessProfile) {

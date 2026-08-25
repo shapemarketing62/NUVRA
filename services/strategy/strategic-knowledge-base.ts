@@ -60,6 +60,7 @@ export class StrategicKnowledgeBase {
       if (pattern.journeyStage === problem.journeyStage) { score += .2; reasons.push("misma etapa comercial"); }
       if (pattern.commercialModel === profile.commercialModel) { score += .18; reasons.push("mismo modelo comercial"); }
       if (pattern.archetype === archetype) { score += .15; reasons.push("contexto de negocio cercano"); }
+      if (objectiveMatches(pattern.objectives, profile.goal.interpretation?.goalType)) { score += .05; reasons.push("coincide con el resultado interpretado del objetivo libre"); }
       if (profile.resources.monthlyBudget != null && profile.resources.monthlyBudget < 200 && pattern.interventions[0]?.cost === "bajo") { score += .05; reasons.push("compatible con presupuesto acotado"); }
       const causalMismatch = pattern.problemPattern !== problem.pattern || pattern.journeyStage !== problem.journeyStage;
       const contextMismatch = pattern.archetype !== archetype && pattern.commercialModel !== profile.commercialModel && pattern.archetype !== "general_small_business";
@@ -75,3 +76,4 @@ export class StrategicKnowledgeBase {
 }
 
 function inferArchetype(profile: BusinessProfile) { const text = `${profile.originalIndustry} ${profile.inferredCategory}`; return ARCHETYPES.find(([, model, rule]) => (model === profile.commercialModel || model === "general") && rule.test(text))?.[0] || "general_small_business"; }
+function objectiveMatches(objectives: string[], goalType?: string) { const text = objectives.join(" ").toLowerCase(); if (goalType === "retention") return /volv|renov|recompra|continua/.test(text); if (goalType === "reservations") return /reserv|turno|pedido|clase/.test(text); if (goalType === "sales") return /venta|compra|pedido/.test(text); if (goalType === "consultations" || goalType === "larger_clients") return /consulta|reunion|cliente/.test(text); if (goalType === "awareness") return /visib|marca|descubr|presencia/.test(text); return false; }

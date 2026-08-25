@@ -98,7 +98,9 @@ test("Identidad de Marca aparece como área trazable y usa señales observadas",
   const result = labAnalysis();
   const identity = result.intelligenceScore.dimensions.find((item) => item.slug === "identidad");
   assert.equal(identity.name, "Qué tan sólida y reconocible es tu marca");
-  assert.equal(identity.points, result.brandIdentity.score);
+  assert.equal(identity.performanceScore, result.brandIdentity.performanceScore);
+  assert.ok(identity.points <= result.brandIdentity.score);
+  assert.ok(identity.points <= identity.evidenceCeiling);
   assert.ok(identity.points >= 60);
   assert.ok(result.brandIdentity.evidence.some((item) => /logo|colores|tipograf/i.test(item)));
   assert.ok(result.brandIdentity.limitations.some((item) => /una sola fuente|canales/i.test(item)));

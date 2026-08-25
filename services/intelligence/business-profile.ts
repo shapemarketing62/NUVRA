@@ -1,11 +1,12 @@
 import type { Business } from "@prisma/client";
 import type { AggregatedEvidence } from "./evidence-aggregator";
 import type { EvidenceFinding, SourceType } from "./source-analyzer";
-import { getGoalAdjustedAction, getGoalAreaRelevance, selectBusinessPlaybook, type CommercialModel } from "../strategy/business-playbook.ts";
+import { getGoalAdjustedAction, selectBusinessPlaybook, type CommercialModel } from "../strategy/business-playbook.ts";
 import { buildCommercialEvidence, type CommercialEvidence, type CommercialProcessingIssue } from "./commercial-evidence.ts";
 import { CommercialJourneyEngine, type CommercialJourney } from "./commercial-journey-engine.ts";
 import { buildProblemCandidates, buildStrengthCandidates, type ProblemCandidate, type StrengthCandidate } from "./commercial-candidates.ts";
 import { EvidenceCorroborationEngine, type EvidenceConflict } from "./evidence/evidence-corroboration-engine.ts";
+import { GoalInterpreter, goalAreaRelevance, type GoalInterpretation } from "./goal-interpreter.ts";
 
 type GoalInput = { objetivo?: string; magnitud?: number | null; plazoDias?: number; plazoLabel?: string };
 type BusinessWithGoal = Business & { goals?: GoalInput[] };
@@ -63,7 +64,7 @@ export interface BusinessProfile {
   problems: ContextualFinding[];
   contextualFindings: ContextualFinding[];
   competitorsDetected: number;
-  goal: { text: string; magnitude: number | null; timeframeDays: number | null; timeframeLabel: string | null };
+  goal: { text: string; goalOriginalText: string; interpretation: GoalInterpretation; magnitude: number | null; timeframeDays: number | null; timeframeLabel: string | null };
   resources: { monthlyBudget: number | null; executionCapacity: string | null };
   additionalInformation: string | null;
   decisionFactors: { trust: number; price: number; reviews: number; proximity: number };
@@ -148,10 +149,11 @@ function contextualizeFinding(finding: EvidenceFinding, primaryAction: string, g
 
 export function buildBusinessProfile(business: BusinessWithGoal, aggregated: AggregatedEvidence): BusinessProfile {
   const goal = business.goals?.[0] || {};
+  const interpretedGoal = GoalInterpreter.interpret(goal.objetivo || "hacer crecer el negocio");
   const contextText = [business.rubro, business.descripcion, business.productosServicios, business.publicoObjetivo, business.otrosCanales, goal.objetivo].filter(Boolean).join(" ");
   const playbook = selectBusinessPlaybook(contextText);
   const goalAction = getGoalAdjustedAction(playbook, goal.objetivo || "hacer crecer el negocio");
-  const goalRelevance = getGoalAreaRelevance(goal.objetivo || "hacer crecer el negocio");
+  const goalRelevance = goalAreaRelevance(interpretedGoal);
   const areaRelevance = Object.fromEntries(Object.keys(playbook.areaRelevance).map((area) => [area, { goalRelevance: goalRelevance[area] ?? .5, businessRelevance: playbook.areaRelevance[area] ?? .5 }]));
   const contextualFindings = aggregated.findings.map((finding) => {
     const area = categoryToArea(finding.category);
@@ -182,6 +184,8 @@ export function buildBusinessProfile(business: BusinessWithGoal, aggregated: Agg
   const inferenceTrace: BusinessProfile["inferenceTrace"] = [
     { field: "commercialModel", value: playbook.model, evidence: contextText, source: "inferred" },
     { field: "primaryCustomerAction", value: goalAction.action, evidence: goal.objetivo || "Objetivo no especificado", source: "inferred" },
+    { field: "goalType", value: interpretedGoal.goalType, evidence: interpretedGoal.goalOriginalText, source: "inferred" },
+    { field: "goalScope", value: interpretedGoal.goalScope.join(", "), evidence: interpretedGoal.goalOriginalText, source: "inferred" },
     ...(business.ubicacion ? [{ field: "location", value: business.ubicacion, evidence: business.ubicacion, source: "declared" as const }] : []),
     ...(noWebDeclared ? [{ field: "webDeclaration", value: "absent", evidence: "El usuario declaró que no tiene página web.", source: "declared" as const }] : []),
     ...(business.webUrl ? [{ field: "webObservedOrDeclared", value: business.webUrl, evidence: business.webUrl, source: noWebDeclared ? "observed" as const : "declared" as const }] : []),
@@ -246,7 +250,7 @@ export function buildBusinessProfile(business: BusinessWithGoal, aggregated: Agg
     problems: contextualFindings.filter((finding) => finding.type === "problem"),
     contextualFindings,
     competitorsDetected: competitors?.totalValidated || 0,
-    goal: { text: goal.objetivo || "hacer crecer el negocio", magnitude: goal.magnitud ?? null, timeframeDays: goal.plazoDias ?? null, timeframeLabel: goal.plazoLabel || null },
+    goal: { text: interpretedGoal.goalOriginalText, goalOriginalText: interpretedGoal.goalOriginalText, interpretation: interpretedGoal, magnitude: goal.magnitud ?? null, timeframeDays: goal.plazoDias ?? null, timeframeLabel: goal.plazoLabel || null },
     resources: { monthlyBudget: business.inversionMarketing ?? null, executionCapacity: business.empleados || business.tamano || null },
     additionalInformation: business.otrosCanales || null,
     decisionFactors,

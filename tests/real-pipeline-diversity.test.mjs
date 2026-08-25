@@ -128,6 +128,9 @@ test("onboarding representa y envía las declaraciones sin web e Instagram", () 
   assert.match(onboarding, /disabled=\{data\.noWeb\}/);
   assert.match(onboarding, /disabled=\{data\.noInstagram\}/);
   assert.match(onboarding, /noWebDeclared: data\.noWeb, noInstagramDeclared: data\.noInstagram/);
+  assert.doesNotMatch(onboarding, /OBJETIVOS|options=\{OBJETIVOS\}/);
+  assert.match(onboarding, /¿Qué querés lograr\?<\/h1>.*<TextArea value=\{data\.objetivo\}/s);
+  assert.match(onboarding, /objetivo: data\.objetivo\.trim\(\)/);
   assert.match(input, /background: disabled \? COLORS\.paperDim : "#fff"/);
   const declaredAbsent = businessInputSchema.parse({ ...fixtures[0].input, webUrl: undefined, instagramHandle: undefined, noWebDeclared: true, noInstagramDeclared: true });
   assert.equal(declaredAbsent.noWebDeclared, true);

@@ -36,15 +36,15 @@ function objectiveFor(stage: CommercialJourneyStageId, profile: BusinessProfile)
 
 function importance(stage: CommercialJourneyStageId, profile: BusinessProfile): number {
   let value = BASE_IMPORTANCE[stage];
-  const goal = String(profile.goal?.text || "").toLowerCase();
-  if (/volv|vuelv|recompra|renov|recurren|fideliza|clientes actuales|socios actuales/.test(goal)) {
+  const goalType = profile.goal.interpretation?.goalType;
+  if (goalType === "retention") {
     if (stage === "retention") value = 1;
     if (stage === "experience") value = .95;
     if (stage === "discovery") value = .25;
     if (stage === "action") value = .4;
     if (stage === "decision") value = .45;
     if (stage === "evaluation") value = .5;
-  } else if (/dar a conocer|marca|reconoc|visibilidad/.test(goal) && stage === "discovery") value = 1;
+  } else if (goalType === "awareness" && stage === "discovery") value = 1;
   if (stage === "decision" && (profile.commercialModel === "commerce" || profile.localDependency === "high")) value = .9;
   if (stage === "evaluation" && profile.commercialModel === "professional") value = 1;
   if (stage === "retention" && ["frequent", "periodic", "membership"].includes(profile.recurrence)) value = Math.max(value, .8);
@@ -63,7 +63,7 @@ function missingEvidence(stage: CommercialJourneyStageId, evidence: CommercialEv
 
 export class CommercialJourneyEngine {
   static build(profile: BusinessProfile, evidence: CommercialEvidence[]): CommercialJourney {
-    const retentionGoal = /volv|vuelv|recompra|renov|recurren|fideliza|clientes actuales|socios actuales/i.test(String(profile.goal?.text || ""));
+    const retentionGoal = profile.goal.interpretation?.goalType === "retention";
     const sequence: CommercialJourneyStageId[] = ["discovery", "evaluation", "decision", "action", "experience"];
     if (retentionGoal || profile.recurrence !== "occasional") sequence.push("retention");
     const stages = sequence.map((id) => {
