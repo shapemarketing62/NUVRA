@@ -1,7 +1,6 @@
 "use client";
 
 import { usePathname, useRouter } from "next/navigation";
-import { COLORS } from "@/lib/design-tokens";
 import { BrandMark, ProBadge } from "@/components/ui";
 import { getPlanSnapshot, hasEntitlement, type PlanTier } from "@/lib/plans";
 
@@ -53,23 +52,9 @@ export function Sidebar({
       <button
         type="button"
         onClick={() => router.push(item.id)}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          width: "100%",
-          padding: "10px 14px",
-          borderRadius: 10,
-          border: "none",
-          background: active ? COLORS.paperDim : "transparent",
-          color: active ? COLORS.ink : COLORS.inkSoft,
-          fontWeight: active ? 600 : 500,
-          fontSize: 14,
-          textAlign: "left",
-          marginBottom: 3,
-          cursor: "pointer",
-          opacity: locked ? 0.75 : 1,
-        }}
+        className={`sidebar-item ${active ? "sidebar-item-active" : ""}`}
+        style={{ opacity: locked ? 0.7 : 1 }}
+        aria-current={active ? "page" : undefined}
       >
         {item.label}
         {(item.pro || locked) && <ProBadge label={locked ? "PRO+" : "PRO"} />}
@@ -79,25 +64,23 @@ export function Sidebar({
 
   return (
     <aside className="sidebar">
-      <div className="sidebar-brand" style={{ padding: "0 8px", marginBottom: 28 }}>
+      <div className="sidebar-brand">
         <BrandMark />
       </div>
       <nav className="sidebar-nav" aria-label="Navegación principal">
-        <div><div className="sidebar-label">Trabajo</div>{NAV_MAIN.map((i) => <Item key={i.id} item={i} />)}</div>
-        <div className="sidebar-divider" style={{ height: 1, background: COLORS.line, margin: "8px 8px 4px" }} />
-        <div><div className="sidebar-label">Análisis avanzado</div>{NAV_PRO.map((i) => <Item key={i.id} item={i} />)}</div>
-        <div className="sidebar-divider" style={{ height: 1, background: COLORS.line, margin: "8px 8px 4px" }} />
-        <div><div className="sidebar-label">Cuenta</div>{NAV_END.map((i) => <Item key={i.id} item={i} />)}</div>
+        <div className="sidebar-group"><div className="sidebar-label">Trabajo</div>{NAV_MAIN.map((i) => <Item key={i.id} item={i} />)}</div>
+        <div className="sidebar-group"><div className="sidebar-label">Análisis avanzado</div>{NAV_PRO.map((i) => <Item key={i.id} item={i} />)}</div>
+        <div className="sidebar-group"><div className="sidebar-label">Cuenta</div>{NAV_END.map((i) => <Item key={i.id} item={i} />)}</div>
       </nav>
       <div style={{ flex: 1 }} />
-      <div className="sidebar-account" style={{ borderTop: `1px solid ${COLORS.line}`, padding: "14px 8px 4px" }}>
+      <div className="sidebar-account">
         <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 2 }}>{businessName}</div>
-        <div className="shp-mono" style={{ fontSize: 11, color: COLORS.inkFaint, marginBottom: 12 }}>
+        <div style={{ fontSize: 11, color: "var(--n-text-faint)", marginTop: 4, marginBottom: 10 }}>
           Plan {plan.label}
           {isDemo && " · DEMO"}
           {internalAccess && " · acceso interno"}
         </div>
-        <div style={{ fontSize: 12, lineHeight: 1.5, color: COLORS.inkSoft }}>
+        <div style={{ fontSize: 11.5, lineHeight: 1.5, color: "var(--n-text-soft)" }}>
           {plan.summary}
         </div>
       </div>

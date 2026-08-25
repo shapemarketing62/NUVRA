@@ -30,9 +30,9 @@ export default function ResultadosPage() {
   const totalActions = actions.length;
 
   return (
-    <div>
+    <div className="page-container">
       <div style={{ marginBottom: 32 }}>
-        <h1 className="shp-display" style={{ fontSize: 32, fontWeight: 700, marginBottom: 8 }}>
+        <h1 className="page-title">
           Resultados
         </h1>
         <p style={{ color: COLORS.inkSoft, fontSize: 15 }}>

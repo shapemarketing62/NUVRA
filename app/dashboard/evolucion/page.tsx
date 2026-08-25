@@ -36,9 +36,9 @@ export default function EvolucionPage() {
 
   if (comparableHistory.length === 1) {
     return (
-      <div>
+      <div className="page-container">
         <div style={{ marginBottom: 32 }}>
-          <h1 className="shp-display" style={{ fontSize: 32, fontWeight: 700, marginBottom: 8 }}>
+          <h1 className="page-title">
             Evolución
           </h1>
           <p style={{ color: COLORS.inkSoft, fontSize: 15 }}>
@@ -71,9 +71,9 @@ export default function EvolucionPage() {
   const changePercent = firstScore > 0 ? Math.round((change / firstScore) * 100) : 0;
 
   return (
-    <div>
+    <div className="page-container">
       <div style={{ marginBottom: 32 }}>
-        <h1 className="shp-display" style={{ fontSize: 32, fontWeight: 700, marginBottom: 8 }}>
+        <h1 className="page-title">
           Evolución
         </h1>
         <p style={{ color: COLORS.inkSoft, fontSize: 15 }}>

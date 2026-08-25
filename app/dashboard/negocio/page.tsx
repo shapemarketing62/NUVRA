@@ -27,9 +27,9 @@ export default function NegocioPage() {
   }
 
   return (
-    <div>
+    <div className="page-container">
       <div style={{ marginBottom: 32 }}>
-        <h1 className="shp-display" style={{ fontSize: 32, fontWeight: 700, marginBottom: 8 }}>
+        <h1 className="page-title">
           Mi negocio
         </h1>
         <p style={{ color: COLORS.inkSoft, fontSize: 15 }}>

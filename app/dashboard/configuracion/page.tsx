@@ -15,9 +15,9 @@ export default function ConfiguracionPage() {
   const planOrder: PlanTier[] = ["FREE", "PRO", "PARTNER"];
 
   return (
-    <div>
+    <div className="page-container">
       <div style={{ marginBottom: 32 }}>
-        <h1 className="shp-display" style={{ fontSize: 32, fontWeight: 700, marginBottom: 8 }}>
+        <h1 className="page-title">
           Configuración
         </h1>
         <p style={{ color: COLORS.inkSoft, fontSize: 15 }}>
@@ -25,8 +25,8 @@ export default function ConfiguracionPage() {
         </p>
       </div>
 
-      <div style={{ display: "flex", gap: 24 }}>
-        <div style={{ width: 200, flexShrink: 0 }}>
+      <div className="settings-layout">
+        <div className="settings-tabs">
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {[
               { id: "general", label: "General" },
@@ -39,8 +39,8 @@ export default function ConfiguracionPage() {
                 type="button"
                 onClick={() => setActiveTab(tab.id as any)}
                 style={{
-                  padding: "12px 16px",
-                  borderRadius: 8,
+                  padding: "10px 12px",
+                  borderRadius: 7,
                   border: "none",
                   background: activeTab === tab.id ? COLORS.blueSoft : "transparent",
                   color: activeTab === tab.id ? COLORS.blueDeep : COLORS.inkSoft,

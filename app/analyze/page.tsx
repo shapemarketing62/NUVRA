@@ -7,12 +7,12 @@ import { setStoredBusinessId } from "@/lib/session";
 import { getApiErrorMessage } from "@/lib/api-client";
 
 const STEPS = [
-  "Validando URL",
-  "Analizando sitio web",
-  "Detectando hallazgos",
-  "Calculando Nuvra Score",
-  "Generando diagnóstico",
-  "Creando estrategia",
+  "Revisando presencia pública",
+  "Organizando la información",
+  "Identificando señales relevantes",
+  "Evaluando el estado del negocio",
+  "Preparando el diagnóstico",
+  "Ordenando las próximas acciones",
 ];
 
 function AnalyzeContent() {
@@ -58,8 +58,8 @@ function AnalyzeContent() {
   }, [businessId, router]);
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ textAlign: "center", width: 360 }}>
+    <main style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: 24 }}>
+      <section style={{ width: "100%", maxWidth: 520, borderTop: `2px solid ${COLORS.blue}`, paddingTop: 28 }} aria-live="polite">
         {!error ? (
           <>
             <div
@@ -69,26 +69,26 @@ function AnalyzeContent() {
                 borderRadius: "50%",
                 border: `3px solid ${COLORS.line}`,
                 borderTopColor: COLORS.blue,
-                margin: "0 auto 30px",
+                margin: "0 0 28px",
                 animation: score !== null ? "none" : "shpSpin 0.9s linear infinite",
               }}
             />
-            <h2 className="shp-display" style={{ fontSize: 20, fontWeight: 700, marginBottom: 8 }}>
+            <h1 className="shp-display" style={{ fontSize: 28, fontWeight: 650, marginBottom: 8, letterSpacing: "-.03em" }}>
               {score !== null ? "Análisis completado" : "Analizando tu negocio"}
-            </h2>
+            </h1>
             {score !== null && (
-              <p className="shp-display" style={{ fontSize: 32, fontWeight: 700, color: COLORS.blue, marginBottom: 20 }}>
+              <p className="shp-display" style={{ fontSize: 30, fontWeight: 650, color: COLORS.ink, marginBottom: 20 }}>
                 Nuvra Score: {score}/100
               </p>
             )}
-            <div style={{ display: "flex", flexDirection: "column", gap: 13, textAlign: "left" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 0, textAlign: "left", marginTop: 26, borderTop: `1px solid ${COLORS.line}` }}>
               {STEPS.map((it, i) => (
-                <div key={it} style={{ display: "flex", alignItems: "center", gap: 12, opacity: i <= currentStep ? 1 : 0.3, transition: "opacity .3s" }}>
+                <div key={it} style={{ display: "flex", alignItems: "center", gap: 12, minHeight: 44, borderBottom: `1px solid ${COLORS.line}`, opacity: i <= currentStep ? 1 : 0.35, transition: "opacity .3s" }}>
                   <span
                     style={{
                       width: 20,
                       height: 20,
-                      borderRadius: "50%",
+                      borderRadius: 3,
                       background: i < currentStep || score !== null ? COLORS.olive : i === currentStep ? COLORS.blue : COLORS.line,
                       color: "#fff",
                       display: "flex",
@@ -105,7 +105,7 @@ function AnalyzeContent() {
               ))}
             </div>
             <p style={{ fontSize: 12, color: COLORS.inkFaint, marginTop: 24 }}>
-              Análisis del sitio web en curso.
+              Este proceso puede tomar unos minutos.
             </p>
           </>
         ) : (
@@ -123,8 +123,8 @@ function AnalyzeContent() {
             </button>
           </div>
         )}
-      </div>
-    </div>
+      </section>
+    </main>
   );
 }
 
