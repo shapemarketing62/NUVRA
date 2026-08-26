@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { COLORS } from "@/lib/design-tokens";
 import { setStoredBusinessId } from "@/lib/session";
 import { getApiErrorMessage } from "@/lib/api-client";
+import { BrandMark } from "@/components/ui";
 
 const STEPS = [
   "Revisando presencia pública",
@@ -59,7 +60,8 @@ function AnalyzeContent() {
 
   return (
     <main style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: 24 }}>
-      <section style={{ width: "100%", maxWidth: 520, borderTop: `2px solid ${COLORS.blue}`, paddingTop: 28 }} aria-live="polite">
+      <section style={{ width: "100%", maxWidth: 520, borderTop: `3px solid ${COLORS.blue}`, paddingTop: 28, background:COLORS.surface, padding:"30px 34px 34px" }} aria-live="polite">
+        <div style={{marginBottom:30}}><BrandMark subtitle={false}/></div>
         {!error ? (
           <>
             <div
@@ -73,7 +75,7 @@ function AnalyzeContent() {
                 animation: score !== null ? "none" : "shpSpin 0.9s linear infinite",
               }}
             />
-            <h1 className="shp-display" style={{ fontSize: 28, fontWeight: 650, marginBottom: 8, letterSpacing: "-.03em" }}>
+            <h1 className="shp-display" style={{ fontSize: 32, fontWeight: 500, marginBottom: 8, letterSpacing: "-.02em" }}>
               {score !== null ? "Análisis completado" : "Analizando tu negocio"}
             </h1>
             {score !== null && (
@@ -110,7 +112,7 @@ function AnalyzeContent() {
           </>
         ) : (
           <div>
-            <h2 className="shp-display" style={{ fontSize: 20, fontWeight: 700, marginBottom: 12, color: COLORS.red }}>
+            <h2 className="shp-display" style={{ fontSize: 24, fontWeight: 500, marginBottom: 12, color: COLORS.red }}>
               Error en el análisis
             </h2>
             <p style={{ fontSize: 14, color: COLORS.inkSoft, marginBottom: 24 }}>{error}</p>

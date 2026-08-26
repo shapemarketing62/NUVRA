@@ -74,7 +74,7 @@ export default function ResultadosPage() {
           }}>
             <div style={{ padding: 16, background: COLORS.paperDim, borderRadius: 12 }}>
               <div style={{ fontSize: 13, color: COLORS.inkSoft, marginBottom: 8 }}>Nuvra Score</div>
-              <div className="shp-display" style={{ fontSize: 28, fontWeight: 700, color: COLORS.blue }}>
+              <div style={{ fontSize: 28, fontWeight: 600, color: COLORS.blue }}>
                 {score.total}
               </div>
               <div style={{ fontSize: 12, color: COLORS.inkFaint, marginTop: 4 }}>
@@ -84,7 +84,7 @@ export default function ResultadosPage() {
 
             <div style={{ padding: 16, background: COLORS.paperDim, borderRadius: 12 }}>
               <div style={{ fontSize: 13, color: COLORS.inkSoft, marginBottom: 8 }}>Acciones completadas</div>
-              <div className="shp-display" style={{ fontSize: 28, fontWeight: 700, color: COLORS.olive }}>
+              <div style={{ fontSize: 28, fontWeight: 600, color: COLORS.olive }}>
                 {completedActions}
               </div>
               <div style={{ fontSize: 12, color: COLORS.inkFaint, marginTop: 4 }}>

@@ -3,6 +3,7 @@
 import { CSSProperties, ReactNode, ReactElement, ButtonHTMLAttributes, InputHTMLAttributes, TextareaHTMLAttributes, cloneElement, isValidElement, useId } from "react";
 import { COLORS } from "@/lib/design-tokens";
 import { FEATURES, getMinimumPlan, hasEntitlement, type EntitlementKey, type PlanTier } from "@/lib/plans";
+import { LogoConceptFrameC1 } from "@/components/brand/logo-concepts";
 
 type BtnVariant = "primary" | "accent" | "ghost" | "subtle" | "danger";
 type BtnSize = "sm" | "md" | "lg";
@@ -60,9 +61,9 @@ export function ErrorState({message,onRetry}:{message:string;onRetry?:()=>void})
 
 export function CoverageBar({value,label="Cobertura"}:{value:number;label?:string}) { const safe=Math.max(0,Math.min(100,Math.round(value))); return <div><div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:COLORS.inkSoft,marginBottom:8}}><span>{label}</span><strong style={{color:COLORS.ink}}>{safe}%</strong></div><div className="diagnostic-track" style={{"--value":safe} as CSSProperties}/></div>; }
 
-export function ScoreRing({value}:{value:number|null;status:"PENDIENTE"|"PRELIMINAR"|"COMPLETO"}) { const safe=value===null?0:Math.max(0,Math.min(100,value)); const color=value===null?COLORS.inkFaint:safe>=65?COLORS.olive:safe>=45?COLORS.blue:COLORS.amber; return <div className="score-dial" style={{"--score":safe,"--score-color":color} as CSSProperties}><div className="score-value">{value??"—"}<small>/100</small></div></div>; }
+export function ScoreRing({value}:{value:number|null;status:"PENDIENTE"|"PRELIMINAR"|"COMPLETO"}) { const safe=value===null?0:Math.max(0,Math.min(100,value)); const color=value===null?COLORS.inkFaint:COLORS.blue; return <div className="score-dial" style={{"--score":safe,"--score-color":color} as CSSProperties}><div className="score-value">{value??"—"}<small>/100</small></div></div>; }
 
-export function Metric({label,value,detail}:{label:string;value:ReactNode;detail?:string}) { return <div><div className="page-eyebrow">{label}</div><div className="shp-display" style={{fontSize:30,fontWeight:650,letterSpacing:"-.035em"}}>{value}</div>{detail&&<p className="section-description">{detail}</p>}</div>; }
+export function Metric({label,value,detail}:{label:string;value:ReactNode;detail?:string}) { return <div><div className="page-eyebrow">{label}</div><div style={{fontSize:30,fontWeight:600,letterSpacing:"-.035em"}}>{value}</div>{detail&&<p className="section-description">{detail}</p>}</div>; }
 export function Insight({title,children}:{title?:string;children:ReactNode}) { return <div className="insight"><div>{title&&<h3 style={{fontSize:14,fontWeight:650,marginBottom:5}}>{title}</h3>}<div style={{fontSize:13,lineHeight:1.55,color:COLORS.inkSoft}}>{children}</div></div></div>; }
 export function SourceStatus({label,detail,status}:{label:string;detail:string;status:"ready"|"partial"|"pending"|"unavailable"}) { const config=status==="ready"?{tone:"success" as const,text:"Analizada"}:status==="partial"?{tone:"warning" as const,text:"Parcial"}:status==="unavailable"?{tone:"neutral" as const,text:"No disponible"}:{tone:"neutral" as const,text:"Pendiente"}; return <div className="source-row"><div><div style={{fontSize:13,fontWeight:650}}>{label}</div><div className="field-hint" style={{marginTop:3}}>{detail}</div></div><StatusBadge tone={config.tone}>{config.text}</StatusBadge></div>; }
 
@@ -72,7 +73,7 @@ export function ProBadge({label="PRO",style}:{label?:string;style?:CSSProperties
 export function DemoBadge({label="Demo",style}:{label?:string;style?:CSSProperties}) { return <span className="badge badge-warning" style={style}>{label}</span>; }
 export function PendingBadge({label="Pendiente"}:{label?:string}) { return <span className="badge badge-neutral">{label}</span>; }
 
-export function NuvraLogo({size=20,inverse=false}:{size?:number;inverse?:boolean}) { const color=inverse?"#8795D4":COLORS.blue; return <svg aria-hidden="true" viewBox="0 0 24 24" width={size} height={size} fill="none"><path d="M4 18C4 10 9 5 18 5" stroke={color} strokeWidth="2.2" strokeLinecap="round"/><circle cx="19" cy="5" r="2.2" fill={color}/></svg>; }
-export function BrandMark({subtitle=true,inverse=false}:{subtitle?:boolean;inverse?:boolean}) { return <div style={{display:"flex",flexDirection:"column",gap:subtitle?2:0,color:inverse?"white":COLORS.ink}}><div className="shp-display" style={{fontWeight:700,fontSize:18,display:"flex",alignItems:"center",gap:8,letterSpacing:"-.02em"}}><NuvraLogo size={18} inverse={inverse}/>NUVRA</div>{subtitle&&<div style={{fontSize:10,color:inverse?"#A9ABB0":COLORS.inkFaint,paddingLeft:26}}>by Shape</div>}</div>; }
+export function NuvraLogo({size=24,inverse=false,accent=true}:{size?:number;inverse?:boolean;accent?:boolean}) { return <LogoConceptFrameC1 aria-hidden="true" lockup="favicon" tone={inverse?"light":"indigo"} accent={accent} style={{width:size,height:size,display:"block"}}/>; }
+export function BrandMark({subtitle=true,inverse=false,compact=false}:{subtitle?:boolean;inverse?:boolean;compact?:boolean}) { const showSubtitle=subtitle&&!compact; return <LogoConceptFrameC1 lockup={showSubtitle?"principal":"compact"} showByShape={showSubtitle} tone={inverse?"light":"ink"} style={{display:"block",width:showSubtitle?154:142,height:"auto",maxWidth:"100%"}}/>; }
 
 export function SimpleTable({headers,rows}:{headers:string[];rows:string[][]}) { if(!rows.length)return <EmptyState title="Todavía no hay datos acá" description="La información aparecerá cuando esté disponible."/>; return <div className="table-shell"><table><thead><tr>{headers.map((header)=><th key={header}>{header}</th>)}</tr></thead><tbody>{rows.map((row,i)=><tr key={i}>{row.map((cell,j)=><td key={j}>{cell}</td>)}</tr>)}</tbody></table></div>; }

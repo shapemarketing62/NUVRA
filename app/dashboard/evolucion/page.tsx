@@ -96,7 +96,7 @@ export default function EvolucionPage() {
           textAlign: "center"
         }}>
           <div style={{ fontSize: 13, color: COLORS.inkSoft, marginBottom: 8 }}>Score inicial</div>
-          <div className="shp-display" style={{ fontSize: 32, fontWeight: 700 }}>
+          <div style={{ fontSize: 32, fontWeight: 600 }}>
             {firstScore}
           </div>
         </div>
@@ -109,7 +109,7 @@ export default function EvolucionPage() {
           textAlign: "center"
         }}>
           <div style={{ fontSize: 13, color: COLORS.inkSoft, marginBottom: 8 }}>Score actual</div>
-          <div className="shp-display" style={{ fontSize: 32, fontWeight: 700, color: COLORS.blue }}>
+          <div style={{ fontSize: 32, fontWeight: 600, color: COLORS.blue }}>
             {lastScore}
           </div>
         </div>
@@ -122,9 +122,9 @@ export default function EvolucionPage() {
           textAlign: "center"
         }}>
           <div style={{ fontSize: 13, color: COLORS.inkSoft, marginBottom: 8 }}>Cambio</div>
-          <div className="shp-display" style={{ 
+          <div style={{ 
             fontSize: 32, 
-            fontWeight: 700, 
+            fontWeight: 600, 
             color: change >= 0 ? COLORS.olive : COLORS.red 
           }}>
             {change >= 0 ? "+" : ""}{change}
@@ -166,7 +166,7 @@ export default function EvolucionPage() {
                   })}
                 </div>
               </div>
-              <div className="shp-display" style={{ fontSize: 24, fontWeight: 700 }}>
+              <div style={{ fontSize: 24, fontWeight: 600 }}>
                 {h.nuvraScoreTotal || "N/A"}
               </div>
             </div>
