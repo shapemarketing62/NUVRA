@@ -29,8 +29,9 @@ export default function LandingPage() {
     </nav>
     <main>
       <section className="landing-hero">
-        <div className="landing-hero-copy"><div className="landing-hero-mark" /><h1 className="shp-display">Entender el negocio.<br /><em>Decidir con claridad.</em></h1></div>
-        <div className="landing-hero-aside"><p>NUVRA convierte la presencia del negocio en un diagnóstico y un plan de acción concreto para alcanzar su objetivo.</p><div className="landing-hero-actions"><Btn size="lg" onClick={() => router.push("/onboarding")}>Analizar mi negocio</Btn><a className="landing-text-link" href="#como-funciona">Conocer el proceso</a></div></div>
+        <div className="landing-hero-structure" aria-hidden="true"><span /><span /><span /></div>
+        <div className="landing-hero-copy"><div className="landing-hero-mark" /><h1 className="shp-display">Una nueva forma de entender y <em>hacer crecer tu negocio.</em></h1></div>
+        <div className="landing-hero-aside"><p>Hacé el diagnóstico de tu empresa gratis. Descubrí tus oportunidades de mejora y trabajá con NUVRA para convertirlas en una estrategia de crecimiento.</p><div className="landing-hero-actions"><Btn size="lg" onClick={() => router.push("/onboarding")}>Hacer mi diagnóstico gratis</Btn><a className="landing-text-link" href="#como-funciona">Conocer el proceso</a></div></div>
       </section>
       <section id="como-funciona" className="landing-section landing-section-surface">
         <div className="landing-section-inner"><div className="landing-section-heading"><div className="page-eyebrow">Cómo trabaja NUVRA</div><h2 className="page-title">De la información a un plan</h2><p>Primero entendemos el contexto. Después ordenamos lo que importa para decidir y avanzar.</p></div><div className="landing-steps">{steps.map((item) => <article key={item[0]}><div className="stage-label">{item[0]}</div><h3 className="shp-display">{item[1]}</h3><p className="section-description">{item[2]}</p></article>)}</div></div>
