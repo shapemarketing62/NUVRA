@@ -1,28 +1,9 @@
 "use client";
 
 import { usePathname, useRouter } from "next/navigation";
-import { BrandMark, ProBadge } from "@/components/ui";
-import { getPlanSnapshot, hasEntitlement, type PlanTier } from "@/lib/plans";
-
-const NAV_MAIN = [
-  { id: "/dashboard", label: "Resumen" },
-  { id: "/dashboard/diagnostico", label: "Diagnóstico" },
-  { id: "/dashboard/estrategia", label: "Mi estrategia" },
-  { id: "/dashboard/acciones", label: "Acciones" },
-  { id: "/dashboard/evolucion", label: "Evolución" },
-  { id: "/dashboard/resultados", label: "Resultados" },
-  { id: "/dashboard/negocio", label: "Mi negocio" },
-];
-
-const NAV_PRO = [
-  { id: "/dashboard/competencia", label: "Competencia", pro: true },
-  { id: "/dashboard/nuvra-ai", label: "Nuvra AI", pro: true },
-];
-
-const NAV_END = [
-  { id: "/dashboard/shape-partner", label: "Shape Partner" },
-  { id: "/dashboard/configuracion", label: "Configuración" },
-];
+import { BrandMark } from "@/components/ui";
+import { getPlanSnapshot, type PlanTier } from "@/lib/plans";
+import { getDashboardNavigation, type DashboardNavItem } from "@/lib/product-navigation";
 
 export function Sidebar({
   businessName,
@@ -38,26 +19,19 @@ export function Sidebar({
   const pathname = usePathname();
   const router = useRouter();
   const plan = getPlanSnapshot(planTier);
+  const groups = getDashboardNavigation(planTier, internalAccess);
 
-  const Item = ({ item }: { item: { id: string; label: string; pro?: boolean } }) => {
-    const active = pathname === item.id || (item.id === "/dashboard" && pathname === "/dashboard/");
-    const locked =
-      item.id === "/dashboard/competencia"
-        ? !hasEntitlement(plan, "analysis.competitors", internalAccess)
-        : item.id === "/dashboard/nuvra-ai"
-        ? !hasEntitlement(plan, "ai.nuvra", internalAccess)
-        : false;
+  const Item = ({ item }: { item: DashboardNavItem }) => {
+    const active = pathname === item.href || (item.href === "/dashboard" && pathname === "/dashboard/");
 
     return (
       <button
         type="button"
-        onClick={() => router.push(item.id)}
+        onClick={() => router.push(item.href)}
         className={`sidebar-item ${active ? "sidebar-item-active" : ""}`}
-        style={{ opacity: locked ? 0.7 : 1 }}
         aria-current={active ? "page" : undefined}
       >
         {item.label}
-        {(item.pro || locked) && <ProBadge label={locked ? "PRO+" : "PRO"} />}
       </button>
     );
   };
@@ -68,9 +42,12 @@ export function Sidebar({
         <BrandMark />
       </div>
       <nav className="sidebar-nav" aria-label="Navegación principal">
-        <div className="sidebar-group"><div className="sidebar-label">Trabajo</div>{NAV_MAIN.map((i) => <Item key={i.id} item={i} />)}</div>
-        <div className="sidebar-group"><div className="sidebar-label">Análisis avanzado</div>{NAV_PRO.map((i) => <Item key={i.id} item={i} />)}</div>
-        <div className="sidebar-group"><div className="sidebar-label">Cuenta</div>{NAV_END.map((i) => <Item key={i.id} item={i} />)}</div>
+        {groups.map((group) => (
+          <div className="sidebar-group" key={group.label}>
+            <div className="sidebar-label">{group.label}</div>
+            {group.items.map((item) => <Item key={item.href} item={item} />)}
+          </div>
+        ))}
       </nav>
       <div style={{ flex: 1 }} />
       <div className="sidebar-account">
@@ -79,9 +56,6 @@ export function Sidebar({
           Plan {plan.label}
           {isDemo && " · DEMO"}
           {internalAccess && " · acceso interno"}
-        </div>
-        <div style={{ fontSize: 11.5, lineHeight: 1.5, color: "var(--n-text-soft)" }}>
-          {plan.summary}
         </div>
       </div>
     </aside>

@@ -21,6 +21,7 @@
     "db:migrate-legacy": "node scripts/migrate-legacy-businesses.js",
     "users:set-internal": "node scripts/set-internal-user.js",
     "test:internal-access": "node --test tests/internal-access.test.js"
+    ,"test:business-editing": "node --test tests/business-editing.test.mjs"
     ,"test:resilience": "node --test tests/analysis-resilience.test.js"
     ,"jobs:run": "node scripts/run-job.js all",
     "jobs:cleanup-auth": "node scripts/run-job.js cleanup-auth",

@@ -3,9 +3,11 @@ import { prisma } from "@/lib/prisma";
 export const AUDIT_ACTIONS = {
   login: "auth.login", logout: "auth.logout", passwordChanged: "auth.password_changed",
   businessCreated: "business.created", businessDeleted: "business.deleted",
+  businessUpdated: "business.updated", goalChanged: "business.goal_changed",
   memberAdded: "membership.added", memberRemoved: "membership.removed", roleChanged: "membership.role_changed",
   organizationChanged: "organization.changed", planChanged: "organization.plan_changed",
   integrationConnected: "integration.connected", integrationDisconnected: "integration.disconnected",
+  actionStatusChanged: "action.status_changed",
 } as const;
 const FORBIDDEN_KEYS = /password|token|secret|key|authorization|cookie/i;
 function sanitize(value: unknown): unknown {

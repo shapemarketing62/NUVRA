@@ -500,6 +500,10 @@ model StrategicAction {
   problem            String?
   unlocksContent     Boolean  @default(false)
   done               Boolean  @default(false)
+  status             String   @default("pending")
+  startedAt          DateTime?
+  completedAt        DateTime?
+  updatedAt          DateTime @updatedAt
 }
 
 model AnalysisHistory {

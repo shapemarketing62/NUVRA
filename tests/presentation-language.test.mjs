@@ -74,11 +74,13 @@ test("la presentación no altera la evidencia completa conservada por AnalysisTr
   assert.equal(trace.evidence[0].text, fullEvidence);
 });
 
-test("el dashboard prioriza tres acciones y oculta las fuentes hasta que el usuario las pide", () => {
+test("el dashboard prioriza una acción inmediata y deriva el detalle a sus vistas canónicas", () => {
   const dashboard = fs.readFileSync(new URL("../app/dashboard/page.tsx", import.meta.url), "utf8");
   const actions = fs.readFileSync(new URL("../app/dashboard/acciones/page.tsx", import.meta.url), "utf8");
-  assert.match(dashboard, /slice\(0, 3\)/);
-  assert.match(dashboard, /Ver por qué llegamos a esta conclusión/);
-  assert.match(dashboard, /showEvidence &&/);
+  assert.match(dashboard, /actionsSummary\.immediateAction/);
+  assert.match(dashboard, /Próxima acción/);
+  assert.match(dashboard, /Ver diagnóstico/);
+  assert.match(dashboard, /Ver todas las acciones/);
+  assert.doesNotMatch(dashboard, /sourceMessages|analysisTrace|analysisAudit/);
   assert.doesNotMatch(actions, /1\. ¿Qué problema hay|2\. ¿Por qué importa|3\. ¿Qué debería hacer|4\. ¿Qué resultado/);
 });

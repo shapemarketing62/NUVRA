@@ -9,7 +9,7 @@ import { requiresVerifiedEmail } from "@/lib/server/verification-policy";
 export async function GET(req: NextRequest) {
   const businessId = req.nextUrl.searchParams.get("businessId");
   if (!businessId || businessId.length > 100) return apiError("validation_error", 400);
-  const access = await authorizeBusiness(businessId, "business.read");
+  const access = await authorizeBusiness(businessId, "business.read", "integrations.standard");
   if (!access.ok) return apiError(access.reason, access.reason === "unauthorized" ? 401 : 403);
 
   const config = getInstagramConfigStatus();

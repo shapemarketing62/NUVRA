@@ -31,6 +31,6 @@ services:
       INTEGRATION_MASTER_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
       REDIS_REST_URL: http://redis-rest:80
       REDIS_REST_TOKEN: staging-redis-token
-    ports: ["3000:3000"]
+    ports: ["3000:8080"]
     depends_on: { postgres: { condition: service_healthy }, redis-rest: { condition: service_started } }
 volumes: { postgres_staging: {}, redis_staging: {} }

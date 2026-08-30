@@ -12,7 +12,7 @@ const manager = new IntegrationManager();
 export async function GET(req: NextRequest) {
   try {
     const businessId = z.string().min(1).max(100).parse(req.nextUrl.searchParams.get("businessId"));
-    const access = await authorizeBusiness(businessId, "business.read");
+    const access = await authorizeBusiness(businessId, "business.read", "integrations.standard");
     if (!access.ok) return apiError(access.reason, access.reason === "unauthorized" ? 401 : 403);
     return Response.json({ integrations: await manager.list(access.organization.id, businessId) });
   } catch (error) { return handleApiError(error); }

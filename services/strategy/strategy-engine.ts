@@ -201,7 +201,9 @@ export function buildProfileStrategy(context: StrategyContext, diagnosis: Diagno
   return {
     engineType: "deterministic",
     objetivo: `${context.objetivo}${context.magnitud ? ` (+${context.magnitud}%)` : ""} en ${context.plazoLabel}`,
-    situacionActual: primary ? `${context.nombre} tiene un Nuvra Score de ${scoreResult.total ?? 40}/100. La hipótesis principal está en ${primary.journeyStage}: ${primary.hypothesis}` : `${context.nombre} tiene un Nuvra Score de ${scoreResult.total ?? 40}/100, pero todavía no hay evidencia concreta suficiente para recomendar un cambio específico.`,
+    situacionActual: primary
+      ? `${scoreResult.total === null ? `${context.nombre} fue analizado con la información disponible.` : `${context.nombre} tiene un Nuvra Score de ${scoreResult.total}/100.`} La hipótesis principal está en ${primary.journeyStage}: ${primary.hypothesis}`
+      : `${scoreResult.total === null ? `${context.nombre} fue analizado con la información disponible` : `${context.nombre} tiene un Nuvra Score de ${scoreResult.total}/100`}, pero todavía no hay evidencia concreta suficiente para recomendar un cambio específico.`,
     distanciaObjetivo: primary ? `El próximo paso es intervenir donde hoy se frena el recorrido hacia ${profile.primaryCustomerAction}, sin modificar las partes que ya funcionan.` : "Hace falta incorporar evidencia concreta antes de indicar un cambio.",
     principalProblema: diagnosis.bottleneck.explanation,
     prioridades: actions.slice(0, 3).map((action) => action.title),

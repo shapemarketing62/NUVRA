@@ -1,9 +1,17 @@
-"use client";
-import { COLORS } from "@/lib/design-tokens";
-import { Btn, PageHeader, ProBadge, SectionHeader } from "@/components/ui";
-export default function NuvraAiPage(){
- const hasAIConfigured=!!process.env.OPENAI_API_KEY||!!process.env.ANTHROPIC_API_KEY;
- return <div className="page-container"><PageHeader eyebrow="Asistencia avanzada" title="Nuvra AI" subtitle="Un espacio para profundizar preguntas sobre el diagnóstico y el plan."/>
-  {!hasAIConfigured?<section style={{maxWidth:720,borderTop:"1px solid "+COLORS.lineStrong,paddingTop:28}}><ProBadge/><h2 className="section-title" style={{fontSize:24,marginTop:18}}>Disponible con NUVRA Pro</h2><p style={{fontSize:14,lineHeight:1.7,color:COLORS.inkSoft,maxWidth:580,marginTop:10}}>Esta función amplía el diagnóstico con consultas y análisis adicionales. Todavía no está activa en este entorno.</p><div className="split-grid" style={{marginTop:32}}><div><SectionHeader title="Qué permite"/><ul style={{paddingLeft:18,display:"grid",gap:10,fontSize:13.5,lineHeight:1.55,color:COLORS.inkSoft}}><li>Profundizar el diagnóstico actual</li><li>Evaluar alternativas para una decisión</li><li>Adaptar el plan ante nueva información</li></ul></div><div><SectionHeader title="Cómo se integra"/><p className="section-description">Trabaja sobre la información ya organizada por NUVRA y mantiene el contexto del negocio y su objetivo.</p></div></div><Btn style={{marginTop:32}} onClick={()=>{window.location.href="/dashboard/configuracion#planes"}}>Ver planes</Btn></section>:<section><SectionHeader title="Consultá sobre tu estrategia"/><div style={{height:300,border:"1px solid "+COLORS.line,borderRadius:10,background:COLORS.surface,padding:24,display:"grid",placeItems:"center"}}><p className="section-description">El asistente se habilitará cuando exista una integración configurada.</p></div></section>}
- </div>;
+import { EmptyState, PageHeader } from "@/components/ui";
+
+export default function NuvraAiPage() {
+  return (
+    <div className="page-container">
+      <PageHeader
+        eyebrow="Asistencia"
+        title="Nuvra AI"
+        subtitle="Esta función todavía no está disponible como parte del producto."
+      />
+      <EmptyState
+        title="Nuvra AI todavía no está habilitado"
+        description="Cuando pueda trabajar de forma segura con el contexto real de tu negocio, aparecerá en la navegación correspondiente."
+      />
+    </div>
+  );
 }

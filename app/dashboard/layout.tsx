@@ -35,13 +35,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       router.push("/onboarding");
       return;
     }
-    await fetch(`/api/business?id=${id}`)
+    await fetch(`/api/dashboard?businessId=${encodeURIComponent(id)}`, { cache: "no-store" })
       .then((r) => r.json())
       .then((data) => {
         if (data.error) router.push("/onboarding");
         else {
-          setBusinessName(data.nombre);
-          setPlanTier(normalizePlanTier(data.planTier));
+          setBusinessName(data.business?.nombre || "...");
+          setPlanTier(normalizePlanTier(data.plan?.tier));
           setInternalAccess(data.internalAccess === true);
         }
         if (!cancelled) setReady(true);

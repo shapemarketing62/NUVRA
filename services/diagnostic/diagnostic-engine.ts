@@ -53,8 +53,10 @@ export function buildProfileDiagnosis(business: BusinessContext, scoreResult: Nu
   const strengthsFound = [...profile.strengthCandidates].filter((candidate) => ["sufficient", "strong"].includes(candidate.evidenceSufficiency?.status || "limited")).sort((a, b) => b.priorityScore - a.priorityScore);
   const primary = problems[0];
   const primaryStrength = strengthsFound[0];
-  const score = scoreResult.total ?? 40;
   const objective = String(business.objetivo || profile.goal?.text || "hacer crecer el negocio").toLowerCase();
+  const scoreContext = scoreResult.total === null
+    ? `${business.nombre} fue analizado para su objetivo de ${objective}.`
+    : `${business.nombre} obtiene un Nuvra Score de ${scoreResult.total}/100 para su objetivo de ${objective}.`;
   const mainTitle = primary ? primary.hypothesis : primaryStrength ? `La base comercial más aprovechable está en ${stageLabel(primaryStrength.journeyStage).toLowerCase()}` : "Todavía no encontramos un obstáculo comprobable";
   const mainExplanation = primary ? candidateExplanation(profile, primary) : primaryStrength ? `${primaryStrength.statement} Conviene usar esa base para avanzar hacia ${profile.goal.text.toLowerCase()}.` : "El puntaje se muestra con la información disponible, pero todavía no hay una señal concreta que justifique señalar un problema principal.";
   const strengths = strengthsFound.slice(0, 4).map((candidate) => ({ title: candidate.statement, evidence: evidenceText(profile, candidate.evidence) }));
@@ -65,7 +67,7 @@ export function buildProfileDiagnosis(business: BusinessContext, scoreResult: Nu
   const summaryEvidence = primary ? `El freno más probable está en ${stageLabel(primary.journeyStage).toLowerCase()}: ${primary.hypothesis}` : primaryStrength ? `La señal más firme es: ${primaryStrength.statement}` : "Todavía hay poca evidencia concreta para señalar un único freno.";
   return {
     engineType: "deterministic",
-    summary: `${business.nombre} obtiene un Nuvra Score de ${score}/100 para su objetivo de ${objective}. ${summaryEvidence}`,
+    summary: `${scoreContext} ${summaryEvidence}`,
     bottleneck: { dimension: primary?.journeyStage || "estado actual", title: mainTitle, explanation: mainExplanation, findingId: primary?.evidenceFor[0] },
     strengths,
     weaknesses,
@@ -118,11 +120,13 @@ function buildProfileRisks(profile: BusinessProfile, problems: ProblemCandidate[
 function buildLegacyFallback(business: BusinessContext, scoreResult: NuvraScoreResult, findings: RawFinding[]): DiagnosisResult {
   const safeFindings = Array.isArray(findings) ? findings : [];
   const problem = safeFindings.find((finding) => finding?.type === "problem");
-  const score = scoreResult.total ?? 40;
+  const scoreContext = scoreResult.total === null
+    ? `${business.nombre} fue analizado con la información disponible.`
+    : `${business.nombre} obtiene un Nuvra Score de ${scoreResult.total}/100 con la información disponible.`;
   const objective = String(business.objetivo || "hacer crecer el negocio").toLowerCase();
   return {
     engineType: "deterministic",
-    summary: `${business.nombre} obtiene un Nuvra Score de ${score}/100 con la información disponible.`,
+    summary: scoreContext,
     bottleneck: { dimension: problem?.category || "estado actual", title: problem?.title || "Hace falta observar un poco más", explanation: problem?.evidence || "Todavía no hay una señal concreta suficiente para elegir un único problema." },
     strengths: [],
     weaknesses: problem ? [{ title: problem.title, evidence: problem.evidence }] : [],

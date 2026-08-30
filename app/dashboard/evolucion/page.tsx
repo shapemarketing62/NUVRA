@@ -2,177 +2,83 @@
 
 import { useDashboardData } from "@/lib/use-dashboard-data";
 import { COLORS } from "@/lib/design-tokens";
-import { DemoBadge, ProBadge, ErrorState, PageSkeleton, UpgradePanel } from "@/components/ui";
+import { DemoBadge, EmptyState, ErrorState, PageHeader, PageSkeleton, SectionHeader, StatusBadge, UpgradePanel } from "@/components/ui";
 import { hasEntitlement } from "@/lib/plans";
+import type { EvolutionDirection } from "@/lib/evolution-view";
+
+const SOURCE_NAMES: Record<string, string> = {
+  web: "Sitio web", search: "Búsqueda", instagram: "Instagram", reviews: "Reseñas",
+  competitor: "Competencia", external_mentions: "Menciones externas", google_places: "Google Maps",
+};
+
+function formatDate(value: string) {
+  return new Date(value).toLocaleDateString("es-AR", { day: "numeric", month: "short", year: "numeric" });
+}
+
+function directionLabel(direction: EvolutionDirection) {
+  if (direction === "improved") return "Mejoró";
+  if (direction === "declined") return "Bajó";
+  if (direction === "unchanged") return "Se mantuvo";
+  if (direction === "newly_evaluable") return "Ahora puede evaluarse";
+  if (direction === "no_longer_evaluable") return "Sin información suficiente ahora";
+  return "No comparable";
+}
 
 export default function EvolucionPage() {
-  const { history, score, loading, error, isDemo, planTier, internalAccess } = useDashboardData();
-
+  const { evolution, loading, error, isDemo, planTier, internalAccess } = useDashboardData();
   if (loading) return <PageSkeleton />;
   if (error) return <ErrorState message={error} />;
-  if (!hasEntitlement(planTier, "history.trend", internalAccess)) return <div className="page-container"><div className="page-eyebrow">Evolución</div><h1 className="page-title" style={{ marginBottom: 28 }}>Tu progreso en el tiempo</h1><UpgradePanel feature="history.trend" /></div>;
+  if (!hasEntitlement(planTier, "history.trend", internalAccess)) return <div className="page-container"><PageHeader eyebrow="Evolución" title="Tu progreso en el tiempo" /><UpgradePanel feature="history.trend" /></div>;
 
-  if (!history || history.length === 0) {
-    return (
-      <div style={{ 
-        background: COLORS.paperDim, 
-        borderRadius: 16, 
-        padding: 32, 
-        textAlign: "center" 
-      }}>
-        <h3 style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>Sin historial</h3>
-        <p style={{ color: COLORS.inkSoft, marginBottom: 16 }}>
-          Necesitás al menos dos análisis para medir la evolución de tu Nuvra Score.
-        </p>
-        <p style={{ fontSize: 13, color: COLORS.inkFaint }}>
-          Realizá un nuevo análisis en el futuro para comparar resultados.
-        </p>
-      </div>
-    );
-  }
+  const current = evolution.currentAnalysis;
+  const previous = evolution.previousComparableAnalysis;
+  if (!current) return <div className="page-container"><PageHeader eyebrow="Evolución" title="Qué cambió con el tiempo" subtitle={isDemo ? <DemoBadge /> : undefined} /><EmptyState title="Todavía no hay un análisis para seguir" description="Cuando completes un análisis, esta pantalla conservará el punto de partida para futuras comparaciones." /></div>;
 
-  const currentMethodologyVersion = history[0].scoreMethodologyVersion;
-  const comparableHistory = history.filter((item) => item.scoreMethodologyVersion === currentMethodologyVersion);
+  return <div className="page-container">
+    <PageHeader eyebrow="Evolución" title="Qué cambió desde el último análisis" subtitle={<>{isDemo && <DemoBadge style={{ marginRight: 8 }} />}Cambios observados, acciones realizadas y nueva información disponible.</>} />
 
-  if (comparableHistory.length === 1) {
-    return (
-      <div className="page-container">
-        <div style={{ marginBottom: 32 }}>
-          <h1 className="page-title">
-            Evolución
-          </h1>
-          <p style={{ color: COLORS.inkSoft, fontSize: 15 }}>
-            {isDemo && <DemoBadge style={{ marginRight: 8 }} />}
-            Seguimiento de tu progreso en el tiempo
-          </p>
+    <section style={{ paddingBottom: 34, borderBottom: `1px solid ${COLORS.line}`, marginBottom: 40 }}>
+      <SectionHeader title={evolution.hasComparison ? "Desde tu último análisis comparable" : "Tu punto de partida actual"} />
+      {evolution.hasComparison && previous ? <div className="split-grid">
+        <div><div className="page-eyebrow">Anterior · {formatDate(previous.date)}</div><div className="shp-display" style={{ fontSize: 34, fontWeight: 600 }}>{previous.score ?? "—"}</div>{previous.status === "partial" && <p className="section-description">Análisis parcial</p>}</div>
+        <div><div className="page-eyebrow">Actual · {formatDate(current.date)}</div><div style={{ display: "flex", alignItems: "baseline", gap: 14 }}><span className="shp-display" style={{ fontSize: 34, fontWeight: 600 }}>{current.score ?? "—"}</span>{evolution.globalDelta !== null && <span style={{ fontSize: 14, color: COLORS.inkSoft }}>{evolution.globalDelta > 0 ? "+" : ""}{evolution.globalDelta} puntos</span>}</div><p className="section-description">{evolution.generalDirection === "improved" ? "El resultado observado subió." : evolution.generalDirection === "declined" ? "El resultado observado bajó; revisá las notas antes de interpretarlo." : evolution.generalDirection === "unchanged" ? "El resultado general se mantuvo." : "No existe un delta global defendible."}</p></div>
+      </div> : <div><div className="page-eyebrow">Análisis actual · {formatDate(current.date)}</div><div className="shp-display" style={{ fontSize: 34, fontWeight: 600 }}>{current.score ?? "Sin puntaje general"}</div><p className="section-description" style={{ marginTop: 10 }}>{evolution.history.length > 1 ? "Los análisis anteriores usan otra metodología o no tienen información suficiente para compararlos directamente." : "Con el próximo análisis compatible podremos mostrar qué cambió y relacionarlo con el trabajo realizado."}</p></div>}
+      {evolution.interpretationNotes.length > 0 && <div style={{ marginTop: 22, display: "grid", gap: 8 }}>{evolution.interpretationNotes.map((note) => <p key={note} style={{ borderLeft: `2px solid ${COLORS.sand}`, paddingLeft: 12, fontSize: 13, lineHeight: 1.6, color: COLORS.inkSoft }}>{note}</p>)}</div>}
+    </section>
+
+    {evolution.hasComparison && <>
+      <section style={{ marginBottom: 42 }}>
+        <SectionHeader title="Qué cambió por área" description="Solo comparamos valores evaluables con la misma metodología." />
+        {evolution.dimensionChanges.length ? <div>{evolution.dimensionChanges.map((change) => <div className="diagnostic-row" key={change.slug} style={{ gridTemplateColumns: "minmax(150px,1fr) auto auto" }}><span style={{ fontSize: 13 }}>{change.name}</span><span style={{ fontSize: 12.5, color: COLORS.inkSoft }}>{change.previous ?? "—"} → {change.current ?? "—"}</span><strong style={{ fontSize: 12.5, minWidth: 150, textAlign: "right" }}>{directionLabel(change.direction)}{change.delta !== null && change.delta !== 0 ? ` (${change.delta > 0 ? "+" : ""}${change.delta})` : ""}</strong></div>)}</div> : <p className="section-description">No hay áreas comparables entre estos dos análisis.</p>}
+      </section>
+
+      <section className="section-rule" style={{ marginBottom: 42 }}>
+        <SectionHeader title="Cambios en la lectura del negocio" />
+        <div className="split-grid">
+          <div><h3 className="section-title">Señales nuevas</h3><div className="insight-list">{[...evolution.diagnosisChanges.newStrengths, ...evolution.diagnosisChanges.newFrictions, ...evolution.diagnosisChanges.newOpportunities].length ? [...evolution.diagnosisChanges.newStrengths, ...evolution.diagnosisChanges.newFrictions, ...evolution.diagnosisChanges.newOpportunities].slice(0, 6).map((item) => <div className="insight" key={item}><p className="section-description">{item}</p></div>) : <p className="section-description">No aparecieron conclusiones nuevas suficientemente diferenciadas.</p>}</div></div>
+          <div><h3 className="section-title">Señales que ya no aparecen</h3><div className="insight-list">{[...evolution.diagnosisChanges.noLongerObservedStrengths, ...evolution.diagnosisChanges.noLongerObservedFrictions, ...evolution.diagnosisChanges.noLongerObservedOpportunities].length ? [...evolution.diagnosisChanges.noLongerObservedStrengths, ...evolution.diagnosisChanges.noLongerObservedFrictions, ...evolution.diagnosisChanges.noLongerObservedOpportunities].slice(0, 6).map((item) => <div className="insight" key={item}><p className="section-description">{item}</p></div>) : <p className="section-description">Las conclusiones anteriores principales siguen presentes o no pueden compararse.</p>}</div></div>
         </div>
+      </section>
 
-        <div style={{ 
-          background: COLORS.paperDim, 
-          borderRadius: 16, 
-          padding: 32, 
-          textAlign: "center" 
-        }}>
-          <h3 style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>Primer análisis completado</h3>
-          <p style={{ color: COLORS.inkSoft, marginBottom: 16 }}>
-            Tu Nuvra Score actual es: <strong>{comparableHistory[0].nuvraScoreTotal || "N/A"}</strong>
-          </p>
-          <p style={{ fontSize: 13, color: COLORS.inkFaint }}>
-            Realizá un nuevo análisis para comparar resultados calculados con la misma metodología.
-          </p>
-        </div>
-      </div>
-    );
-  }
+      <section style={{ marginBottom: 42 }}>
+        <SectionHeader title="Lo que hiciste entre ambos análisis" description={`${evolution.actionActivity.counts.completed} completadas · ${evolution.actionActivity.counts.inProgress} iniciadas · ${evolution.actionActivity.counts.pending} pendientes`} />
+        {[...evolution.actionActivity.completed, ...evolution.actionActivity.started].length ? <div className="action-list">{[...evolution.actionActivity.completed, ...evolution.actionActivity.started].map((action) => <article className="action-item" key={`${action.id}-${action.eventDate}`}><div className="action-marker" aria-hidden="true" /><div><div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}><h3 className="section-title">{action.title}</h3><StatusBadge tone={action.status === "completed" ? "success" : "info"}>{action.status === "completed" ? "Completada" : "Iniciada"}</StatusBadge></div>{action.eventDate && <p className="section-description">{formatDate(action.eventDate)}</p>}<p style={{ fontSize: 13, lineHeight: 1.6, marginTop: 8 }}>{action.relationText}</p>{action.relatedProblem && <p className="section-description" style={{ marginTop: 7 }}>Relacionada con: {action.relatedProblem}</p>}</div></article>)}</div> : <p className="section-description">No hay inicios o finalizaciones registradas dentro de este período.</p>}
+      </section>
 
-  const firstScore = comparableHistory[comparableHistory.length - 1].nuvraScoreTotal || 0;
-  const lastScore = comparableHistory[0].nuvraScoreTotal || 0;
-  const change = lastScore - firstScore;
-  const changePercent = firstScore > 0 ? Math.round((change / firstScore) * 100) : 0;
+      <section className="section-rule" style={{ marginBottom: 42 }}>
+        <SectionHeader title="Nueva información disponible" description="Cambios en las fuentes pueden modificar el diagnóstico aunque el negocio no haya cambiado en la misma medida." />
+        {evolution.sourceChanges.length ? <div className="insight-list">{evolution.sourceChanges.map((change) => <div className="insight" key={change.source}><div><h3 style={{ fontSize: 14, fontWeight: 650 }}>{SOURCE_NAMES[change.source] || change.source}</h3><p className="section-description">{change.kind === "new_source" ? "Ahora aporta información al análisis." : change.kind === "more_information" ? "Ahora pudo analizarse con mayor profundidad." : change.kind === "lost_access" ? "En el análisis actual no estuvo disponible con el mismo nivel de acceso." : "Cambió su estado entre ambos análisis."}</p></div></div>)}</div> : <p className="section-description">No hubo cambios relevantes en las fuentes analizadas.</p>}
+      </section>
 
-  return (
-    <div className="page-container">
-      <div style={{ marginBottom: 32 }}>
-        <h1 className="page-title">
-          Evolución
-        </h1>
-        <p style={{ color: COLORS.inkSoft, fontSize: 15 }}>
-          {isDemo && <DemoBadge style={{ marginRight: 8 }} />}
-          Seguimiento de tu progreso en el tiempo
-        </p>
-      </div>
+      <section className="strategic-callout" style={{ marginBottom: 42 }}>
+        <div className="page-eyebrow">Prioridad principal</div>
+        {evolution.priorityChange.status === "changed" ? <><p className="section-description">Antes: {evolution.priorityChange.previous}</p><h2 style={{ fontSize: 19, lineHeight: 1.4, marginTop: 10 }}>Ahora: {evolution.priorityChange.current}</h2>{evolution.priorityChange.explanation && <p className="section-description" style={{ marginTop: 10 }}>{evolution.priorityChange.explanation}</p>}</> : evolution.priorityChange.status === "same" ? <><h2 style={{ fontSize: 19, lineHeight: 1.4 }}>{evolution.priorityChange.current}</h2><p className="section-description" style={{ marginTop: 8 }}>La prioridad principal se mantiene.</p></> : <p className="section-description">No hay información suficiente para comparar la prioridad principal.</p>}
+      </section>
+    </>}
 
-      <div style={{ 
-        display: "grid", 
-        gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", 
-        gap: 20, 
-        marginBottom: 24 
-      }}>
-        <div style={{ 
-          background: "#fff", 
-          borderRadius: 16, 
-          padding: 24, 
-          border: `1px solid ${COLORS.line}`,
-          textAlign: "center"
-        }}>
-          <div style={{ fontSize: 13, color: COLORS.inkSoft, marginBottom: 8 }}>Score inicial</div>
-          <div style={{ fontSize: 32, fontWeight: 600 }}>
-            {firstScore}
-          </div>
-        </div>
-
-        <div style={{ 
-          background: "#fff", 
-          borderRadius: 16, 
-          padding: 24, 
-          border: `1px solid ${COLORS.line}`,
-          textAlign: "center"
-        }}>
-          <div style={{ fontSize: 13, color: COLORS.inkSoft, marginBottom: 8 }}>Score actual</div>
-          <div style={{ fontSize: 32, fontWeight: 600, color: COLORS.blue }}>
-            {lastScore}
-          </div>
-        </div>
-
-        <div style={{ 
-          background: "#fff", 
-          borderRadius: 16, 
-          padding: 24, 
-          border: `1px solid ${COLORS.line}`,
-          textAlign: "center"
-        }}>
-          <div style={{ fontSize: 13, color: COLORS.inkSoft, marginBottom: 8 }}>Cambio</div>
-          <div style={{ 
-            fontSize: 32, 
-            fontWeight: 600, 
-            color: change >= 0 ? COLORS.olive : COLORS.red 
-          }}>
-            {change >= 0 ? "+" : ""}{change}
-          </div>
-          <div style={{ fontSize: 12, color: COLORS.inkFaint }}>
-            {changePercent >= 0 ? "+" : ""}{changePercent}%
-          </div>
-        </div>
-      </div>
-
-      <div style={{ 
-        background: "#fff", 
-        borderRadius: 16, 
-        padding: 24, 
-        border: `1px solid ${COLORS.line}`
-      }}>
-        <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>Historial de análisis</h3>
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {history.map((h, i) => (
-            <div key={i} style={{ 
-              display: "flex", 
-              justifyContent: "space-between", 
-              alignItems: "center", 
-              padding: "12px", 
-              background: COLORS.paperDim, 
-              borderRadius: 8 
-            }}>
-              <div>
-                <div style={{ fontWeight: 500, fontSize: 14 }}>
-                  Análisis #{history.length - i}
-                </div>
-                <div style={{ fontSize: 12, color: COLORS.inkSoft }}>
-                  {new Date(h.createdAt).toLocaleDateString("es-AR", { 
-                    year: "numeric", 
-                    month: "short", 
-                    day: "numeric",
-                    hour: "2-digit",
-                    minute: "2-digit"
-                  })}
-                </div>
-              </div>
-              <div style={{ fontSize: 24, fontWeight: 600 }}>
-                {h.nuvraScoreTotal || "N/A"}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
+    <section className="section-rule">
+      <SectionHeader title="Historial de análisis" />
+      <div className="insight-list">{evolution.history.map((analysis) => <div className="insight" key={analysis.id}><div style={{ width: "100%", display: "flex", justifyContent: "space-between", gap: 16, alignItems: "flex-start" }}><div><h3 style={{ fontSize: 14, fontWeight: 650 }}>{formatDate(analysis.date)}</h3><p className="section-description">{analysis.status === "partial" ? "Análisis parcial" : analysis.status === "completed" ? "Análisis completo" : "Información histórica limitada"}</p>{analysis.comparisonLabel && <p className="field-hint" style={{ marginTop: 6 }}>{analysis.comparisonLabel}</p>}</div><strong className="shp-display" style={{ fontSize: 23, fontWeight: 600 }}>{analysis.score ?? "—"}</strong></div></div>)}</div>
+    </section>
+  </div>;
 }

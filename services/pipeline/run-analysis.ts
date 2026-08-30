@@ -14,6 +14,7 @@ import { normalizeUrl } from "@/lib/utils";
 import { REBUILD_TIMESTAMP } from "@/lib/rebuild-trigger";
 import { currentLogContext } from "@/lib/server/logger";
 import { inferCustomerType } from "@/lib/business-context";
+import { createAnalysisInputSnapshot } from "@/lib/analysis-freshness";
 
 // Force recompilation with timestamp: REBUILD_TIMESTAMP
 
@@ -99,8 +100,8 @@ export async function runFullAnalysis(businessId: string, options: { signal?: Ab
     category: business.rubro,
     location: business.ubicacion || undefined,
     tipoCliente: inferredCustomerType,
-    declaredWebUrl: business.webUrl || business.websites[0]?.url || undefined,
-    declaredInstagram: business.instagramHandle || undefined,
+    declaredWebUrl: business.noWebDeclared ? undefined : business.webUrl || business.websites[0]?.url || undefined,
+    declaredInstagram: business.noInstagramDeclared ? undefined : business.instagramHandle || undefined,
   };
   const discoveryExecution = await executeSource({
     source: "discovery",
@@ -122,7 +123,7 @@ export async function runFullAnalysis(businessId: string, options: { signal?: Ab
     execution: discoveryExecution.audit,
   }, { startedAt: discoveryStarted, endedAt: Date.now(), durationMs: Date.now() - discoveryStarted });
 
-  const rawWebUrl = business.webUrl || business.websites[0]?.url || discoveryResult.primaryWebUrl;
+  const rawWebUrl = (business.noWebDeclared ? null : business.webUrl || business.websites[0]?.url) || discoveryResult.primaryWebUrl;
   stageLog("1_inicio", { businessId, nombre: business.nombre, webUrl: rawWebUrl, objetivo: goal.objetivo, plazoDias: goal.plazoDias }, { startedAt, endedAt: Date.now(), durationMs: Date.now() - startedAt });
 
   currentStage = "website_normalize";
@@ -142,7 +143,7 @@ export async function runFullAnalysis(businessId: string, options: { signal?: Ab
   }
 
   currentStage = "website_persist";
-  let website = business.websites[0];
+  let website = normalizedUrl && business.websites[0]?.url === normalizedUrl ? business.websites[0] : undefined;
   if (!website && normalizedUrl) {
     const createStarted = Date.now();
     console.log("[ANALYSIS] Creating website record from discovery/input");
@@ -438,8 +439,8 @@ export async function runFullAnalysis(businessId: string, options: { signal?: Ab
       const actionId = randomUUID();
       try {
         await (prisma as any).$executeRaw`
-          INSERT INTO "StrategicAction" ("id", "strategyId", "title", "description", "order", "impact", "difficulty", "estimatedTime", "dependencies", "indicatorToImprove", "rationale", "relatedFindingIds", "findingIds", "evidence", "inference", "dimension", "framework", "confidence", "problem", "unlocksContent", "done")
-          VALUES (${actionId}, ${strategyId}, ${action.title}, ${action.description || null}, ${action.order}, ${action.impact}, ${action.difficulty}, ${action.estimatedTime}, ${JSON.stringify(action.dependencies) || null}, ${action.indicatorToImprove}, ${action.rationale}, ${JSON.stringify(action.relatedFindingIds || []) || null}, ${JSON.stringify(action.findingIds || []) || null}, ${action.evidence || null}, ${action.inference || null}, ${action.dimension || null}, ${action.framework || null}, ${action.confidence || null}, ${action.problem || null}, ${action.unlocksContent || false}, false)
+          INSERT INTO "StrategicAction" ("id", "strategyId", "title", "description", "order", "impact", "difficulty", "estimatedTime", "dependencies", "indicatorToImprove", "rationale", "relatedFindingIds", "findingIds", "evidence", "inference", "dimension", "framework", "confidence", "problem", "unlocksContent", "done", "status", "updatedAt")
+          VALUES (${actionId}, ${strategyId}, ${action.title}, ${action.description || null}, ${action.order}, ${action.impact}, ${action.difficulty}, ${action.estimatedTime}, ${JSON.stringify(action.dependencies) || null}, ${action.indicatorToImprove}, ${action.rationale}, ${JSON.stringify(action.relatedFindingIds || []) || null}, ${JSON.stringify(action.findingIds || []) || null}, ${action.evidence || null}, ${action.inference || null}, ${action.dimension || null}, ${action.framework || null}, ${action.confidence || null}, ${action.problem || null}, ${action.unlocksContent || false}, false, ${"pending"}, ${new Date()})
         `;
         actionIds.push(actionId);
       } catch (e) {
@@ -477,6 +478,7 @@ export async function runFullAnalysis(businessId: string, options: { signal?: Ab
             externalMentionsSummary: biResult.aggregatedEvidence.sources.external_mentions?.data || null,
           },
           businessProfile: biResult.businessProfile,
+          analysisInput: createAnalysisInputSnapshot(business, goal),
           analysisTrace,
           analysisAudit: {
             discovery: discoveryExecution.audit,

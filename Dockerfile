@@ -18,7 +18,7 @@ ARG APP_VERSION=0.1.0
 ARG COMMIT_SHA=unknown
 ARG BUILD_DATE=unknown
 WORKDIR /app
-ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=3000 HOSTNAME=0.0.0.0 PLAYWRIGHT_BROWSERS_PATH=/ms-playwright APP_VERSION=$APP_VERSION COMMIT_SHA=$COMMIT_SHA BUILD_DATE=$BUILD_DATE
+ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=8080 HOSTNAME=0.0.0.0 PLAYWRIGHT_BROWSERS_PATH=/ms-playwright APP_VERSION=$APP_VERSION COMMIT_SHA=$COMMIT_SHA BUILD_DATE=$BUILD_DATE
 COPY --from=builder --chown=pwuser:pwuser /app/package.json /app/package-lock.json ./
 COPY --from=builder --chown=pwuser:pwuser /app/node_modules ./node_modules
 COPY --from=builder --chown=pwuser:pwuser /app/.next/standalone ./.next/standalone
@@ -31,6 +31,6 @@ COPY --from=builder --chown=pwuser:pwuser /app/lib ./lib
 COPY --from=builder --chown=pwuser:pwuser /app/services ./services
 COPY --from=builder --chown=pwuser:pwuser /app/tsconfig.json ./tsconfig.json
 USER pwuser
-EXPOSE 3000
-HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 CMD node -e "fetch('http://127.0.0.1:3000/api/health/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+EXPOSE 8080
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 CMD node -e "fetch('http://127.0.0.1:'+process.env.PORT+'/api/health/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
 CMD ["sh","-c","npx prisma migrate deploy --schema prisma/postgresql/schema.prisma && exec node .next/standalone/server.js"]
