@@ -59,7 +59,7 @@ export default function AccionesPage() {
   return <div className="page-container">
     <PageHeader eyebrow="Plan de trabajo" title="Acciones" subtitle={<>{isDemo && <DemoBadge style={{ marginRight: 8 }} />}Qué hacer concretamente, en el orden recomendado por el análisis.</>} />
 
-    <section style={{ display: "grid", gridTemplateColumns: "minmax(220px,.45fr) 1fr", gap: 28, alignItems: "end", paddingBottom: 28, borderBottom: `1px solid ${COLORS.line}` }}>
+    <section className="dashboard-action-progress" style={{ borderBottom: `1px solid ${COLORS.line}` }}>
       <div><div className="page-eyebrow">Progreso de este plan</div><div className="shp-display" style={{ fontSize: 36, fontWeight: 650, letterSpacing: "-.04em" }}>{progress.percentage}%</div><p className="section-description">{progress.completed} de {progress.total} acciones visibles completadas</p></div>
       <div><div className="diagnostic-track" style={{ "--value": progress.percentage } as React.CSSProperties} /></div>
     </section>
@@ -85,17 +85,11 @@ export default function AccionesPage() {
             {action.dimension && <span>Área relacionada: {simplifyTechnicalText(action.dimension)}</span>}
           </div>
 
-          <div style={{ display: "grid", gap: 10, marginTop: 16, fontSize: 13, lineHeight: 1.6 }}>
-            {action.relatedConclusion && <p><strong>Qué estamos intentando resolver: </strong>{simplifyTechnicalText(action.relatedConclusion)}</p>}
-            {canonicalStrategy?.direction && <p><strong>Dirección de la estrategia: </strong>{simplifyTechnicalText(canonicalStrategy.direction)}</p>}
-            {action.rationale && <p><strong>Por qué recomendamos esta acción: </strong>{simplifyTechnicalText(action.rationale)}</p>}
-            {action.indicatorToImprove && <p><strong>Cómo medirla: </strong>{simplifyTechnicalText(action.indicatorToImprove)}</p>}
-            {action.dependencies?.length ? <p><strong>Antes de empezar: </strong>{action.dependencies.map(simplifyTechnicalText).join(" · ")}</p> : null}
-            {action.startedAt && <p className="section-description">Iniciada el {new Date(action.startedAt).toLocaleDateString("es-AR")}</p>}
-            {action.completedAt && <p className="section-description">Completada el {new Date(action.completedAt).toLocaleDateString("es-AR")}</p>}
-          </div>
+          {(action.details?.expectedResult || action.indicatorToImprove) && <p style={{ fontSize: 13, lineHeight: 1.6, marginTop: 15 }}><strong>Resultado buscado: </strong>{simplifyTechnicalText(action.details?.expectedResult || action.indicatorToImprove)}</p>}
+          {action.startedAt && <p className="section-description">Iniciada el {new Date(action.startedAt).toLocaleDateString("es-AR")}</p>}
+          {action.completedAt && <p className="section-description">Completada el {new Date(action.completedAt).toLocaleDateString("es-AR")}</p>}
 
-          {(action.evidence || action.inference) && <details style={{ marginTop: 15 }}><summary style={{ fontSize: 12.5, color: COLORS.inkSoft, cursor: "pointer" }}>Ver fundamento</summary><div style={{ padding: "12px 0 0", display: "grid", gap: 7, fontSize: 12.5, lineHeight: 1.55 }}>{action.evidence && <p><strong>Qué observamos: </strong>{simplifyTechnicalText(action.evidence)}</p>}{action.inference && <p style={{ color: COLORS.inkSoft }}><strong>Qué significa: </strong>{simplifyTechnicalText(action.inference)}</p>}</div></details>}
+          {(action.details?.steps.length || action.evidence || action.inference) && <details style={{ marginTop: 15 }}><summary style={{ fontSize: 12.5, color: COLORS.inkSoft, cursor: "pointer" }}>Ver plan de ejecución</summary><div style={{ padding: "12px 0 0", display: "grid", gap: 9, fontSize: 12.5, lineHeight: 1.55 }}>{action.details?.where && <p><strong>Dónde hacerlo: </strong>{simplifyTechnicalText(action.details.where)}</p>}{action.details?.audience && <p><strong>Para quién: </strong>{simplifyTechnicalText(action.details.audience)}</p>}{action.relatedConclusion && <p><strong>Qué estamos intentando resolver: </strong>{simplifyTechnicalText(action.relatedConclusion)}</p>}{canonicalStrategy?.direction && <p><strong>Dirección del plan: </strong>{simplifyTechnicalText(canonicalStrategy.direction)}</p>}{action.rationale && <p><strong>Por qué recomendamos esta acción: </strong>{simplifyTechnicalText(action.rationale)}</p>}{action.details?.steps.length ? <ol style={{ paddingLeft: 20, display: "grid", gap: 6 }}>{action.details.steps.map((step) => <li key={step}>{simplifyTechnicalText(step)}</li>)}</ol> : null}{(action.details?.metric || action.indicatorToImprove) && <p><strong>Cómo medirla: </strong>{simplifyTechnicalText(action.details?.metric || action.indicatorToImprove)}</p>}{action.details?.estimatedCost && <p><strong>Costo estimado: </strong>{simplifyTechnicalText(action.details.estimatedCost)}</p>}{action.dependencies?.length ? <p><strong>Antes de empezar: </strong>{action.dependencies.map(simplifyTechnicalText).join(" · ")}</p> : null}{action.evidence && <p><strong>Qué observamos: </strong>{simplifyTechnicalText(action.evidence)}</p>}{action.inference && <p style={{ color: COLORS.inkSoft }}><strong>Qué significa: </strong>{simplifyTechnicalText(action.inference)}</p>}</div></details>}
 
           {action.canUpdateStatus && <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 17 }}>
             {action.state === "pending" && <><Btn size="sm" variant="primary" disabled={updatingId === action.id} onClick={() => changeStatus(action, "in_progress")}>{updatingId === action.id ? "Guardando…" : "Empezar"}</Btn><Btn size="sm" variant="ghost" disabled={updatingId === action.id} onClick={() => changeStatus(action, "completed")}>Marcar como completada</Btn></>}

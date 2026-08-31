@@ -44,14 +44,10 @@ export default function DashboardHomePage() {
       {analysis.hasPartialSources && <p className="section-description" style={{ flexBasis: "100%" }}>Algunas fuentes no estuvieron disponibles o necesitan autorización. El análisis conserva la información que sí pudo comprobar.</p>}
     </section>
 
-    <section className="metric-grid" style={{ marginBottom: 42 }}>
+    <section style={{ marginBottom: 42, maxWidth: 720 }}>
       <div className="score-indicator">
         <ScoreRing value={score?.total ?? null} status={score?.total == null ? "PENDIENTE" : "COMPLETO"} />
         <div><h2 className="section-title">Nuvra Score</h2><p className="section-description">Una lectura general basada únicamente en la información disponible.</p></div>
-      </div>
-      <div>
-        <SectionHeader title="Áreas principales" description="Una lectura breve de las áreas que pudieron evaluarse." />
-        {keyAreas.length ? <div>{keyAreas.map((dimension) => <div className="diagnostic-row" key={dimension.slug}><span style={{ fontSize: 12.5 }}>{getFriendlyDimensionName(dimension.slug, dimension.name)}</span><div className="diagnostic-track" style={{ "--value": dimension.points } as CSSProperties} /><strong style={{ fontSize: 12, textAlign: "right" }}>{dimension.points}</strong></div>)}</div> : <EmptyState title="Sin áreas evaluables" description="Todavía no hay información suficiente para mostrar puntajes por área." />}
       </div>
     </section>
 
@@ -63,6 +59,11 @@ export default function DashboardHomePage() {
     <section style={{ marginBottom: 42 }}>
       <SectionHeader title="Próxima acción" description="El siguiente paso priorizado en el plan actual." />
       {nextAction ? <article className="action-item"><div className="action-marker" aria-hidden="true" /><div><h2 className="shp-display" style={{ fontSize: 20, fontWeight: 500 }}>{nextAction.title}</h2>{nextAction.description && <p className="section-description">{nextAction.description}</p>}<div className="action-meta"><span>Impacto: {nextAction.impact}</span><span>Plazo: {nextAction.estimatedTime}</span></div><Btn variant="ghost" size="sm" onClick={() => { window.location.href = "/dashboard/acciones"; }} style={{ marginTop: 14 }}>Ver todas las acciones</Btn></div></article> : <EmptyState title="Sin una acción inmediata" description="Todavía no existe una acción sustentada para priorizar." />}
+    </section>
+
+    <section style={{ marginBottom: 42 }}>
+      <SectionHeader title="Áreas evaluadas" description="Una lectura breve de las áreas que pudieron analizarse con información defendible." />
+      {keyAreas.length ? <div>{keyAreas.map((dimension) => <div className="diagnostic-row" key={dimension.slug}><span style={{ fontSize: 12.5 }}>{getFriendlyDimensionName(dimension.slug, dimension.name)}</span><div className="diagnostic-track" style={{ "--value": dimension.points } as CSSProperties} /><strong style={{ fontSize: 12, textAlign: "right" }}>{dimension.points}</strong></div>)}</div> : <EmptyState title="Sin áreas evaluables" description="El análisis conserva lo encontrado, pero todavía no hay un puntaje defendible por área." />}
     </section>
 
     {evolutionSummary.hasComparableAnalysis && <section className="section-rule" style={{ marginBottom: 38 }}><SectionHeader title="Desde el análisis anterior" /><div style={{ display: "flex", alignItems: "baseline", gap: 12 }}><strong className="shp-display" style={{ fontSize: 30, fontWeight: 600 }}>{evolutionSummary.change !== null && evolutionSummary.change > 0 ? "+" : ""}{evolutionSummary.change}</strong><span className="section-description">puntos con la misma metodología</span></div></section>}

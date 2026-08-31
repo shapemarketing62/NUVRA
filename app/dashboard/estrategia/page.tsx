@@ -24,22 +24,22 @@ export default function EstrategiaPage() {
 
     <section style={{ maxWidth: 820, marginBottom: 38 }}>
       <SectionHeader title="El desafío principal" />
-      {canonicalStrategy.problemOfOrigin ? <p style={{ fontSize: 15, lineHeight: 1.7 }}>{canonicalStrategy.problemOfOrigin.title}</p> : <p className="section-description">Todavía no existe una conclusión suficientemente firme para orientar la estrategia.</p>}
+      {canonicalStrategy.problemOfOrigin ? <p style={{ fontSize: 15, lineHeight: 1.7 }}>{canonicalStrategy.problemOfOrigin.title}</p> : <p className="section-description">Todavía no podemos atribuir el desafío a una única causa. La estrategia prioriza una prueba acotada antes de ampliar la inversión.</p>}
     </section>
 
     <section className="strategic-callout" style={{ marginBottom: 42 }}>
-      <div className="page-eyebrow">Dirección estratégica</div>
+      <div className="page-eyebrow">Apuesta estratégica</div>
       {canonicalStrategy.direction ? <h2 style={{ fontSize: 21, fontWeight: 650, lineHeight: 1.4 }}>{simplifyTechnicalText(canonicalStrategy.direction)}</h2> : <p className="section-description">Necesitamos más información antes de recomendar una dirección concreta.</p>}
     </section>
 
     <section style={{ maxWidth: 820, marginBottom: 42 }}>
       <SectionHeader title="Por qué esta dirección" />
-      {canonicalStrategy.rationale ? <p style={{ fontSize: 14, lineHeight: 1.7 }}>{simplifyTechnicalText(canonicalStrategy.rationale)}</p> : <p className="section-description">La relación entre el diagnóstico y el objetivo todavía no está suficientemente documentada.</p>}
+      {canonicalStrategy.rationale ? <p style={{ fontSize: 14, lineHeight: 1.7 }}>{simplifyTechnicalText(canonicalStrategy.rationale)}</p> : <p className="section-description">Primero necesitamos comprobar qué movimiento acerca mejor al negocio a su objetivo.</p>}
     </section>
 
     <div className="split-grid" style={{ marginBottom: 42 }}>
       <section><SectionHeader title="Resultado buscado" />{canonicalStrategy.expectedResult ? <p style={{ fontSize: 14, lineHeight: 1.7 }}>{simplifyTechnicalText(canonicalStrategy.expectedResult)}</p> : <p className="section-description">Todavía no hay un resultado definido.</p>}</section>
-      <section><SectionHeader title="Cómo vamos a medirlo" />{canonicalStrategy.kpi ? <p style={{ fontSize: 14, lineHeight: 1.7 }}>{simplifyTechnicalText(canonicalStrategy.kpi)}</p> : <p className="section-description">La estrategia actual todavía no tiene un indicador persistido.</p>}</section>
+      <section><SectionHeader title="Cómo vamos a medirlo" />{canonicalStrategy.kpi ? <p style={{ fontSize: 14, lineHeight: 1.7 }}>{simplifyTechnicalText(canonicalStrategy.kpi)}</p> : <p className="section-description">El primer paso será definir una medida simple para seguir el avance.</p>}</section>
     </div>
 
     <section className="section-rule">

@@ -166,7 +166,8 @@ test("el texto libre sobre origen de clientes cambia las acciones", () => {
   const referrals = analyzeFixture({ ...base, id: "accounting-referrals", additional: "La mayoría de los clientes llega por recomendación." });
   const instagram = analyzeFixture({ ...base, id: "accounting-instagram", additional: "La mayoría de los clientes llega por Instagram." });
   assert.ok(referrals.strategy.actions.some((action) => /recomendaciones/i.test(action.title)));
-  assert.ok(instagram.strategy.actions.some((action) => /canal informado/i.test(action.title)));
+  assert.ok(instagram.strategy.actions.some((action) => /Instagram/i.test(action.title)));
+  assert.equal(instagram.strategy.actions.some((action) => /canal informado/i.test(action.title)), false);
   assert.notDeepEqual(referrals.strategy.actions.map((action) => action.title), instagram.strategy.actions.map((action) => action.title));
 });
 

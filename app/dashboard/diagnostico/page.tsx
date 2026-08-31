@@ -25,6 +25,11 @@ export default function DiagnosticoPage() {
       <p style={{ fontSize: 16, lineHeight: 1.75 }}>{simplifyTechnicalText(diagnosis.summary)}</p>
     </section>
 
+    <section className="strategic-callout" style={{ marginBottom: 42 }}>
+      <div className="page-eyebrow">Lo que más importa ahora</div>
+      {canonicalDiagnosis.mainConclusion ? <><h2 style={{ fontSize: 20, fontWeight: 650, lineHeight: 1.35 }}>{canonicalDiagnosis.mainConclusion.title}</h2><p className="section-description" style={{ marginTop: 10 }}>{canonicalDiagnosis.mainConclusion.explanation}</p></> : <p className="section-description">Todavía no podemos atribuir el resultado a una causa única. El próximo paso es validar la primera decisión antes de invertir más recursos.</p>}
+    </section>
+
     <section className="section-rule" style={{ marginBottom: 42 }}>
       <SectionHeader title="Qué observamos" description="Señales concretas encontradas en las fuentes disponibles." />
       {observations.length ? <details><summary style={{ fontSize: 13, color: COLORS.inkSoft, cursor: "pointer", marginBottom: 14 }}>Ver evidencia ({observations.length})</summary><div className="insight-list">{observations.map((item, index) => <div className="insight" key={`${item.source}-${index}`}><div><p style={{ fontSize: 14, lineHeight: 1.6 }}>{item.observation}</p><div className="field-hint" style={{ marginTop: 7 }}>Fuente: {item.url ? <a href={item.url} target="_blank" rel="noreferrer">{item.source}</a> : item.source}{item.date ? ` · ${new Date(item.date).toLocaleDateString("es-AR")}` : ""}</div></div></div>)}</div></details> : <EmptyState title="Sin observaciones públicas disponibles" description="El diagnóstico existe, pero este análisis anterior no conservó evidencia pública para mostrar." />}
@@ -33,11 +38,6 @@ export default function DiagnosticoPage() {
     <section style={{ marginBottom: 42 }}>
       <SectionHeader title="Qué significa" />
       {canonicalDiagnosis.mainConclusion ? <div style={{ maxWidth: 820 }}><p style={{ fontSize: 15, lineHeight: 1.7 }}>{canonicalDiagnosis.mainConclusion.explanation}</p>{canonicalDiagnosis.mainConclusion.relationshipToGoal && <p className="section-description" style={{ marginTop: 10 }}>{canonicalDiagnosis.mainConclusion.relationshipToGoal}</p>}</div> : <p className="section-description">La información disponible todavía no permite explicar un problema principal con suficiente sustento.</p>}
-    </section>
-
-    <section className="strategic-callout" style={{ marginBottom: 42 }}>
-      <div className="page-eyebrow">Conclusión principal</div>
-      {canonicalDiagnosis.mainConclusion ? <h2 style={{ fontSize: 20, fontWeight: 650, lineHeight: 1.35 }}>{canonicalDiagnosis.mainConclusion.title}</h2> : <p className="section-description">Necesitamos más información antes de sostener una conclusión concreta.</p>}
     </section>
 
     <div className="split-grid" style={{ marginBottom: 42 }}>

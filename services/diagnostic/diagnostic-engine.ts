@@ -3,6 +3,7 @@ import type { RawFinding } from "../website-analyzer/types";
 import { createAIService, diagnosisSchema, type DiagnosisOutput } from "../ai/ai-service.ts";
 import type { BusinessProfile } from "../intelligence/business-profile";
 import type { ProblemCandidate, StrengthCandidate } from "../intelligence/commercial-candidates.ts";
+import { buildMarketingDecisionContext } from "../strategy/marketing-decision-context.ts";
 
 export interface BusinessContext {
   nombre: string;
@@ -49,22 +50,24 @@ export async function runDiagnosticEngine(business: BusinessContext, scoreResult
 }
 
 export function buildProfileDiagnosis(business: BusinessContext, scoreResult: NuvraScoreResult, profile: BusinessProfile): DiagnosisResult {
+  const decision = buildMarketingDecisionContext(profile, { timeframeDays: business.plazoDias, timeframeLabel: business.plazoLabel });
   const problems = [...profile.problemCandidates].filter((candidate) => candidate.validationStatus === "validated").sort((a, b) => b.priorityScore - a.priorityScore);
   const strengthsFound = [...profile.strengthCandidates].filter((candidate) => ["sufficient", "strong"].includes(candidate.evidenceSufficiency?.status || "limited")).sort((a, b) => b.priorityScore - a.priorityScore);
   const primary = problems[0];
   const primaryStrength = strengthsFound[0];
   const objective = String(business.objetivo || profile.goal?.text || "hacer crecer el negocio").toLowerCase();
+  const demandPatternQuote = decision.demandPattern?.replace(/[.!?]+$/, "");
   const scoreContext = scoreResult.total === null
     ? `${business.nombre} fue analizado para su objetivo de ${objective}.`
     : `${business.nombre} obtiene un Nuvra Score de ${scoreResult.total}/100 para su objetivo de ${objective}.`;
-  const mainTitle = primary ? primary.hypothesis : primaryStrength ? `La base comercial más aprovechable está en ${stageLabel(primaryStrength.journeyStage).toLowerCase()}` : "Todavía no encontramos un obstáculo comprobable";
-  const mainExplanation = primary ? candidateExplanation(profile, primary) : primaryStrength ? `${primaryStrength.statement} Conviene usar esa base para avanzar hacia ${profile.goal.text.toLowerCase()}.` : "El puntaje se muestra con la información disponible, pero todavía no hay una señal concreta que justifique señalar un problema principal.";
+  const mainTitle = primary ? primary.hypothesis : decision.demandPattern ? "La oportunidad más concreta está en equilibrar los momentos de menor demanda" : primaryStrength ? `La base comercial más aprovechable está en ${stageLabel(primaryStrength.journeyStage).toLowerCase()}` : `La próxima decisión debe validarse alrededor de ${decision.decision.primaryKpi}`;
+  const mainExplanation = primary ? candidateExplanation(profile, primary) : decision.demandPattern ? `El negocio informó: “${demandPatternQuote}”. Como el objetivo es “${decision.goal.original}”, la decisión más defendible es trabajar ese desbalance y medirlo, sin asumir una falla en los canales que no fue comprobada.` : primaryStrength ? `${primaryStrength.statement} Conviene usar esa base para avanzar hacia ${profile.goal.text.toLowerCase()}.` : `La información disponible no demuestra una única falla. Sí permite proponer una prueba acotada para ${decision.decision.strategicBet}, medida con ${decision.decision.primaryKpi}.`;
   const strengths = strengthsFound.slice(0, 4).map((candidate) => ({ title: candidate.statement, evidence: evidenceText(profile, candidate.evidence) }));
   const weaknesses = problems.slice(0, 5).map((candidate) => ({ title: candidate.hypothesis, evidence: candidateExplanation(profile, candidate), findingId: candidate.evidenceFor[0] }));
-  const opportunities = buildProfileOpportunities(profile, problems, strengthsFound);
+  const opportunities = buildProfileOpportunities(profile, problems, strengthsFound, decision);
   const priorities = problems.slice(0, 3).map((candidate, index) => ({ title: candidate.hypothesis, reason: candidateExplanation(profile, candidate), order: index + 1 }));
   const risks = buildProfileRisks(profile, problems);
-  const summaryEvidence = primary ? `El freno más probable está en ${stageLabel(primary.journeyStage).toLowerCase()}: ${primary.hypothesis}` : primaryStrength ? `La señal más firme es: ${primaryStrength.statement}` : "Todavía hay poca evidencia concreta para señalar un único freno.";
+  const summaryEvidence = primary ? `El freno más probable está en ${stageLabel(primary.journeyStage).toLowerCase()}: ${primary.hypothesis}` : decision.demandPattern ? "El contexto aportado permite elegir una oportunidad comercial concreta, aunque todavía no prueba una causa única." : primaryStrength ? `La señal más firme es: ${primaryStrength.statement}` : "La evidencia no alcanza para afirmar una causa única; el siguiente paso será una validación medible, no una recomendación genérica.";
   return {
     engineType: "deterministic",
     summary: `${scoreContext} ${summaryEvidence}`,
@@ -95,16 +98,28 @@ function evidenceText(profile: BusinessProfile, evidenceIds: string[]): string {
 function candidateExplanation(profile: BusinessProfile, candidate: ProblemCandidate): string {
   const supporting = evidenceText(profile, candidate.evidenceFor);
   const contradiction = evidenceText(profile, candidate.evidenceAgainst);
-  return `${candidate.causalExplanation} Evidencia: ${supporting}.${contradiction ? ` También se consideró evidencia favorable que limita la hipótesis: ${contradiction}.` : ""} Esto importa para “${profile.goal.text}” porque ocurre en ${stageLabel(candidate.journeyStage).toLowerCase()}, antes de que la persona pueda ${profile.primaryCustomerAction}.`;
+  const supportingSentence = supporting.replace(/[.!?]+$/, "");
+  const contradictionSentence = contradiction.replace(/[.!?]+$/, "");
+  const commercialRelation = candidate.journeyStage === "retention"
+    ? `después de que la persona logra ${profile.primaryCustomerAction}, cuando el objetivo depende de que continúe`
+    : candidate.journeyStage === "experience"
+      ? `durante la experiencia posterior a ${profile.primaryCustomerAction}`
+      : `antes de que la persona pueda ${profile.primaryCustomerAction}`;
+  return `${candidate.causalExplanation} Evidencia: ${supportingSentence}.${contradictionSentence ? ` También se consideró evidencia favorable que limita la hipótesis: ${contradictionSentence}.` : ""} Esto importa para “${profile.goal.text}” porque ocurre en ${stageLabel(candidate.journeyStage).toLowerCase()}, ${commercialRelation}.`;
 }
 
-function buildProfileOpportunities(profile: BusinessProfile, problems: ProblemCandidate[], strengths: StrengthCandidate[]): string[] {
+function buildProfileOpportunities(profile: BusinessProfile, problems: ProblemCandidate[], strengths: StrengthCandidate[], decision: ReturnType<typeof buildMarketingDecisionContext>): string[] {
   const opportunities: string[] = [];
   for (const problem of problems.slice(0, 2)) opportunities.push(`Destrabar ${stageLabel(problem.journeyStage).toLowerCase()} para que más personas puedan ${profile.primaryCustomerAction}: ${problem.hypothesis}`);
   const strength = strengths[0];
   if (strength) opportunities.push(`Aprovechar esta fortaleza antes de ${profile.primaryCustomerAction}: ${strength.statement}`);
   const declared = profile.declaredSignals[0];
-  if (declared && !opportunities.some((item) => item.includes(declared.evidence))) opportunities.push(`Usar este dato aportado por el negocio para decidir el próximo paso: ${declared.evidence}`);
+  if (declared && !opportunities.some((item) => item.includes(declared.evidence))) {
+    if (declared.type === "demand_pattern") opportunities.push(`Trabajar los períodos con capacidad disponible para avanzar hacia “${decision.goal.original}”, y medir ${decision.decision.primaryKpi}.`);
+    else if (declared.type === "referrals") opportunities.push(`Hacer medibles las recomendaciones que el negocio declaró como origen de clientes, sin asumir resultados que todavía no fueron verificados.`);
+    else if (declared.type === "channel") opportunities.push(`Conectar el canal que el negocio ya usa con un próximo paso concreto hacia ${profile.primaryCustomerAction}.`);
+    else opportunities.push(`Convertir el contexto aportado por el negocio en una prueba pequeña y medible sobre ${decision.decision.primaryKpi}.`);
+  }
   return opportunities.slice(0, 3);
 }
 

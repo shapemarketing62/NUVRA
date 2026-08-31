@@ -166,3 +166,18 @@ button,input,select,textarea{font:inherit}button{cursor:pointer}a{color:inherit;
 .app-main [style*="border-radius: 16px"],.app-main [style*="border-radius: 18px"]{border-radius:var(--n-radius-panel)!important;box-shadow:none!important}
 .app-main [style*="background: rgb(255, 255, 255)"],.app-main [style*="background: #fff"]{background:var(--n-surface)!important}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
+/* Dashboard: lectura progresiva del plan de acciones. */
+.dashboard-action-progress {
+  display: grid;
+  grid-template-columns: minmax(220px, .45fr) minmax(0, 1fr);
+  gap: 28px;
+  align-items: end;
+  padding-bottom: 28px;
+}
+
+@media (max-width: 640px) {
+  .dashboard-action-progress {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
+  }
+}

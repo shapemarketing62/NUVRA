@@ -5,6 +5,7 @@ import { COLORS } from "@/lib/design-tokens";
 import { DemoBadge, EmptyState, ErrorState, PageHeader, PageSkeleton, SectionHeader, StatusBadge, UpgradePanel } from "@/components/ui";
 import { hasEntitlement } from "@/lib/plans";
 import type { EvolutionDirection } from "@/lib/evolution-view";
+import { getFriendlyDimensionName } from "@/lib/simple-language-presenter";
 
 const SOURCE_NAMES: Record<string, string> = {
   web: "Sitio web", search: "Búsqueda", instagram: "Instagram", reviews: "Reseñas",
@@ -25,7 +26,7 @@ function directionLabel(direction: EvolutionDirection) {
 }
 
 export default function EvolucionPage() {
-  const { evolution, loading, error, isDemo, planTier, internalAccess } = useDashboardData();
+  const { evolution, score, canonicalDiagnosis, actionsSummary, loading, error, isDemo, planTier, internalAccess } = useDashboardData();
   if (loading) return <PageSkeleton />;
   if (error) return <ErrorState message={error} />;
   if (!hasEntitlement(planTier, "history.trend", internalAccess)) return <div className="page-container"><PageHeader eyebrow="Evolución" title="Tu progreso en el tiempo" /><UpgradePanel feature="history.trend" /></div>;
@@ -45,6 +46,16 @@ export default function EvolucionPage() {
       </div> : <div><div className="page-eyebrow">Análisis actual · {formatDate(current.date)}</div><div className="shp-display" style={{ fontSize: 34, fontWeight: 600 }}>{current.score ?? "Sin puntaje general"}</div><p className="section-description" style={{ marginTop: 10 }}>{evolution.history.length > 1 ? "Los análisis anteriores usan otra metodología o no tienen información suficiente para compararlos directamente." : "Con el próximo análisis compatible podremos mostrar qué cambió y relacionarlo con el trabajo realizado."}</p></div>}
       {evolution.interpretationNotes.length > 0 && <div style={{ marginTop: 22, display: "grid", gap: 8 }}>{evolution.interpretationNotes.map((note) => <p key={note} style={{ borderLeft: `2px solid ${COLORS.sand}`, paddingLeft: 12, fontSize: 13, lineHeight: 1.6, color: COLORS.inkSoft }}>{note}</p>)}</div>}
     </section>
+
+    {!evolution.hasComparison && <section style={{ marginBottom: 42 }}>
+      <SectionHeader title="Este es tu punto de partida" description="Conservamos esta lectura para compararla con el próximo análisis compatible." />
+      <div className="split-grid">
+        <div><h3 className="section-title">Prioridad inicial</h3><p className="section-description">{canonicalDiagnosis.mainConclusion?.title || "La primera prioridad quedará definida cuando exista una conclusión defendible."}</p></div>
+        <div><h3 className="section-title">Acciones que empiezan ahora</h3>{[...actionsSummary.inProgress, ...actionsSummary.pending].slice(0, 3).length ? <div className="insight-list">{[...actionsSummary.inProgress, ...actionsSummary.pending].slice(0, 3).map((action) => <div className="insight" key={action.id}><p className="section-description">{action.title}</p></div>)}</div> : <p className="section-description">Todavía no hay acciones activas para comparar.</p>}</div>
+      </div>
+      {score?.dimensions.some((dimension) => dimension.applicable) && <div style={{ marginTop: 30 }}><h3 className="section-title">Áreas evaluadas hoy</h3><div className="insight-list" style={{ marginTop: 12 }}>{score.dimensions.filter((dimension) => dimension.applicable).slice(0, 5).map((dimension) => <div className="insight" key={dimension.slug}><div style={{ width: "100%", display: "flex", justifyContent: "space-between", gap: 16 }}><span className="section-description">{getFriendlyDimensionName(dimension.slug, dimension.name)}</span><strong>{dimension.points}</strong></div></div>)}</div></div>}
+      <p className="section-description" style={{ marginTop: 22 }}>En el próximo análisis comparable revisaremos el puntaje, estas áreas, la prioridad y el avance de las acciones. No atribuiremos un cambio a una acción sin evidencia suficiente.</p>
+    </section>}
 
     {evolution.hasComparison && <>
       <section style={{ marginBottom: 42 }}>

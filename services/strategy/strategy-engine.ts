@@ -9,6 +9,7 @@ import type { BusinessProfile } from "../intelligence/business-profile";
 import type { ProblemCandidate } from "../intelligence/commercial-candidates.ts";
 import { StrategicKnowledgeBase, type KnowledgeMatch } from "./strategic-knowledge-base.ts";
 import { ActionOpportunityEngine } from "./action-opportunity-engine.ts";
+import { encodeActionDecisionDetails } from "./action-decision-details.ts";
 
 // Force recompilation: 2025-01-17T20:25:00Z
 
@@ -145,18 +146,28 @@ export function buildProfileStrategy(context: StrategyContext, diagnosis: Diagno
     seen.add(key);
     return true;
   }).slice(0, 5);
-  const opportunities = ActionOpportunityEngine.generate(profile, { businessName: context.nombre, industry: context.rubro, location: context.ubicacion, budget: context.presupuesto, capacity: context.capacidad, timeframeDays: context.plazoDias });
+  const opportunities = ActionOpportunityEngine.generate(profile, { businessName: context.nombre, industry: context.rubro, location: context.ubicacion, budget: context.presupuesto, capacity: context.capacidad, timeframeDays: context.plazoDias, timeframeLabel: context.plazoLabel });
+  const decision = opportunities.decisionContext;
   const selectedOpportunityIds = new Set(opportunities.selected.map((item) => item.id));
   const actions: StrategyOutput["actions"] = opportunities.selected.map((opportunity, index) => ({
     title: opportunity.title,
-    description: `${opportunity.description} Para qué: ${opportunity.purpose}`,
+    description: opportunity.description,
     order: index + 1,
     impact: opportunity.impact,
     difficulty: opportunity.difficulty,
     estimatedTime: opportunity.timeframe,
     dependencies: opportunity.dependencies,
     indicatorToImprove: opportunity.metric,
-    rationale: opportunity.inference,
+    rationale: encodeActionDecisionDetails({
+      what: opportunity.description,
+      where: opportunity.where,
+      audience: opportunity.audience,
+      steps: opportunity.executionSteps,
+      why: opportunity.purpose,
+      expectedResult: opportunity.expectedResult,
+      estimatedCost: opportunity.estimatedCost,
+      metric: opportunity.metric,
+    }),
     relatedFindingIds: opportunity.evidenceIds,
     findingIds: opportunity.evidenceIds,
     evidence: opportunity.evidence,
@@ -176,7 +187,7 @@ export function buildProfileStrategy(context: StrategyContext, diagnosis: Diagno
     title: opportunity.title,
     priority: opportunity.priority,
     selected: selectedOpportunityIds.has(opportunity.id),
-    reason: selectedOpportunityIds.has(opportunity.id) ? `Seleccionada como ${opportunity.type} y como palanca distinta (${opportunity.lever}).` : "Descartada por menor prioridad o por duplicar la intención de otra intervención.",
+    reason: selectedOpportunityIds.has(opportunity.id) ? `Seleccionada porque responde al objetivo, conserva evidencia y supera el control de calidad (${opportunity.quality.score}/100).` : opportunity.quality.reasons.length ? `Descartada por calidad: ${opportunity.quality.reasons.join(", ")}.` : "Descartada por menor prioridad o por duplicar la intención de otra intervención.",
     journeyStage: opportunity.lever,
     evidenceIds: opportunity.evidenceIds,
     cause: opportunity.inference,
@@ -202,9 +213,9 @@ export function buildProfileStrategy(context: StrategyContext, diagnosis: Diagno
     engineType: "deterministic",
     objetivo: `${context.objetivo}${context.magnitud ? ` (+${context.magnitud}%)` : ""} en ${context.plazoLabel}`,
     situacionActual: primary
-      ? `${scoreResult.total === null ? `${context.nombre} fue analizado con la información disponible.` : `${context.nombre} tiene un Nuvra Score de ${scoreResult.total}/100.`} La hipótesis principal está en ${primary.journeyStage}: ${primary.hypothesis}`
-      : `${scoreResult.total === null ? `${context.nombre} fue analizado con la información disponible` : `${context.nombre} tiene un Nuvra Score de ${scoreResult.total}/100`}, pero todavía no hay evidencia concreta suficiente para recomendar un cambio específico.`,
-    distanciaObjetivo: primary ? `El próximo paso es intervenir donde hoy se frena el recorrido hacia ${profile.primaryCustomerAction}, sin modificar las partes que ya funcionan.` : "Hace falta incorporar evidencia concreta antes de indicar un cambio.",
+      ? `${scoreResult.total === null ? `${context.nombre} fue analizado con la información disponible.` : `${context.nombre} tiene un Nuvra Score de ${scoreResult.total}/100.`} La evidencia más firme señala: ${primary.hypothesis}`
+      : `${scoreResult.total === null ? `${context.nombre} fue analizado con la información disponible.` : `${context.nombre} tiene un Nuvra Score de ${scoreResult.total}/100.`} No hay una única falla comprobada; la decisión más útil es trabajar el objetivo con una prueba acotada y medible.`,
+    distanciaObjetivo: `Durante ${decision.goal.timeframeLabel}, conviene ${primary && actions[0] ? actions[0].title.toLowerCase() : decision.decision.strategicBet}. Por ahora no conviene ${decision.decision.notPriority}.`,
     principalProblema: diagnosis.bottleneck.explanation,
     prioridades: actions.slice(0, 3).map((action) => action.title),
     frameworks: [{ id: frameworkSelection.primary, title: FRAMEWORKS[frameworkSelection.primary]?.name || frameworkSelection.primary, rationale: "Selección interna basada en la hipótesis causal, el objetivo y el recorrido comercial.", useCase: FRAMEWORKS[frameworkSelection.primary]?.description || "", dimension: primary?.journeyStage, priority: 1 }],
@@ -294,8 +305,8 @@ function interventionFor(profile: BusinessProfile, problem: ProblemCandidate, co
   }
   const declaredInstagram = profile.declaredSignals.find((signal) => signal.type === "channel" && /instagram/i.test(signal.evidence));
   if (isPrimary && declaredInstagram) {
-    const change = `Hacer que el canal informado conduzca directamente a ${action}.`;
-    return { ...base, title: `Hacer que el canal informado conduzca directamente a ${action}`, change, where: "Instagram", metric: profile.primaryResult, description: `${change} Ajustar el enlace y el mensaje inicial sin asumir métricas privadas. La intervención responde a: ${problem.hypothesis}` };
+    const change = `Hacer que Instagram conduzca directamente a ${action}.`;
+    return { ...base, title: `Hacer que Instagram conduzca directamente a ${action}`, change, where: "Instagram", metric: profile.primaryResult, description: `${change} Ajustar el enlace y el mensaje inicial sin asumir métricas privadas. La intervención responde a: ${problem.hypothesis}` };
   }
   if (problem.pattern === "action_path") {
     const change = `Crear un único acceso directo a ${action}, con el destino y el mensaje ya preparados.`;

@@ -162,7 +162,7 @@ test("las acciones genéricas sin detalle son rechazadas", () => {
 test("el dashboard siempre muestra puntajes y explica con claridad cuándo hay poca información", () => {
   const dashboard = fs.readFileSync(new URL("../app/dashboard/page.tsx", import.meta.url), "utf8");
   assert.match(dashboard, /Nuvra Score/);
-  assert.match(dashboard, /Áreas principales/);
+  assert.match(dashboard, /Áreas evaluadas/);
   assert.match(dashboard, /información disponible/);
   assert.match(dashboard, /ScoreRing value=\{score\?\.total \?\? null\}/);
   assert.doesNotMatch(dashboard, /CoverageBar|PRELIMINAR|Falta claridad en la dimensión prioritaria|Podemos afinar esta área|No hay un único problema/);

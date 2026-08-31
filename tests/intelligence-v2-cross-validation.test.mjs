@@ -1,0 +1,90 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { GoalInterpreter } from "../services/intelligence/goal-interpreter.ts";
+import { buildProfileDiagnosis } from "../services/diagnostic/diagnostic-engine.ts";
+import { buildProfileStrategy } from "../services/strategy/strategy-engine.ts";
+import { ActionOpportunityEngine, assessActionQuality } from "../services/strategy/action-opportunity-engine.ts";
+
+const weights = { presencia: .13, conversion: .17, posicionamiento: .13, propuesta: .13, redes: .12, adquisicion: .17, identidad: .15 };
+const observed = (id, source, text, polarity = "positive", stage = "evaluation") => ({ id, source, text, kind: "ObservedEvidence", polarity, confidence: "ALTA", journeyStage: stage });
+const declared = (id, text) => ({ id, source: "onboarding", text, kind: "DeclaredEvidence", polarity: "neutral", confidence: "ALTA", journeyStage: "discovery" });
+
+function validatedProblem(id, pattern, hypothesis, evidenceId, stage, explanation) {
+  return { id, pattern, hypothesis, journeyStage: stage, evidenceFor: [evidenceId], evidenceAgainst: [], frequency: 2, goalImpact: .9, commercialRelevance: .9, severity: "high", confidence: "ALTA", solvability: .85, dependencies: [], scope: "single_touchpoint", priorityScore: .82, causalExplanation: explanation, evidenceStrength: .82, contradictionStrength: 0, supportingIndependentSignals: 2, contradictingIndependentSignals: 0, supportingSourceCount: 1, contradictingSourceCount: 0, validationStatus: "validated", validationReason: "La evidencia observada sostiene una intervención acotada.", evidenceSufficiency: { score: .78, status: "sufficient", independentOrigins: 2, independentSources: 1, contradictionRatio: 0, searchOnly: false, reasons: ["Señal observable y verificable."] }, conclusionConfidence: .78 };
+}
+
+function makeProfile(fixture) {
+  const interpretation = GoalInterpreter.interpret(fixture.goal);
+  if (fixture.goalType) interpretation.goalType = fixture.goalType;
+  const evidence = [declared("declared:goal", fixture.goal), declared("declared:industry", fixture.industry), declared("declared:additional", fixture.additional), ...(fixture.evidence || [])];
+  return {
+    businessId: fixture.id, businessName: fixture.name, originalIndustry: fixture.industry, inferredCategory: fixture.category, commercialModel: fixture.model,
+    operatingMode: fixture.operatingMode, localDependency: fixture.localDependency, location: fixture.location, customerType: fixture.customerType,
+    offerings: [fixture.offer], offeringType: fixture.model === "commerce" ? "product" : "service", audienceSignals: [fixture.audience],
+    primaryCustomerAction: fixture.action, primaryResult: fixture.result, recurrence: fixture.recurrence || "possible", requiresAppointmentOrReservation: fixture.model === "appointments", purchasePattern: fixture.recurrence || "repeated", geographicArea: fixture.location,
+    activeChannels: fixture.channels, primaryChannel: fixture.primaryChannel, unavailableChannels: fixture.unavailableChannels || [], channelDeclarations: {}, contactMethods: fixture.contacts,
+    trustSignals: [], declaredSignals: fixture.declaredSignals, strengths: [], problems: [], contextualFindings: [], competitorsDetected: 0,
+    goal: { text: fixture.goal, goalOriginalText: fixture.goal, interpretation, magnitude: null, timeframeDays: fixture.days, timeframeLabel: fixture.timeframe },
+    resources: { monthlyBudget: fixture.budget, executionCapacity: fixture.capacity }, additionalInformation: fixture.additional,
+    decisionFactors: { trust: .7, price: .6, reviews: .6, proximity: fixture.localDependency === "high" ? 1 : .3 }, areaRelevance: {}, inferenceTrace: [],
+    commercialEvidence: evidence, commercialJourney: { stages: [] }, problemCandidates: fixture.problem ? [fixture.problem] : [], strengthCandidates: [], evidenceConflicts: [], processingIssues: [],
+  };
+}
+
+function run(fixture) {
+  const profile = makeProfile(fixture);
+  const score = { total: fixture.score, dimensions: [], weights, allFindings: [], coverage: fixture.coverage };
+  const business = { nombre: fixture.name, rubro: fixture.industry, objetivo: fixture.goal, plazoDias: fixture.days, plazoLabel: fixture.timeframe, descripcion: fixture.description, businessProfile: profile };
+  const diagnosis = buildProfileDiagnosis(business, score, profile);
+  const strategyInput = { ...business, ubicacion: fixture.location, tipoCliente: fixture.customerType, presupuesto: fixture.budget, capacidad: fixture.capacity, canales: fixture.channels.join(", "), informacionComplementaria: fixture.additional };
+  const strategy = buildProfileStrategy(strategyInput, diagnosis, score, profile);
+  const opportunities = ActionOpportunityEngine.generate(profile, { businessName: fixture.name, industry: fixture.industry, location: fixture.location, budget: fixture.budget, capacity: fixture.capacity, timeframeDays: fixture.days, timeframeLabel: fixture.timeframe });
+  return { fixture, profile, diagnosis, strategy, opportunities };
+}
+
+const cases = [
+  { id: "noma", name: "Noma Café", industry: "cafetería de especialidad", category: "local", model: "reservations", operatingMode: "physical", localDependency: "high", location: "Palermo", customerType: "B2C", offer: "café de especialidad, desayunos y pastelería artesanal", audience: "personas de 20 a 40 años que viven, estudian o trabajan en Palermo", action: "visitar el local", result: "visitas al local", goal: "aumentar las visitas al local y lograr más recurrencia", days: 90, timeframe: "3 meses", budget: 250, capacity: "media", score: 58, coverage: 45, channels: ["instagram", "search", "other"], primaryChannel: "instagram", contacts: ["WhatsApp"], unavailableChannels: ["web"], additional: "Los fines de semana hay mucho movimiento, pero queremos vender más de lunes a viernes.", declaredSignals: [{ id: "demand", type: "demand_pattern", evidence: "Los fines de semana hay mucho movimiento, pero queremos vender más de lunes a viernes." }, { id: "channel", type: "channel", evidence: "Instagram, Google Maps y WhatsApp participan en la llegada de clientes." }], evidence: [observed("noma-ig", "instagram", "El perfil muestra café, pastelería, ubicación y actividad reciente."), observed("noma-search", "search", "La ficha pública ubica el local en Palermo.")] , contextTerms: [/café|pastelería/i, /lunes a viernes/i, /Palermo/i] },
+  { id: "b2b", name: "Estudio Norte", industry: "estudio contable para pymes", category: "professional", model: "professional", operatingMode: "mixed", localDependency: "medium", location: "CABA", customerType: "B2B", offer: "contabilidad, impuestos y asesoramiento empresarial para pymes", audience: "dueños y responsables administrativos de pymes", action: "solicitar una reunión", result: "consultas calificadas", goal: "aumentar consultas calificadas de pymes", days: 120, timeframe: "4 meses", budget: 300, capacity: "media", score: 54, coverage: 50, channels: ["web", "linkedin", "other"], primaryChannel: "web", contacts: ["email"], unavailableChannels: ["reviews"], additional: "El estudio quiere evitar consultas personales y priorizar empresas con necesidades mensuales.", declaredSignals: [{ id: "channel", type: "channel", evidence: "El sitio web, LinkedIn y email son los principales puntos de contacto." }], evidence: [observed("b2b-fit", "web", "El sitio enumera servicios contables, pero no explica qué situaciones indican que una pyme necesita una reunión.", "negative", "decision"), observed("b2b-linkedin", "linkedin", "LinkedIn muestra experiencia trabajando con empresas.")], problem: validatedProblem("problem:b2b-fit", "decision_information", "Las pymes pueden ver los servicios, pero no reconocer cuándo conviene solicitar una reunión.", "b2b-fit", "decision", "La información observada describe servicios, pero no ayuda a una pyme a reconocer si su situación justifica una consulta."), contextTerms: [/pymes/i, /reunión/i, /contable|impositiva|impuestos/i] },
+  { id: "clinic", name: "Clínica Sur", industry: "clínica odontológica local", category: "health", model: "appointments", operatingMode: "physical", localDependency: "high", location: "CABA", customerType: "B2C", offer: "odontología general, estética y rehabilitación", audience: "adultos de CABA que buscan atención odontológica", action: "pedir un turno", result: "turnos reservados", goal: "aumentar reservas de turnos", days: 60, timeframe: "2 meses", budget: 400, capacity: "media", score: 57, coverage: 50, channels: ["instagram", "search", "other"], primaryChannel: "instagram", contacts: ["WhatsApp"], unavailableChannels: ["web", "reviews"], additional: "La recepción puede atender más turnos por la tarde.", declaredSignals: [{ id: "channel", type: "channel", evidence: "Instagram, Google Maps y WhatsApp concentran las consultas." }, { id: "demand", type: "demand_pattern", evidence: "La recepción puede atender más turnos por la tarde." }], evidence: [observed("clinic-booking", "instagram", "El perfil muestra tratamientos, pero no ofrece un acceso directo al pedido de turno por WhatsApp.", "negative", "action"), observed("clinic-map", "search", "Google Maps muestra ubicación y horarios de la clínica.")], problem: validatedProblem("problem:clinic-booking", "action_path", "La información sobre tratamientos no conduce de forma directa al pedido de turno.", "clinic-booking", "action", "El recorrido observado en Instagram termina sin un acceso directo al pedido de turno por WhatsApp."), contextTerms: [/turno/i, /tratamiento|odontología/i, /WhatsApp|Instagram/i] },
+  { id: "shop", name: "Casa Nativa", industry: "ecommerce de accesorios para el hogar", category: "commerce", model: "commerce", operatingMode: "online", localDependency: "low", location: "Argentina", customerType: "B2C", offer: "accesorios y objetos de decoración para el hogar", audience: "personas que compran accesorios para el hogar online", action: "completar una compra", result: "ventas completadas", goal: "aumentar ventas online", days: 90, timeframe: "3 meses", budget: 1000, capacity: "alta", score: 62, coverage: 55, channels: ["web", "instagram"], primaryChannel: "web", contacts: ["WhatsApp"], unavailableChannels: ["reviews"], additional: "Los productos tienen buenas fotografías, pero las consultas sobre envío se repiten.", declaredSignals: [{ id: "channel", type: "channel", evidence: "La tienda online e Instagram concentran la demanda." }], evidence: [observed("shop-shipping", "web", "El costo y plazo de envío aparecen recién al final del checkout.", "negative", "decision"), observed("shop-products", "web", "Las fichas muestran materiales, medidas y fotografías.")], problem: validatedProblem("problem:shop-shipping", "decision_information", "La información de envío aparece después de que la persona ya avanzó en la compra.", "shop-shipping", "decision", "El costo y el plazo de entrega se observan tarde, aunque son necesarios para decidir una compra de accesorios para el hogar."), contextTerms: [/envío/i, /compra|checkout/i, /accesorios|hogar/i] },
+  { id: "gym", name: "Gimnasio Central", industry: "gimnasio de barrio con membresía", category: "fitness", model: "subscription", operatingMode: "physical", localDependency: "high", location: "Villa Crespo", customerType: "B2C", offer: "membresía de gimnasio y clases grupales", audience: "socios nuevos del barrio", action: "inscribirse", result: "socios activos", goal: "aumentar altas y reducir abandono", goalType: "retention", days: 90, timeframe: "3 meses", budget: 300, capacity: "media", score: 51, coverage: 48, channels: ["instagram", "search", "other"], primaryChannel: "instagram", contacts: ["WhatsApp"], unavailableChannels: ["web", "reviews"], additional: "La mayoría de las bajas ocurre durante las primeras seis semanas de la membresía.", declaredSignals: [{ id: "capacity", type: "capacity", evidence: "El equipo puede hacer un seguimiento semanal breve." }], evidence: [observed("gym-drop", "other", "El registro interno muestra más bajas durante las primeras seis semanas.", "negative", "retention"), observed("gym-map", "search", "Google Maps muestra ubicación y horarios del gimnasio.")], problem: validatedProblem("problem:gym-drop", "retention", "La continuidad se debilita durante las primeras seis semanas de la membresía.", "gym-drop", "retention", "El registro disponible concentra las bajas al comienzo de la membresía, por lo que conviene intervenir antes de ese momento."), contextTerms: [/primeras seis semanas/i, /socios|membresía/i, /bajas|abandono/i] },
+  { id: "hardware", name: "Ferretería Oeste", industry: "ferretería local", category: "local", model: "commerce", operatingMode: "physical", localDependency: "high", location: "Caballito", customerType: "B2C", offer: "herramientas e insumos para reparaciones", audience: "vecinos y trabajadores de obra de Caballito", action: "visitar el local", result: "visitas y compras recurrentes", goal: "aumentar visitas y ventas recurrentes", days: 90, timeframe: "3 meses", budget: 150, capacity: "baja", score: 49, coverage: 35, channels: ["search", "other"], primaryChannel: "search", contacts: ["WhatsApp"], unavailableChannels: ["web", "instagram", "reviews"], additional: "El sábado concentra las ventas; de lunes a jueves hay capacidad y muchos clientes consultan stock por WhatsApp.", declaredSignals: [{ id: "demand", type: "demand_pattern", evidence: "El sábado concentra las ventas; de lunes a jueves hay capacidad." }, { id: "channel", type: "channel", evidence: "Los clientes consultan stock por WhatsApp antes de visitar." }], evidence: [observed("hardware-search", "search", "La ficha pública muestra dirección y teléfono en Caballito.")], contextTerms: [/herramientas|insumos/i, /lunes a jueves/i, /Caballito|stock/i], allowPaid: false },
+];
+
+function tokens(value) { return new Set(value.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9 ]/g, " ").split(/\s+/).filter((word) => word.length > 4)); }
+function similarity(a, b) { const left = tokens(a); const right = tokens(b); return [...left].filter((word) => right.has(word)).length / Math.max(1, new Set([...left, ...right]).size); }
+
+test("validación cruzada Intelligence V2 produce seis planes específicos y coherentes", () => {
+  const outputs = cases.map(run);
+  assert.equal(new Set(outputs.map(({ opportunities }) => opportunities.selected[0]?.title)).size, cases.length);
+  for (const output of outputs) {
+    const { fixture, diagnosis, strategy, opportunities } = output;
+    assert.ok(opportunities.selected.length >= 3 && opportunities.selected.length <= 5, `${fixture.name}: ${opportunities.selected.length} seleccionadas de ${opportunities.considered.map((item) => `${item.title} [${item.quality.accepted ? "ok" : item.quality.reasons.join(",")}]`).join(" | ")}`);
+    assert.equal(strategy.prioridades[0], opportunities.selected[0].title, fixture.name);
+    assert.ok(fixture.contextTerms.some((term) => term.test(`${opportunities.selected[0].title} ${opportunities.selected[0].description} ${opportunities.selected[0].executionSteps.join(" ")}`)), fixture.name);
+    assert.equal(opportunities.selected.some((action) => !action.quality.accepted), false, fixture.name);
+    assert.equal(opportunities.selected.some((action) => /mejorar redes|publicar contenido|optimizar web|canal informado|\.\.\.|…/i.test(`${action.title} ${action.description}`)), false, fixture.name);
+    if (fixture.budget === 0 || fixture.allowPaid === false) assert.equal(opportunities.selected.some((action) => action.lever === "paid_test"), false, fixture.name);
+    assert.ok(diagnosis.bottleneck.title && strategy.distanciaObjetivo && strategy.actions.length >= 3, fixture.name);
+    for (let i = 0; i < opportunities.selected.length; i++) for (let j = i + 1; j < opportunities.selected.length; j++) assert.ok(similarity(opportunities.selected[i].title, opportunities.selected[j].title) < .68, `${fixture.name}: acciones duplicadas`);
+  }
+  const noma = outputs[0].opportunities.selected;
+  assert.equal(noma.some((action) => /^Conectar Instagram/i.test(action.title)), false);
+  assert.match(noma.find((action) => action.lever === "retention")?.executionSteps.join(" ") || "", /beneficio|QR|mensaje posterior/i);
+  const gym = outputs.find((item) => item.fixture.id === "gym").opportunities.selected;
+  assert.equal(gym.filter((action) => action.lever === "retention").length, 1);
+  assert.ok(gym.some((action) => /Google Maps/i.test(action.title) && action.dependencies.length > 0));
+  const rejectedGeneric = outputs.find((item) => item.fixture.id === "shop").opportunities.considered.find((action) => /Concentrar la propuesta/i.test(action.title));
+  assert.ok(rejectedGeneric && !rejectedGeneric.quality.accepted && rejectedGeneric.quality.reasons.some((reason) => /intercambiable/i.test(reason)));
+  console.log("NUVRA_CROSS_VALIDATION=" + JSON.stringify(outputs.map(({ fixture, diagnosis, strategy, opportunities }) => ({ business: fixture.name, partialEvidence: opportunities.decisionContext.evidence.isPartial, budget: fixture.budget, capacity: fixture.capacity, conclusion: diagnosis.bottleneck, priority: strategy.prioridades[0], strategy: strategy.distanciaObjetivo, kpi: strategy.actions[0]?.kpi, actions: opportunities.selected.slice(0, 3).map((action) => ({ title: action.title, why: action.purpose, where: action.where, audience: action.audience, steps: action.executionSteps, metric: action.metric, cost: action.estimatedCost })) }))));
+});
+
+test("quality gate rechaza canal inexistente y complejidad incompatible con capacidad baja", () => {
+  const output = run(cases.find((item) => item.id === "hardware"));
+  const base = output.opportunities.selected[0];
+  const invalid = { ...base, where: "TikTok", difficulty: "alta" };
+  const quality = assessActionQuality(invalid, output.opportunities.decisionContext);
+  assert.equal(quality.accepted, false);
+  assert.ok(quality.reasons.includes("depende de un canal no disponible"));
+  assert.ok(quality.reasons.includes("no respeta la capacidad de ejecución"));
+});

@@ -1,5 +1,6 @@
 import { getPlanSnapshot, normalizePlanTier, type EntitlementKey, type PlanTier } from "./plans.ts";
-import { presentOpportunity, presentProblem, simplifyTechnicalText } from "./simple-language-presenter.ts";
+import { getFriendlyDimensionName, presentOpportunity, presentProblem, simplifyTechnicalText } from "./simple-language-presenter.ts";
+import { decodeActionDecisionDetails, type ActionDecisionDetails } from "../services/strategy/action-decision-details.ts";
 import { actionProgress, normalizeActionStatus, type ActionStatus } from "./action-execution.ts";
 import { buildEvolutionView, type EvolutionView } from "./evolution-view.ts";
 import {
@@ -85,6 +86,7 @@ export interface DashboardActionView {
   problem?: string;
   indicatorToImprove?: string;
   relatedConclusion: string | null;
+  details: ActionDecisionDetails | null;
 }
 
 export interface DashboardViewModel {
@@ -557,6 +559,7 @@ export function buildDashboardViewModel(rawValue: unknown, options: { isDemo?: b
 
   const actionItems: DashboardActionView[] = array(strategyRecord.actions).map((item, index) => {
     const action = record(item);
+    const details = decodeActionDecisionDetails(action.rationale);
     const status = normalizeActionStatus(action);
     const done = status === "completed";
     return {
@@ -566,7 +569,7 @@ export function buildDashboardViewModel(rawValue: unknown, options: { isDemo?: b
       impact: text(action.impact),
       difficulty: text(action.difficulty),
       estimatedTime: text(action.estimatedTime),
-      rationale: text(action.rationale),
+      rationale: details?.why || text(action.rationale),
       done,
       state: status,
       status,
@@ -579,12 +582,13 @@ export function buildDashboardViewModel(rawValue: unknown, options: { isDemo?: b
       dependencies: array(json(action.dependencies, [])).map(text).filter(Boolean),
       evidence: nullableText(action.evidence) || undefined,
       inference: nullableText(action.inference) || undefined,
-      dimension: nullableText(action.dimension) || undefined,
+      dimension: nullableText(action.dimension) ? friendlyActionArea(text(action.dimension)) : undefined,
       framework: nullableText(action.framework) || undefined,
       confidence: nullableText(action.confidence) || undefined,
       problem: nullableText(action.problem) || undefined,
       indicatorToImprove: nullableText(action.indicatorToImprove) || undefined,
       relatedConclusion: mainConclusion?.title || null,
+      details,
     };
   }).filter((action) => action.title);
   const pendingActions = actionItems.filter((action) => action.state === "pending");
@@ -746,9 +750,9 @@ export function buildDashboardViewModel(rawValue: unknown, options: { isDemo?: b
       objective: analyzedObjective,
       problemOfOrigin: mainConclusion,
       direction: nullableText(strategyRecord.distanciaObjetivo),
-      rationale: mainConclusion?.relationshipToGoal || null,
-      expectedResult: analyzedObjective,
-      kpi: pendingActions[0]?.indicatorToImprove || actionItems[0]?.indicatorToImprove || null,
+      rationale: pendingActions[0]?.rationale || actionItems[0]?.rationale || mainConclusion?.relationshipToGoal || null,
+      expectedResult: pendingActions[0]?.details?.expectedResult || actionItems[0]?.details?.expectedResult || analyzedObjective,
+      kpi: pendingActions[0]?.details?.metric || pendingActions[0]?.indicatorToImprove || actionItems[0]?.details?.metric || actionItems[0]?.indicatorToImprove || null,
       horizon: nullableText(analyzedInputGoal.plazoLabel) || nullableText(analyzedProfileGoal.timeframeLabel) || (nullableNumber(scoreRecord.plazoDias) ? `${nullableNumber(scoreRecord.plazoDias)} días` : null),
     } : null,
     actions: actionItems,
@@ -780,4 +784,19 @@ export function buildDashboardViewModel(rawValue: unknown, options: { isDemo?: b
   };
   viewModel.evidence = evidenceProjection({ snapshot, mainConclusion, objective: analyzedObjective });
   return viewModel;
+}
+
+function friendlyActionArea(value: string) {
+  const labels: Record<string, string> = {
+    commercial_path: "Paso para comprar, reservar o consultar",
+    local_discovery: "Presencia local",
+    reputation: "Confianza y reseñas",
+    offer: "Oferta y decisión",
+    content: "Comunicación",
+    retention: "Clientes que vuelven",
+    channel_mix: "Origen de clientes",
+    paid_test: "Prueba con inversión",
+    measurement: "Medición",
+  };
+  return labels[value] || getFriendlyDimensionName(value, value);
 }

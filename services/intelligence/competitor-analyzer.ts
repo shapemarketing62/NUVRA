@@ -1,5 +1,5 @@
-import { SourceAnalyzer, SourceEvidence, SourceRelevance, SourceType, EvidenceFinding, type SourceAnalysisContext } from "./source-analyzer";
-import { SmartSearchProvider } from "./search-source-analyzer";
+import { SourceAnalyzer, type SourceEvidence, type SourceRelevance, type SourceType, type EvidenceFinding, type SourceAnalysisContext } from "./source-analyzer.ts";
+import { SmartSearchProvider } from "./search-source-analyzer.ts";
 import type { Business } from "@prisma/client";
 
 export interface CompetitorEvidence {
@@ -295,6 +295,13 @@ export class CompetitorSourceAnalyzer extends SourceAnalyzer {
   private looksLikeBusinessCandidate(candidate: string, categoryTokens: string[]): boolean {
     const lower = candidate.toLowerCase();
 
+    const genericStandaloneCandidates = new Set([
+      "cafe", "café", "cafeteria", "cafetería", "coffee", "shop", "shops", "specialty", "store", "tienda",
+    ]);
+    if (genericStandaloneCandidates.has(lower)) {
+      return false;
+    }
+
     if (/\b(diario|art[ií]culo|noticia|blog|review|ranking|lista|foro|comunidad)\b/i.test(lower)) {
       return false;
     }
@@ -304,7 +311,8 @@ export class CompetitorSourceAnalyzer extends SourceAnalyzer {
     }
 
     const businessSignals = /(café|cafe|coffee|cafetería|tienda|store|studio|estudio|clínica|clinica|consultora|agency|lab|market|bar|burger|pizza|pizzeria|pizzería|bakery|resto)/i;
-    return businessSignals.test(candidate) || categoryTokens.some((token) => token.length > 3 && lower.includes(token));
+    const properSingleWordName = !candidate.includes(" ") && /^[A-ZÁÉÍÓÚÑ][A-Za-zÁÉÍÓÚÑáéíóúñ0-9&'-]{2,}$/.test(candidate);
+    return properSingleWordName || businessSignals.test(candidate) || categoryTokens.some((token) => token.length > 3 && lower.includes(token));
   }
 
   private isTargetBusiness(candidateName: string, targetName: string): boolean {
