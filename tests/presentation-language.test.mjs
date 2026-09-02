@@ -6,6 +6,7 @@ import {
   formatActionForBusiness,
   presentOpportunity,
   presentProblem,
+  simplifyTechnicalText,
 } from "../lib/simple-language-presenter.ts";
 
 const forbiddenPresentationText = /La hipótesis se apoya|se consideró evidencia|\b\d+ señales?\b|confidence|weights?|analysis_trace|commercial_journey|problem_candidates|strength_candidates|\b\d+(?:[.,]\d+)?\s*(?:ms|s|segundos?)\b|—/i;
@@ -25,6 +26,17 @@ test("LAB Tostadores recibe un problema breve, específico y sin texto de audito
   assert.match(`${result.title} ${result.explanation}`, /reservar|pedido|formulario/i);
   assert.match(result.whyItMatters, /LAB Tostadores/i);
   assert.equal(result.title.includes("\n"), false);
+});
+
+test("la presentación simplifica CTA principal sin duplicar palabras y conserva siglas", () => {
+  assert.equal(simplifyTechnicalText("CTA principal poco visible"), "botón de acción principal poco visible");
+  const result = presentProblem({
+    title: "CTA principal poco visible",
+    explanation: "DEMO: el CTA principal aparece después del contenido secundario.",
+    objective: "recibir más consultas",
+  });
+  assert.doesNotMatch(`${result.title} ${result.explanation}`, /principal principal|dEMO/);
+  assert.match(result.explanation, /DEMO:/);
 });
 
 test("las oportunidades comerciales quedan en una frase humana y completa", () => {
@@ -80,7 +92,7 @@ test("el dashboard prioriza una acción inmediata y deriva el detalle a sus vist
   assert.match(dashboard, /actionsSummary\.immediateAction/);
   assert.match(dashboard, /Próxima acción/);
   assert.match(dashboard, /Ver diagnóstico/);
-  assert.match(dashboard, /Ver todas las acciones/);
+  assert.match(dashboard, /Ver plan de acción/);
   assert.doesNotMatch(dashboard, /sourceMessages|analysisTrace|analysisAudit/);
   assert.doesNotMatch(actions, /1\. ¿Qué problema hay|2\. ¿Por qué importa|3\. ¿Qué debería hacer|4\. ¿Qué resultado/);
 });

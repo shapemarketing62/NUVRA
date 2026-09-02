@@ -7,6 +7,8 @@ export interface ActionDecisionDetails {
   expectedResult: string;
   estimatedCost: string;
   metric: string;
+  causal?: import("./causal-decision-engine.ts").CausalDecision;
+  experiment?: import("./causal-decision-engine.ts").ExperimentDesign;
 }
 
 const PREFIX = "NUVRA_ACTION_V2:";

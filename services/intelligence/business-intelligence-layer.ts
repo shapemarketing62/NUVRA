@@ -55,7 +55,7 @@ export class BusinessIntelligenceLayer {
 
     // Si tenemos una URL descubierta confirmed/probable y business no tenía web, usarla dinámicamente
     const targetBusiness: Business = { ...business };
-    if (!targetBusiness.webUrl && discoveryResult?.primaryWebUrl) {
+    if (!targetBusiness.noWebDeclared && !targetBusiness.webUrl && discoveryResult?.primaryWebUrl) {
       targetBusiness.webUrl = discoveryResult.primaryWebUrl;
     }
 

@@ -5,6 +5,8 @@ import type { DiagnosisResult } from "../diagnostic/diagnostic-engine.ts";
 import type { StrategyResult } from "../strategy/strategy-engine.ts";
 import type { NuvraScoreResult } from "./nuvra-score-calculator.ts";
 import { STRATEGIC_PATTERNS } from "../strategy/strategic-knowledge-base.ts";
+import { buildCrossChannelMarketingIntelligence, type CrossChannelMarketingIntelligence } from "./cross-channel-marketing-intelligence.ts";
+import { marketingKnowledge } from "../knowledge/marketing-knowledge-catalog.ts";
 
 export interface AnalysisTrace {
   version: "commercial-journey-v1";
@@ -65,6 +67,18 @@ export interface AnalysisTrace {
     evaluations: Array<{ patternId: string; applied: boolean; score: number; reasons: string[]; rejectionReason?: string; intervention?: string }>;
     selectedInterventions: Array<{ action: string; patternIds: string[] }>;
   };
+  marketingKnowledge: Array<{
+    ruleId: string;
+    domain: string;
+    platform: string | null;
+    surface: string | null;
+    evidenceLevel: string;
+    version: string;
+    sourceTitle: string;
+    sourceUrl: string;
+    usedBy: string[];
+  }>;
+  crossChannel: CrossChannelMarketingIntelligence;
   prioritization: {
     selectedProblemId: string | null;
     rule: string;
@@ -107,6 +121,7 @@ export function buildAnalysisTrace(input: {
   const actionCandidates = input.strategy.audit?.candidates || [];
   const knowledgeEvaluations = actionCandidates.flatMap((candidate) => candidate.knowledgeMatches || []);
   const consultedPatternIds = Array.from(new Set(knowledgeEvaluations.map((match) => match.patternId)));
+  const marketingKnowledgeUses = collectMarketingKnowledgeUses(input.aggregated);
   return {
     version: "commercial-journey-v1",
     createdAt: new Date().toISOString(),
@@ -172,6 +187,11 @@ export function buildAnalysisTrace(input: {
       evaluations: knowledgeEvaluations,
       selectedInterventions: actionCandidates.filter((candidate: any) => candidate.selected && candidate.knowledgePatternIds?.length).map((candidate: any) => ({ action: candidate.title, patternIds: candidate.knowledgePatternIds })),
     },
+    marketingKnowledge: Array.from(marketingKnowledgeUses.entries()).flatMap(([ruleId, usedBy]) => {
+      const match = marketingKnowledge.getRule(ruleId);
+      return match ? [{ ruleId, domain: match.rule.domain, platform: match.rule.platform || null, surface: match.rule.surface || null, evidenceLevel: match.rule.evidenceLevel, version: match.rule.version, sourceTitle: match.source.title, sourceUrl: match.source.url, usedBy: Array.from(usedBy) }] : [];
+    }),
+    crossChannel: buildCrossChannelMarketingIntelligence(input.profile, input.aggregated),
     prioritization: {
       selectedProblemId: selectedProblem?.id || null,
       rule: "señal → hipótesis → evidencia que confirma → evidencia que contradice → validación; luego impacto sobre objetivo × relevancia comercial × posibilidad de solución",
@@ -194,4 +214,20 @@ export function buildAnalysisTrace(input: {
       methodology: input.score.methodology,
     },
   };
+}
+
+function collectMarketingKnowledgeUses(aggregated: AggregatedEvidence) {
+  const uses = new Map<string, Set<string>>();
+  const add = (ruleId: unknown, usedBy: string) => {
+    if (typeof ruleId !== "string" || !ruleId) return;
+    if (!uses.has(ruleId)) uses.set(ruleId, new Set());
+    uses.get(ruleId)!.add(usedBy);
+  };
+  const web = aggregated.sources.web?.data as any;
+  for (const area of web?.marketingIntelligence?.areas || []) for (const ruleId of area?.knowledgeRuleIds || []) add(ruleId, `website:${area.area || "unknown"}`);
+  for (const [source, evidence] of Object.entries(aggregated.sources)) {
+    const data = evidence?.data as any;
+    for (const item of data?.platformMarketing?.knowledge || []) add(item?.ruleId, `platform:${source}`);
+  }
+  return uses;
 }

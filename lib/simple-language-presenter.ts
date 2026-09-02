@@ -4,7 +4,8 @@
  */
 
 const TECHNICAL_GLOSSARY: Array<[RegExp, string]> = [
-  [/\bCTA[s]?\b/g, "botón de acción principal"],
+  [/\bCTA[s]?\s+principal(?:es)?\b/gi, "botón de acción principal"],
+  [/\bCTA[s]?\b/gi, "botón de acción principal"],
   [/\babove-the-fold\b/gi, "primera parte visible de la página"],
   [/\bviewport\b/gi, "primera parte visible de la página"],
   [/\bprimer viewport\b/gi, "primera pantalla visible"],
@@ -120,6 +121,7 @@ function concise(value: string | null | undefined, max: number, sentenceLimit = 
 }
 
 function lowerFirst(value: string) {
+  if (/^[A-ZÁÉÍÓÚÜÑ]{2,}(?:\b|:)/.test(value)) return value;
   return value ? value.charAt(0).toLowerCase() + value.slice(1) : value;
 }
 

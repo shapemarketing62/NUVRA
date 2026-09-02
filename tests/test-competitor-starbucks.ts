@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 
-const envPath = path.resolve(__dirname, "../.env");
+const envPath = path.resolve(process.cwd(), ".env");
 if (fs.existsSync(envPath)) {
   const envContent = fs.readFileSync(envPath, "utf8");
   for (const line of envContent.split("\n")) {
@@ -16,7 +16,7 @@ if (fs.existsSync(envPath)) {
   }
 }
 
-import { CompetitorSourceAnalyzer } from "../services/intelligence/competitor-analyzer";
+import { CompetitorSourceAnalyzer } from "../services/intelligence/competitor-analyzer.ts";
 import type { Business } from "@prisma/client";
 
 async function main() {
@@ -64,7 +64,7 @@ async function main() {
       console.log(`    Relevancia: ${Math.round(comp.competitorRelevanceScore * 100)}%`);
       console.log(`    Entity confidence: ${Math.round(comp.entityMatchConfidence * 100)}%`);
       console.log(`    Estado: ${comp.status}`);
-      console.log(`    Evidencia: ${comp.evidenceUrls.join(", ")}`);
+      console.log(`    Evidencia: ${comp.evidenceUrls?.join(", ") || "(sin evidencia)"}`);
     }
   }
 

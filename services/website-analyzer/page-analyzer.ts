@@ -1,5 +1,5 @@
 import * as cheerio from "cheerio";
-import type { PageActionSignal, PageAnalysisData, PageFormSignal, RawFinding, WebsiteJourneyIntent } from "./types";
+import type { PageActionSignal, PageAnalysisData, PageFormSignal, PageRenderedMarketingSignals, RawFinding, WebsiteJourneyIntent } from "./types";
 
 const CTA_PATTERNS = [
   /compr/i, /contact/i, /consult/i, /reserv/i, /whatsapp/i, /pedi/i, /orden/i,
@@ -22,7 +22,7 @@ const COMMERCIAL_SIGNALS = [
   { category: "propuesta", title: "Preguntas frecuentes visibles", pattern: /preguntas frecuentes|frequently asked|\bfaq\b/i, evidence: "La página responde preguntas frecuentes antes de avanzar." },
 ] as const;
 
-export function analyzePageHtml(url: string, html: string, loadTimeMs?: number): PageAnalysisData {
+export function analyzePageHtml(url: string, html: string, loadTimeMs?: number, renderedMarketingSignals?: PageRenderedMarketingSignals): PageAnalysisData {
   const $ = cheerio.load(html);
   const findings: RawFinding[] = [];
   const text = $("body").text().replace(/\s+/g, " ").trim();
@@ -139,6 +139,7 @@ export function analyzePageHtml(url: string, html: string, loadTimeMs?: number):
     actionSignals,
     formSignals,
     brandSignals,
+    renderedMarketingSignals,
   };
 }
 

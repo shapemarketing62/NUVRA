@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { COLORS } from "@/lib/design-tokens";
-import { Btn, Card, EmptyState, ErrorState, PageSkeleton, StatusBadge, UpgradePanel } from "@/components/ui";
+import { Btn, Card, EmptyState, ErrorState, PageHeader, PageSkeleton, StatusBadge, UpgradePanel } from "@/components/ui";
 import { useDashboardData } from "@/lib/use-dashboard-data";
 import { getPlanSnapshot, hasEntitlement } from "@/lib/plans";
 import { IntegrationManagerPanel } from "@/components/integrations/IntegrationManagerPanel";
@@ -36,11 +36,8 @@ export default function ConfiguracionPage() {
   ];
 
   return (
-    <div className="page-container">
-      <div style={{ marginBottom: 32 }}>
-        <h1 className="page-title">Configuración</h1>
-        <p style={{ color: COLORS.inkSoft, fontSize: 15 }}>Cuenta, plan y conexiones del negocio.</p>
-      </div>
+    <div className="page-container settings-v3">
+      <PageHeader eyebrow="Cuenta" title="Configuración" subtitle="Cuenta, plan y conexiones del negocio." />
 
       <div className="settings-layout">
         <div className="settings-tabs">
@@ -50,17 +47,7 @@ export default function ConfiguracionPage() {
                 key={tab.id}
                 type="button"
                 onClick={() => setActiveTab(tab.id)}
-                style={{
-                  padding: "10px 12px",
-                  borderRadius: 7,
-                  border: "none",
-                  background: activeTab === tab.id ? COLORS.blueSoft : "transparent",
-                  color: activeTab === tab.id ? COLORS.blueDeep : COLORS.inkSoft,
-                  fontSize: 14,
-                  fontWeight: 500,
-                  textAlign: "left",
-                  cursor: "pointer",
-                }}
+                className={activeTab === tab.id ? "settings-tab settings-tab-active" : "settings-tab"}
               >
                 {tab.label}
               </button>

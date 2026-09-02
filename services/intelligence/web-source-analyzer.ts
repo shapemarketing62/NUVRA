@@ -76,7 +76,15 @@ export class WebSourceAnalyzer extends SourceAnalyzer {
     }
 
     try {
-      const analysisResult = await analyzeWebsite(webUrl, { signal: context?.signal, timeoutMs: 28_000 });
+      const analysisResult = await analyzeWebsite(webUrl, {
+        signal: context?.signal,
+        timeoutMs: 28_000,
+        businessContext: {
+          industry: business.rubro,
+          customerType: business.tipoCliente,
+          objective: (business as BusinessWithGoals).goals?.[0]?.objetivo || null,
+        },
+      });
       
       // Convertir RawFinding a EvidenceFinding
       const findings = analysisResult.findings.map((f: RawFinding) => {
@@ -113,6 +121,7 @@ export class WebSourceAnalyzer extends SourceAnalyzer {
           status: analysisResult.status,
           journeys: analysisResult.journeys,
           brandIdentity: analysisResult.brandIdentity,
+          marketingIntelligence: analysisResult.marketingIntelligence,
           ...(analysisResult.errorMessage ? { reason: analysisResult.errorMessage } : {}),
         },
       };

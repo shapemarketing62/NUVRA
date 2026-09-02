@@ -1,11 +1,12 @@
-import { chromium, type Browser } from "playwright";
+import { chromium, type Browser, type Page } from "playwright";
 import fs from "fs/promises";
 import path from "path";
 import { validateAndNormalizeUrl, isSameOrigin } from "./url-validator";
 import { analyzePageHtml, discoverInternalLinks } from "./page-analyzer";
-import type { WebsiteAnalysisResult, ScreenshotData, RawFinding } from "./types";
+import type { WebsiteAnalysisResult, ScreenshotData, RawFinding, PageRenderedMarketingSignals } from "./types";
 import { journeyFindings, validateWebsiteJourneys } from "./website-journey-validator.ts";
 import { BrandIdentityAnalyzer } from "./brand-identity-analyzer.ts";
+import { WebsiteMarketingAnalyzer, type WebsiteMarketingContext } from "./website-marketing-analyzer.ts";
 
 const MAX_PAGES = Math.max(1, Math.min(Number(process.env.MAX_CRAWL_PAGES || 10), 15));
 const TIMEOUT_MS = Math.max(10_000, Math.min(Number(process.env.ANALYSIS_TIMEOUT_MS || 90_000), 120_000));
@@ -17,6 +18,7 @@ export interface WebsiteAnalysisOptions {
   signal?: AbortSignal;
   maxPages?: number;
   timeoutMs?: number;
+  businessContext?: WebsiteMarketingContext;
 }
 
 export async function analyzeWebsite(inputUrl: string, options: WebsiteAnalysisOptions = {}): Promise<WebsiteAnalysisResult> {
@@ -121,7 +123,8 @@ export async function analyzeWebsite(inputUrl: string, options: WebsiteAnalysisO
 
         const html = await page.content();
         if (Buffer.byteLength(html, "utf8") > MAX_HTML_BYTES) throw new Error("La página supera el tamaño permitido");
-        const pageData = analyzePageHtml(normalized, html, loadTimeMs);
+        const renderedMarketingSignals = await collectRenderedMarketingSignals(page).catch(() => undefined);
+        const pageData = analyzePageHtml(normalized, html, loadTimeMs, renderedMarketingSignals);
         pages.push(pageData);
         allFindings.push(...pageData.findings);
 
@@ -175,10 +178,12 @@ export async function analyzeWebsite(inputUrl: string, options: WebsiteAnalysisO
 
     const journeys = validateWebsiteJourneys(pages, allFindings);
     const brandIdentity = BrandIdentityAnalyzer.analyze(pages);
+    const marketingIntelligence = WebsiteMarketingAnalyzer.analyze(pages, options.businessContext);
     const dedupedFindings = dedupeFindings([
       ...allFindings,
       ...journeyFindings(journeys),
       ...BrandIdentityAnalyzer.findings(brandIdentity, baseUrl),
+      ...marketingIntelligence.findings,
     ]);
 
     return {
@@ -195,6 +200,7 @@ export async function analyzeWebsite(inputUrl: string, options: WebsiteAnalysisO
       crawledUrls: Array.from(visited),
       journeys,
       brandIdentity,
+      marketingIntelligence,
       analyzedAt: new Date().toISOString(),
       errorMessage: pages.length === 0 ? "No se pudo analizar ninguna página" : undefined,
     };
@@ -212,12 +218,78 @@ export async function analyzeWebsite(inputUrl: string, options: WebsiteAnalysisO
       crawledUrls: [],
       journeys: [],
       brandIdentity: BrandIdentityAnalyzer.analyze([]),
+      marketingIntelligence: WebsiteMarketingAnalyzer.analyze([], options.businessContext),
       errorMessage: err instanceof Error ? err.message : String(err),
       analyzedAt: new Date().toISOString(),
     };
   } finally {
     options.signal?.removeEventListener("abort", onAbort);
   }
+}
+
+async function collectRenderedMarketingSignals(page: Page): Promise<PageRenderedMarketingSignals> {
+  return page.evaluate(() => {
+    const visible = (element: Element) => {
+      const rect = (element as HTMLElement).getBoundingClientRect();
+      const style = getComputedStyle(element);
+      return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none" && Number(style.opacity || 1) > 0;
+    };
+    const backgroundFor = (element: Element) => {
+      let current: Element | null = element;
+      while (current) {
+        const color = getComputedStyle(current).backgroundColor;
+        if (color && !/rgba\([^)]*,\s*0\s*\)$/.test(color) && color !== "transparent") return color;
+        current = current.parentElement;
+      }
+      return "rgb(255, 255, 255)";
+    };
+    const number = (value: string) => { const parsed = Number.parseFloat(value); return Number.isFinite(parsed) ? parsed : null; };
+    const textSamples = Array.from(document.querySelectorAll("h1, h2, h3, p, li")).filter(visible).slice(0, 80).map((element) => {
+      const style = getComputedStyle(element);
+      const rect = (element as HTMLElement).getBoundingClientRect();
+      return {
+        tag: element.tagName.toLowerCase(),
+        text: (element.textContent || "").replace(/\s+/g, " ").trim().slice(0, 320),
+        fontFamily: style.fontFamily,
+        fontSizePx: number(style.fontSize) || 0,
+        fontWeight: Number(style.fontWeight) || 400,
+        lineHeightPx: style.lineHeight === "normal" ? null : number(style.lineHeight),
+        letterSpacingPx: style.letterSpacing === "normal" ? null : number(style.letterSpacing),
+        color: style.color,
+        backgroundColor: backgroundFor(element),
+        widthPx: Math.round(rect.width),
+        topPx: Math.round(rect.top + window.scrollY),
+      };
+    }).filter((item) => item.text);
+    const actionSamples = Array.from(document.querySelectorAll("a[href], button, input[type='submit'], [role='button']")).filter(visible).slice(0, 40).map((element) => {
+      const style = getComputedStyle(element);
+      const rect = (element as HTMLElement).getBoundingClientRect();
+      return {
+        label: ((element.textContent || (element as HTMLInputElement).value || element.getAttribute("aria-label") || "").replace(/\s+/g, " ").trim()).slice(0, 120),
+        topPx: Math.round(rect.top + window.scrollY), widthPx: Math.round(rect.width), heightPx: Math.round(rect.height),
+        color: style.color, backgroundColor: backgroundFor(element), visible: true,
+      };
+    });
+    const dominantColors = Array.from(new Set([...textSamples.flatMap((item) => [item.color, item.backgroundColor]), ...actionSamples.flatMap((item) => [item.color, item.backgroundColor])])).filter(Boolean).slice(0, 16);
+    const fontFamilies = Array.from(new Set(textSamples.map((item) => item.fontFamily))).filter(Boolean).slice(0, 8);
+    const images = Array.from(document.querySelectorAll("img, picture, svg")).filter(visible);
+    return {
+      viewport: { width: window.innerWidth, height: window.innerHeight },
+      bodyWidthPx: Math.round(document.documentElement.scrollWidth),
+      horizontalOverflowPx: Math.max(0, Math.round(document.documentElement.scrollWidth - window.innerWidth)),
+      sectionCount: document.querySelectorAll("main section, body > section").length,
+      landmarkCount: document.querySelectorAll("header, nav, main, aside, footer").length,
+      listCount: document.querySelectorAll("ul, ol").length,
+      cardLikeGroupCount: document.querySelectorAll("[class*='card'], [class*='grid'], [class*='feature'], [class*='benefit']").length,
+      visibleImageCount: images.length,
+      imagesAboveFold: images.filter((element) => (element as HTMLElement).getBoundingClientRect().top < window.innerHeight).length,
+      textSamples,
+      actionSamples,
+      dominantColors,
+      fontFamilies,
+      longParagraphCount: Array.from(document.querySelectorAll("p")).filter((element) => visible(element) && (element.textContent || "").trim().length > 280).length,
+    };
+  });
 }
 
 function dedupeFindings(findings: RawFinding[]): RawFinding[] {

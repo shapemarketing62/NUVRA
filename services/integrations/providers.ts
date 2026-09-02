@@ -2,6 +2,7 @@ import type { IntegrationProviderAdapter } from "./contracts";
 import { emptyEvidence } from "./contracts";
 import { GooglePlacesApiProvider } from "@/services/intelligence/providers/reviews-provider";
 import { GoogleBusinessProfileProvider } from "./google-business-profile-provider";
+import { PlatformMarketingIntelligence } from "@/services/intelligence/platform-marketing-intelligence";
 
 const prepared = (key: IntegrationProviderAdapter["key"], sourceType: IntegrationProviderAdapter["sourceType"], envNames: string[], scopes: readonly string[]): IntegrationProviderAdapter => ({
   key, sourceType, requiredScopes: scopes,
@@ -30,7 +31,14 @@ export const googleBusinessProfileAdapter: IntegrationProviderAdapter = {
     if (!this.configured()) return { evidence: emptyEvidence("other", "unavailable", "Google Places API no está configurada.") };
     const profile = await new GoogleBusinessProfileProvider().collectPublicProfile(context.business);
     if (!profile.entityValidated) return { evidence: emptyEvidence("other", "unavailable", "No se pudo validar con seguridad la ficha del negocio.") };
-    return { evidence: { source: "other", status: "evaluated", data: profile, findings: [], confidence: profile.entityConfidence >= .85 ? "ALTA" : "MEDIA", coverage: Math.min(100, 35 + (profile.address ? 10 : 0) + (profile.openingHours.length ? 10 : 0) + (profile.reviews.length ? 20 : 0) + (profile.website ? 10 : 0)), evaluatedAt: new Date(), requiresAuth: false, metadata: { provider: profile.provider, entityConfidence: profile.entityConfidence, placeId: profile.placeId } } };
+    const sourceCoverage = { profile: true, bio: Boolean(profile.category), content: profile.photoCount ? "partial" as const : "none" as const, comments: profile.reviews.length ? "partial" as const : "none" as const, mentions: "none" as const, metrics: profile.rating !== null ? "public" as const : "none" as const };
+    const platformMarketing = PlatformMarketingIntelligence.analyze({
+      platform: "google_business_profile", status: "analyzed", entityValidated: true,
+      profile: profile as unknown as Record<string, unknown>, content: [],
+      publicMetrics: Object.fromEntries(Object.entries({ rating: profile.rating, reviewCount: profile.reviewCount, photoCount: profile.photoCount }).filter(([, value]) => typeof value === "number")) as Record<string, number>,
+      coverage: sourceCoverage, acquisitionMethods: ["official_api"],
+    });
+    return { evidence: { source: "other", status: "evaluated", data: { ...profile, platformMarketing }, findings: [], confidence: profile.entityConfidence >= .85 ? "ALTA" : "MEDIA", coverage: Math.min(100, 35 + (profile.address ? 10 : 0) + (profile.openingHours.length ? 10 : 0) + (profile.reviews.length ? 20 : 0) + (profile.website ? 10 : 0)), evaluatedAt: new Date(), requiresAuth: false, metadata: { provider: profile.provider, entityConfidence: profile.entityConfidence, placeId: profile.placeId, sourceCoverage } } };
   },
 };
 

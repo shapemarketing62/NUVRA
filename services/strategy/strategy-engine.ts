@@ -167,6 +167,8 @@ export function buildProfileStrategy(context: StrategyContext, diagnosis: Diagno
       expectedResult: opportunity.expectedResult,
       estimatedCost: opportunity.estimatedCost,
       metric: opportunity.metric,
+      causal: opportunity.causalDecision,
+      experiment: opportunity.experimentDesign,
     }),
     relatedFindingIds: opportunity.evidenceIds,
     findingIds: opportunity.evidenceIds,

@@ -8,6 +8,7 @@ import { selectStrategicFrameworks } from "@/services/frameworks/strategic-frame
 import { classifySiteType } from "@/services/scoring/site-type-classifier";
 import { BusinessIntelligenceLayer } from "@/services/intelligence/business-intelligence-layer";
 import { BusinessDiscoveryService, type DiscoveryResult } from "@/services/discovery/business-discovery-service";
+import { selectAnalysisWebUrl } from "@/services/discovery/source-selection";
 import { executeSource } from "@/services/intelligence/source-execution";
 import { buildAnalysisTrace } from "@/services/intelligence/analysis-trace";
 import { normalizeUrl } from "@/lib/utils";
@@ -123,7 +124,12 @@ export async function runFullAnalysis(businessId: string, options: { signal?: Ab
     execution: discoveryExecution.audit,
   }, { startedAt: discoveryStarted, endedAt: Date.now(), durationMs: Date.now() - discoveryStarted });
 
-  const rawWebUrl = (business.noWebDeclared ? null : business.webUrl || business.websites[0]?.url) || discoveryResult.primaryWebUrl;
+  const rawWebUrl = selectAnalysisWebUrl({
+    noWebDeclared: business.noWebDeclared,
+    declaredWebUrl: business.webUrl,
+    storedWebUrl: business.websites[0]?.url,
+    discoveredWebUrl: discoveryResult.primaryWebUrl,
+  });
   stageLog("1_inicio", { businessId, nombre: business.nombre, webUrl: rawWebUrl, objetivo: goal.objetivo, plazoDias: goal.plazoDias }, { startedAt, endedAt: Date.now(), durationMs: Date.now() - startedAt });
 
   currentStage = "website_normalize";

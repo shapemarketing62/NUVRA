@@ -194,6 +194,17 @@ export interface DashboardViewModel {
     frictions: Array<{ title: string; evidence: string; source: "diagnosis.weaknesses" }>;
     opportunities: Array<{ text: string; source: "diagnosis.opportunities" }>;
     unknowns: string[];
+    decisionInsight: {
+      observation: string;
+      hypothesis: string;
+      evidenceFor: string[];
+      evidenceAgainst: string[];
+      unknowns: string[];
+      decision: string;
+      whyThisDecision: string[];
+      alternativesNotPrioritized: string[];
+      confidenceLabel: string;
+    } | null;
   };
   strategy: {
     objetivo: string;
@@ -211,6 +222,7 @@ export interface DashboardViewModel {
     expectedResult: string | null;
     kpi: string | null;
     horizon: string | null;
+    notPriority: string[];
   } | null;
   actions: DashboardActionView[];
   actionsSummary: {
@@ -417,7 +429,7 @@ export function createEmptyDashboardViewModel(): DashboardViewModel {
     sources: [],
     score: null,
     diagnosis: null,
-    canonicalDiagnosis: { mainConclusion: null, strengths: [], frictions: [], opportunities: [], unknowns: [] },
+    canonicalDiagnosis: { mainConclusion: null, strengths: [], frictions: [], opportunities: [], unknowns: [], decisionInsight: null },
     strategy: null,
     canonicalStrategy: null,
     actions: [],
@@ -595,6 +607,7 @@ export function buildDashboardViewModel(rawValue: unknown, options: { isDemo?: b
   const inProgressActions = actionItems.filter((action) => action.state === "in_progress");
   const completedActions = actionItems.filter((action) => action.state === "completed");
   const progress = actionProgress(actionItems);
+  const primaryCausal = (inProgressActions[0] || pendingActions[0] || actionItems[0])?.details?.causal || null;
 
   const competitorRaw = record(intelligenceRecord.competitorSummary);
   const competitionEntitled = entitlements["analysis.competitors"] === true;
@@ -737,6 +750,17 @@ export function buildDashboardViewModel(rawValue: unknown, options: { isDemo?: b
         .map((item) => ({ text: presentOpportunity(item), source: "diagnosis.opportunities" as const }))
         .filter((item) => item.text),
       unknowns,
+      decisionInsight: primaryCausal ? {
+        observation: primaryCausal.observation,
+        hypothesis: primaryCausal.hypothesis,
+        evidenceFor: primaryCausal.evidenceFor,
+        evidenceAgainst: primaryCausal.evidenceAgainst,
+        unknowns: primaryCausal.unknowns,
+        decision: primaryCausal.decision,
+        whyThisDecision: primaryCausal.whyThisDecision,
+        alternativesNotPrioritized: primaryCausal.alternativesNotPrioritized,
+        confidenceLabel: primaryCausal.confidenceLabel,
+      } : null,
     },
     strategy: persistedStrategy ? {
       objetivo: text(strategyRecord.objetivo),
@@ -754,6 +778,7 @@ export function buildDashboardViewModel(rawValue: unknown, options: { isDemo?: b
       expectedResult: pendingActions[0]?.details?.expectedResult || actionItems[0]?.details?.expectedResult || analyzedObjective,
       kpi: pendingActions[0]?.details?.metric || pendingActions[0]?.indicatorToImprove || actionItems[0]?.details?.metric || actionItems[0]?.indicatorToImprove || null,
       horizon: nullableText(analyzedInputGoal.plazoLabel) || nullableText(analyzedProfileGoal.timeframeLabel) || (nullableNumber(scoreRecord.plazoDias) ? `${nullableNumber(scoreRecord.plazoDias)} días` : null),
+      notPriority: primaryCausal?.alternativesNotPrioritized || [],
     } : null,
     actions: actionItems,
     actionsSummary: {

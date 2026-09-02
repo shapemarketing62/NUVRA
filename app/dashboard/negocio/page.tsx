@@ -15,7 +15,7 @@ const groupLabels: Record<BusinessUnderstandingGroup, string> = {
 };
 
 function InformationRows({ items }: { items: BusinessUnderstandingItem[] }) {
-  return <div>{items.map((item) => <div key={item.key} style={{ display: "grid", gridTemplateColumns: "minmax(120px, 180px) minmax(0, 1fr)", gap: 18, padding: "13px 0", borderTop: `1px solid ${COLORS.line}` }}><div style={{ fontSize: 12, color: COLORS.inkSoft }}>{item.label}</div><div style={{ minWidth: 0, overflowWrap: "anywhere" }}><div style={{ fontSize: 14, lineHeight: 1.55 }}>{item.url ? <a href={item.url} target="_blank" rel="noopener noreferrer" style={{ color: COLORS.blueDeep }}>{item.value}</a> : item.value}</div>{item.basis && <div style={{ marginTop: 5, fontSize: 12, lineHeight: 1.5, color: COLORS.inkFaint }}>Lo interpretamos a partir de: {item.basis}</div>}{item.source && <div style={{ marginTop: 5, fontSize: 11, color: COLORS.inkFaint }}>{item.source}</div>}</div></div>)}</div>;
+  return <div>{items.map((item) => <div className="business-information-row" key={item.key}><div className="business-information-label">{item.label}</div><div style={{ minWidth: 0, overflowWrap: "anywhere" }}><div className="business-information-value">{item.url ? <a href={item.url} target="_blank" rel="noopener noreferrer" style={{ color: COLORS.blueDeep }}>{item.value}</a> : item.value}</div>{item.basis && <div className="field-hint">Base de esta lectura: {item.basis}</div>}{item.source && <div className="field-hint">Fuente: {item.source}</div>}</div></div>)}</div>;
 }
 
 export default function NegocioPage() {
@@ -103,11 +103,11 @@ export default function NegocioPage() {
   if (!business.nombre) return <EmptyState title="Todavía no hay información del negocio" description="Completá el onboarding para que NUVRA pueda organizar la información de tu negocio." />;
 
   return (
-    <div className="page-container">
+    <div className="page-container business-profile-v3">
       <PageHeader
-        eyebrow="Memoria del negocio"
+        eyebrow="Mi negocio"
         title="Mi negocio"
-        subtitle={<>{isDemo && <DemoBadge style={{ marginRight: 8 }} />}Esto es lo que NUVRA sabe, observó e interpretó hasta ahora.</>}
+        subtitle={<>{isDemo && <DemoBadge style={{ marginRight: 8 }} />}Lo que nos contaste, lo que observamos y lo que todavía estamos validando.</>}
         action={business.canEditDeclaredInformation ? <Btn size="sm" onClick={() => setEditing(true)}>Editar información</Btn> : undefined}
       />
 
@@ -157,8 +157,8 @@ export default function NegocioPage() {
 
       <Card style={{ marginBottom: 16 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, marginBottom: 8 }}>
-          <div><h2 className="section-title">Información que nos diste</h2><p className="section-description">Conservamos estos datos tal como fueron declarados.</p></div>
-          <StatusBadge tone="neutral">Declarado</StatusBadge>
+          <div><h2 className="section-title">Lo que nos contaste</h2><p className="section-description">Conservamos estos datos tal como los compartiste.</p></div>
+          <StatusBadge tone="neutral">Nos lo contaste</StatusBadge>
         </div>
         {(Object.keys(groupLabels) as BusinessUnderstandingGroup[]).map((group) => {
           const items = businessUnderstanding.declared.filter((item) => item.group === group);
@@ -169,15 +169,15 @@ export default function NegocioPage() {
       <Card style={{ marginBottom: 16 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, marginBottom: 8 }}>
           <div><h2 className="section-title">Lo que observamos</h2><p className="section-description">Señales encontradas directamente en fuentes públicas durante el último análisis.</p></div>
-          <StatusBadge tone="info">Observado</StatusBadge>
+          <StatusBadge tone="info">Lo observamos</StatusBadge>
         </div>
         {businessUnderstanding.observed.length ? <InformationRows items={businessUnderstanding.observed} /> : <p className="section-description" style={{ paddingTop: 14, borderTop: `1px solid ${COLORS.line}` }}>Todavía no tenemos observaciones públicas suficientes para mostrar acá.</p>}
       </Card>
 
       <Card style={{ marginBottom: 16 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, marginBottom: 8 }}>
-          <div><h2 className="section-title">Lo que NUVRA interpreta</h2><p className="section-description">Hipótesis de contexto construidas a partir de lo declarado y lo observado. No reemplazan tus datos originales.</p></div>
-          <StatusBadge tone="warning">Interpretado</StatusBadge>
+          <div><h2 className="section-title">Lo que estamos validando</h2><p className="section-description">Son hipótesis construidas con lo que nos contaste y lo que observamos. Todavía pueden cambiar.</p></div>
+          <StatusBadge tone="warning">Lo estamos validando</StatusBadge>
         </div>
         {businessUnderstanding.inferred.length ? <InformationRows items={businessUnderstanding.inferred} /> : <p className="section-description" style={{ paddingTop: 14, borderTop: `1px solid ${COLORS.line}` }}>Todavía no hay suficiente información para interpretar cómo funciona el negocio.</p>}
       </Card>

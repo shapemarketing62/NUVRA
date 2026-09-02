@@ -39,6 +39,71 @@ export interface PageBrandSignals {
   toneSamples: string[];
 }
 
+export interface RenderedTextSignal {
+  tag: string;
+  text: string;
+  fontFamily: string;
+  fontSizePx: number;
+  fontWeight: number;
+  lineHeightPx: number | null;
+  letterSpacingPx: number | null;
+  color: string;
+  backgroundColor: string;
+  widthPx: number;
+  topPx: number;
+}
+
+export interface RenderedActionSignal {
+  label: string;
+  topPx: number;
+  widthPx: number;
+  heightPx: number;
+  color: string;
+  backgroundColor: string;
+  visible: boolean;
+}
+
+export interface PageRenderedMarketingSignals {
+  viewport: { width: number; height: number };
+  bodyWidthPx: number;
+  horizontalOverflowPx: number;
+  sectionCount: number;
+  landmarkCount: number;
+  listCount: number;
+  cardLikeGroupCount: number;
+  visibleImageCount: number;
+  imagesAboveFold: number;
+  textSamples: RenderedTextSignal[];
+  actionSamples: RenderedActionSignal[];
+  dominantColors: string[];
+  fontFamilies: string[];
+  longParagraphCount: number;
+}
+
+export type WebsiteMarketingArea = "structure" | "hierarchy" | "color" | "typography" | "imagery" | "scannability" | "conversion";
+
+export interface WebsiteMarketingAreaAnalysis {
+  area: WebsiteMarketingArea;
+  status: "evaluated" | "partial" | "not_evaluable";
+  positiveSignals: string[];
+  frictions: string[];
+  evidence: string[];
+  knowledgeRuleIds: string[];
+}
+
+export interface WebsiteMarketingIntelligence {
+  context: {
+    industry: string;
+    customerType: string | null;
+    objective: string | null;
+    expectedPrimaryIntent: WebsiteJourneyIntent | null;
+  };
+  areas: WebsiteMarketingAreaAnalysis[];
+  findings: RawFinding[];
+  evaluatedAt: string;
+  limitations: string[];
+}
+
 export type BrandIdentityAspect = "logo" | "colors" | "typography" | "photography" | "tone" | "crossChannelConsistency" | "visualRecognition" | "differentiation" | "proposalCoherence" | "temporalConsistency";
 
 export interface BrandIdentitySourceEvidence {
@@ -71,6 +136,7 @@ export interface PageAnalysisData {
   actionSignals: PageActionSignal[];
   formSignals: PageFormSignal[];
   brandSignals: PageBrandSignals;
+  renderedMarketingSignals?: PageRenderedMarketingSignals;
 }
 
 export interface WebsiteJourneyValidation {
@@ -128,6 +194,7 @@ export interface WebsiteAnalysisResult {
   crawledUrls: string[];
   journeys: WebsiteJourneyValidation[];
   brandIdentity: BrandIdentityAnalysis;
+  marketingIntelligence: WebsiteMarketingIntelligence;
   errorMessage?: string;
   analyzedAt: string;
 }

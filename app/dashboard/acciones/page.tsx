@@ -56,18 +56,38 @@ export default function AccionesPage() {
     }
   }
 
-  return <div className="page-container">
+  return <div className="page-container dashboard-actions-v3">
     <PageHeader eyebrow="Plan de trabajo" title="Acciones" subtitle={<>{isDemo && <DemoBadge style={{ marginRight: 8 }} />}Qué hacer concretamente, en el orden recomendado por el análisis.</>} />
 
-    <section className="dashboard-action-progress" style={{ borderBottom: `1px solid ${COLORS.line}` }}>
-      <div><div className="page-eyebrow">Progreso de este plan</div><div className="shp-display" style={{ fontSize: 36, fontWeight: 650, letterSpacing: "-.04em" }}>{progress.percentage}%</div><p className="section-description">{progress.completed} de {progress.total} acciones visibles completadas</p></div>
-      <div><div className="diagnostic-track" style={{ "--value": progress.percentage } as React.CSSProperties} /></div>
+    <section className="dashboard-action-progress" style={{ borderBottom: "1px solid var(--n-border)" }}>
+      <div>
+        <div className="page-eyebrow">Progreso de este plan</div>
+        <div className="shp-display" style={{ fontSize: 36, fontWeight: 600, letterSpacing: "-0.04em" }}>
+          {progress.percentage}%
+        </div>
+        <p className="section-description">{progress.completed} de {progress.total} acciones visibles completadas</p>
+      </div>
+      <div>
+        <div className="diagnostic-track" style={{ "--value": progress.percentage } as React.CSSProperties} />
+      </div>
     </section>
 
-    {updateError && <div role="alert" style={{ borderLeft: `2px solid ${COLORS.red}`, padding: "10px 14px", marginTop: 20, color: COLORS.inkSoft, fontSize: 13 }}>{updateError}</div>}
+    {updateError && (
+      <div role="alert" style={{ borderLeft: "2px solid var(--n-error)", padding: "12px 16px", marginTop: 20, color: "var(--n-text-secondary)", fontSize: 13, background: "var(--n-error-light)", borderRadius: "var(--n-radius-md)" }}>
+        {updateError}
+      </div>
+    )}
 
-    <div style={{ display: "flex", gap: 7, margin: "26px 0 10px", flexWrap: "wrap" }}>
-      {[{ id: "all", label: "Todas" }, { id: "pending", label: "Pendientes" }, { id: "in_progress", label: "En curso" }, { id: "completed", label: "Completadas" }].map((item) => <button className={`btn btn-sm ${filter === item.id ? "btn-subtle" : "btn-ghost"}`} key={item.id} onClick={() => setFilter(item.id as typeof filter)}>{item.label}</button>)}
+    <div style={{ display: "flex", gap: 8, margin: "24px 0 16px", flexWrap: "wrap" }}>
+      {[{ id: "all", label: "Todas" }, { id: "pending", label: "Pendientes" }, { id: "in_progress", label: "En curso" }, { id: "completed", label: "Completadas" }].map((item) => (
+        <button 
+          className={`btn btn-sm ${filter === item.id ? "btn-subtle" : "btn-ghost"}`} 
+          key={item.id} 
+          onClick={() => setFilter(item.id as typeof filter)}
+        >
+          {item.label}
+        </button>
+      ))}
     </div>
 
     <div className="action-list">
@@ -82,6 +102,7 @@ export default function AccionesPage() {
             <span>Impacto: {action.impact}</span>
             <span>Dificultad: {action.difficulty}</span>
             <span>Plazo: {action.estimatedTime}</span>
+            {action.details?.estimatedCost && <span>Costo: {simplifyTechnicalText(action.details.estimatedCost)}</span>}
             {action.dimension && <span>Área relacionada: {simplifyTechnicalText(action.dimension)}</span>}
           </div>
 
@@ -89,10 +110,10 @@ export default function AccionesPage() {
           {action.startedAt && <p className="section-description">Iniciada el {new Date(action.startedAt).toLocaleDateString("es-AR")}</p>}
           {action.completedAt && <p className="section-description">Completada el {new Date(action.completedAt).toLocaleDateString("es-AR")}</p>}
 
-          {(action.details?.steps.length || action.evidence || action.inference) && <details style={{ marginTop: 15 }}><summary style={{ fontSize: 12.5, color: COLORS.inkSoft, cursor: "pointer" }}>Ver plan de ejecución</summary><div style={{ padding: "12px 0 0", display: "grid", gap: 9, fontSize: 12.5, lineHeight: 1.55 }}>{action.details?.where && <p><strong>Dónde hacerlo: </strong>{simplifyTechnicalText(action.details.where)}</p>}{action.details?.audience && <p><strong>Para quién: </strong>{simplifyTechnicalText(action.details.audience)}</p>}{action.relatedConclusion && <p><strong>Qué estamos intentando resolver: </strong>{simplifyTechnicalText(action.relatedConclusion)}</p>}{canonicalStrategy?.direction && <p><strong>Dirección del plan: </strong>{simplifyTechnicalText(canonicalStrategy.direction)}</p>}{action.rationale && <p><strong>Por qué recomendamos esta acción: </strong>{simplifyTechnicalText(action.rationale)}</p>}{action.details?.steps.length ? <ol style={{ paddingLeft: 20, display: "grid", gap: 6 }}>{action.details.steps.map((step) => <li key={step}>{simplifyTechnicalText(step)}</li>)}</ol> : null}{(action.details?.metric || action.indicatorToImprove) && <p><strong>Cómo medirla: </strong>{simplifyTechnicalText(action.details?.metric || action.indicatorToImprove)}</p>}{action.details?.estimatedCost && <p><strong>Costo estimado: </strong>{simplifyTechnicalText(action.details.estimatedCost)}</p>}{action.dependencies?.length ? <p><strong>Antes de empezar: </strong>{action.dependencies.map(simplifyTechnicalText).join(" · ")}</p> : null}{action.evidence && <p><strong>Qué observamos: </strong>{simplifyTechnicalText(action.evidence)}</p>}{action.inference && <p style={{ color: COLORS.inkSoft }}><strong>Qué significa: </strong>{simplifyTechnicalText(action.inference)}</p>}</div></details>}
+          {(action.details?.steps.length || action.evidence || action.inference || action.rationale || action.dependencies?.length || action.relatedConclusion) && <details className="action-plan"><summary>Ver plan de ejecución</summary><div className="action-plan-grid">{action.rationale && <div className="action-plan-wide"><strong>Por qué</strong><p>{simplifyTechnicalText(action.rationale)}</p></div>}{canonicalStrategy?.direction && <div className="action-plan-wide"><strong>Dirección del plan</strong><p>{simplifyTechnicalText(canonicalStrategy.direction)}</p></div>}{action.details?.audience && <div><strong>Para quién</strong><p>{simplifyTechnicalText(action.details.audience)}</p></div>}{action.details?.where && <div><strong>Dónde</strong><p>{simplifyTechnicalText(action.details.where)}</p></div>}{action.details?.steps.length ? <div className="action-plan-wide"><strong>Pasos</strong><ol>{action.details.steps.map((step) => <li key={step}>{simplifyTechnicalText(step)}</li>)}</ol></div> : null}{action.details?.experiment && <div className="action-plan-wide experiment-panel"><strong>Hipótesis de la prueba</strong><p>{simplifyTechnicalText(action.details.experiment.hypothesis)}</p><p><b>Duración:</b> {simplifyTechnicalText(action.details.experiment.duration)}</p><p><b>Medición inicial:</b> {simplifyTechnicalText(action.details.experiment.baselineMetric)}</p><p><b>Criterio de éxito:</b> {simplifyTechnicalText(action.details.experiment.successCriteria)}</p><p><b>Si funciona:</b> {simplifyTechnicalText(action.details.experiment.ifWorks)}</p><p><b>Si no funciona:</b> {simplifyTechnicalText(action.details.experiment.ifNot)}</p></div>}{(action.details?.metric || action.indicatorToImprove) && <div><strong>Cómo medirlo</strong><p>{simplifyTechnicalText(action.details?.metric || action.indicatorToImprove || "")}</p></div>}{action.details?.estimatedCost && <div><strong>Costo estimado</strong><p>{simplifyTechnicalText(action.details.estimatedCost)}</p></div>}{action.dependencies?.length ? <div><strong>Antes de empezar</strong><ul>{action.dependencies.map((dependency) => <li key={dependency}>{simplifyTechnicalText(dependency)}</li>)}</ul></div> : null}{action.evidence && <div className="action-plan-wide"><strong>Señal que sostiene esta acción</strong><p>{simplifyTechnicalText(action.evidence)}</p></div>}</div></details>}
 
           {action.canUpdateStatus && <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 17 }}>
-            {action.state === "pending" && <><Btn size="sm" variant="primary" disabled={updatingId === action.id} onClick={() => changeStatus(action, "in_progress")}>{updatingId === action.id ? "Guardando…" : "Empezar"}</Btn><Btn size="sm" variant="ghost" disabled={updatingId === action.id} onClick={() => changeStatus(action, "completed")}>Marcar como completada</Btn></>}
+            {action.state === "pending" && <><Btn size="sm" variant="primary" disabled={updatingId === action.id} onClick={() => changeStatus(action, "in_progress")}>{updatingId === action.id ? "Guardando…" : "Empezar acción"}</Btn><Btn size="sm" variant="ghost" disabled={updatingId === action.id} onClick={() => changeStatus(action, "completed")}>Marcar como completada</Btn></>}
             {action.state === "in_progress" && <><Btn size="sm" variant="primary" disabled={updatingId === action.id} onClick={() => changeStatus(action, "completed")}>{updatingId === action.id ? "Guardando…" : "Marcar como completada"}</Btn><Btn size="sm" variant="ghost" disabled={updatingId === action.id} onClick={() => changeStatus(action, "pending")}>Volver a pendiente</Btn></>}
             {action.state === "completed" && <Btn size="sm" variant="ghost" disabled={updatingId === action.id} onClick={() => changeStatus(action, "in_progress")}>{updatingId === action.id ? "Guardando…" : "Reabrir"}</Btn>}
           </div>}

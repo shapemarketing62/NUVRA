@@ -4,6 +4,7 @@ import { ReputationIntelligence } from "../reputation-intelligence.ts";
 import { PublicContentAnalyzer } from "./public-content-analyzer.ts";
 import { SourceRelevancePlanner } from "./source-relevance-planner.ts";
 import type { SocialBusinessTarget, SocialSourceProvider } from "./social-source-provider.ts";
+import { PlatformMarketingIntelligence } from "../platform-marketing-intelligence.ts";
 
 type BusinessWithGoals = Business & { goals?: Array<{ objetivo?: string }> };
 
@@ -28,6 +29,22 @@ export class SocialPlatformSourceAnalyzer extends SourceAnalyzer {
     };
     if (result.status === "discovered") return { source: this.type, status: "unavailable", data: result, findings: [], confidence: "INSUFICIENTE", coverage: 0, evaluatedAt: new Date(), requiresAuth: false, metadata: socialMetadata(result, plan) };
     const publicContent = PublicContentAnalyzer.analyze(this.provider.platform, result, target);
+    const platformMarketing = PlatformMarketingIntelligence.analyze({
+      platform: this.provider.platform,
+      status: result.status,
+      entityValidated: result.entityValidated,
+      profile: result.profile,
+      content: result.content.map((item) => ({
+        text: item.text,
+        title: item.title,
+        format: typeof item.context?.format === "string" ? item.context.format : null,
+        callToAction: item.callToAction,
+        publishedAt: item.publishedAt,
+      })),
+      publicMetrics: result.publicMetrics,
+      coverage: result.sourceCoverage,
+      acquisitionMethods: result.acquisitionMethods,
+    });
     const reputation = ReputationIntelligence.analyze(result.comments, { objective: target.objective || "" });
     const findings: EvidenceFinding[] = [...publicContent.findings];
     for (const topic of reputation.strengths.slice(0, 4)) findings.push(reputationFinding(this.type, topic, "positive", result.urls[0], result.acquisitionMethods[0]));
@@ -35,7 +52,7 @@ export class SocialPlatformSourceAnalyzer extends SourceAnalyzer {
     return {
       source: this.type,
       status: "evaluated",
-      data: { ...result, publicContent, reputation },
+      data: { ...result, publicContent, reputation, platformMarketing },
       findings,
       confidence: result.entityConfidence >= .9 && result.coverage >= 55 ? "ALTA" : "MEDIA",
       coverage: result.coverage,

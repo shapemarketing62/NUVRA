@@ -1,11 +1,11 @@
 export const DEMO_BUSINESS = {
-  nombre: "Noma Café",
-  rubro: "Cafetería",
-  ubicacion: "Palermo, Buenos Aires",
-  objetivoTipo: "Aumentar ventas",
-  magnitud: 20,
-  plazoMeses: 6,
-  plazoLabel: "6 meses",
+  nombre: "NEGOCIO DEMO",
+  rubro: "Escenario ficticio",
+  ubicacion: "Ubicación demostrativa",
+  objetivoTipo: "Validar una oportunidad comercial",
+  magnitud: 10,
+  plazoMeses: 3,
+  plazoLabel: "3 meses",
 };
 
 export const DEMO_SCORE = {
@@ -21,7 +21,7 @@ export const DEMO_SCORE = {
 };
 
 export const DEMO_DIAGNOSIS = {
-  summary: "Noma Café tiene oportunidades claras en conversión y adquisición. Datos de demostración — no provienen de un análisis real.",
+  summary: "NEGOCIO DEMO presenta una oportunidad comercial para validar. Estos datos son ficticios y no provienen de un análisis real.",
   bottleneck: {
     dimension: "Conversión",
     title: "CTA principal poco visible",
@@ -78,6 +78,6 @@ export const DEMO_RESULTS = [
 ];
 
 export const DEMO_COMPETITORS = [
-  { nombre: "Noma Café", rating: 4.3, resenas: 212, actividad: 74, tuyo: true },
-  { nombre: "Café Registrado", rating: 4.6, resenas: 388, actividad: 91 },
+  { nombre: "NEGOCIO DEMO", rating: 4.3, resenas: 212, actividad: 74, tuyo: true },
+  { nombre: "COMPETIDOR DEMO", rating: 4.6, resenas: 388, actividad: 91 },
 ];

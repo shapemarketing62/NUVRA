@@ -1,50 +1,68 @@
 "use client";
 
 import { useDashboardData } from "@/lib/use-dashboard-data";
-import { COLORS } from "@/lib/design-tokens";
-import { DemoBadge, EmptyState, ErrorState, PageHeader, PageSkeleton, SectionHeader } from "@/components/ui";
+import { Btn, DemoBadge, EmptyState, ErrorState, PageHeader, PageSkeleton } from "@/components/ui";
 import { simplifyTechnicalText } from "@/lib/simple-language-presenter";
 import { AnalysisFreshnessNotice } from "@/components/dashboard/analysis-freshness-notice";
 
 export default function EstrategiaPage() {
-  const { business, analysisFreshness, canonicalStrategy, loading, error, isDemo } = useDashboardData();
+  const { business, analysisFreshness, canonicalStrategy, canonicalDiagnosis, loading, error, isDemo } = useDashboardData();
   if (loading) return <PageSkeleton />;
   if (error) return <ErrorState message={error} />;
   if (!canonicalStrategy) return <EmptyState title="Todavía no hay estrategia" description="Completá el análisis para construir una dirección alrededor de tu objetivo." />;
-
+  const decisionInsight = canonicalDiagnosis.decisionInsight;
   return <div className="page-container">
-    <PageHeader eyebrow="Dirección recomendada" title="Mi estrategia" subtitle={<>{isDemo && <DemoBadge style={{ marginRight: 8 }} />}El enfoque que conviene seguir a partir del diagnóstico.</>} />
-
+    <PageHeader eyebrow="Estrategia" title="La decisión que conviene tomar" subtitle={<>{isDemo && <DemoBadge style={{ marginRight: 8 }} />}Una dirección clara para avanzar hacia el objetivo sin dispersar recursos.</>} action={<Btn size="sm" onClick={() => { window.location.href = "/dashboard/acciones"; }}>Ver acciones</Btn>} />
     <AnalysisFreshnessNotice freshness={analysisFreshness} businessId={business.id} context="strategy" />
-
-    <section style={{ paddingBottom: 34, borderBottom: `1px solid ${COLORS.line}`, marginBottom: 38 }}>
-      <div className="page-eyebrow">Objetivo de este análisis</div>
-      {canonicalStrategy.objective ? <h2 className="shp-display" style={{ fontSize: "clamp(24px,3vw,34px)", fontWeight: 650, letterSpacing: "-.035em", maxWidth: 760 }}>{canonicalStrategy.objective}</h2> : <p className="section-description">No hay un objetivo activo disponible.</p>}
+    
+    <section className="strategy-objective">
+      <div className="analysis-kicker">Objetivo</div>
+      <p>{simplifyTechnicalText(canonicalStrategy.objective || business.objetivo || "Objetivo por definir")}</p>
     </section>
-
-    <section style={{ maxWidth: 820, marginBottom: 38 }}>
-      <SectionHeader title="El desafío principal" />
-      {canonicalStrategy.problemOfOrigin ? <p style={{ fontSize: 15, lineHeight: 1.7 }}>{canonicalStrategy.problemOfOrigin.title}</p> : <p className="section-description">Todavía no podemos atribuir el desafío a una única causa. La estrategia prioriza una prueba acotada antes de ampliar la inversión.</p>}
+    
+    <section className="analysis-module analysis-module-accent" style={{ marginBottom: 24 }}>
+      <div className="analysis-kicker">Decisión</div>
+      <h2>{simplifyTechnicalText(canonicalStrategy.direction || "Necesitamos una prueba adicional antes de elegir una dirección.")}</h2>
     </section>
-
-    <section className="strategic-callout" style={{ marginBottom: 42 }}>
-      <div className="page-eyebrow">Apuesta estratégica</div>
-      {canonicalStrategy.direction ? <h2 style={{ fontSize: 21, fontWeight: 650, lineHeight: 1.4 }}>{simplifyTechnicalText(canonicalStrategy.direction)}</h2> : <p className="section-description">Necesitamos más información antes de recomendar una dirección concreta.</p>}
-    </section>
-
-    <section style={{ maxWidth: 820, marginBottom: 42 }}>
-      <SectionHeader title="Por qué esta dirección" />
-      {canonicalStrategy.rationale ? <p style={{ fontSize: 14, lineHeight: 1.7 }}>{simplifyTechnicalText(canonicalStrategy.rationale)}</p> : <p className="section-description">Primero necesitamos comprobar qué movimiento acerca mejor al negocio a su objetivo.</p>}
-    </section>
-
-    <div className="split-grid" style={{ marginBottom: 42 }}>
-      <section><SectionHeader title="Resultado buscado" />{canonicalStrategy.expectedResult ? <p style={{ fontSize: 14, lineHeight: 1.7 }}>{simplifyTechnicalText(canonicalStrategy.expectedResult)}</p> : <p className="section-description">Todavía no hay un resultado definido.</p>}</section>
-      <section><SectionHeader title="Cómo vamos a medirlo" />{canonicalStrategy.kpi ? <p style={{ fontSize: 14, lineHeight: 1.7 }}>{simplifyTechnicalText(canonicalStrategy.kpi)}</p> : <p className="section-description">El primer paso será definir una medida simple para seguir el avance.</p>}</section>
+    
+    <div className="analysis-module-grid">
+      <section className="analysis-module">
+        <div className="analysis-kicker">Por qué esta decisión</div>
+        <ul>
+          {(decisionInsight?.whyThisDecision || [canonicalStrategy.rationale]).filter(Boolean).map((item) => <li key={item!}>{simplifyTechnicalText(item!)}</li>)}
+        </ul>
+        {canonicalStrategy.problemOfOrigin?.title && (
+          <p className="strategy-origin">
+            <strong>Problema de origen:</strong> {simplifyTechnicalText(canonicalStrategy.problemOfOrigin.title)}
+          </p>
+        )}
+      </section>
+      
+      <section className="analysis-module">
+        <div className="analysis-kicker">Qué no vamos a priorizar ahora</div>
+        <ul>
+          {canonicalStrategy.notPriority.length ? (
+            canonicalStrategy.notPriority.map((item) => <li key={item}>{simplifyTechnicalText(item)}</li>)
+          ) : (
+            <li>No ampliaremos el plan hasta validar la primera intervención.</li>
+          )}
+        </ul>
+      </section>
     </div>
-
-    <section className="section-rule">
-      <SectionHeader title="Horizonte" />
-      <p style={{ fontSize: 14, lineHeight: 1.7 }}>{canonicalStrategy.horizon || "No hay un plazo activo disponible."}</p>
-    </section>
+    
+    <div className="strategy-measures">
+      <div>
+        <div className="analysis-kicker">Indicador principal</div>
+        <strong>{simplifyTechnicalText(canonicalStrategy.kpi || "Indicador por definir")}</strong>
+      </div>
+      <div>
+        <div className="analysis-kicker">Horizonte</div>
+        <strong>{canonicalStrategy.horizon || "Por definir"}</strong>
+      </div>
+      <div>
+        <div className="analysis-kicker">Resultado buscado</div>
+        <strong>{simplifyTechnicalText(canonicalStrategy.expectedResult || canonicalStrategy.objective || "Resultado por definir")}</strong>
+      </div>
+    </div>
   </div>;
 }

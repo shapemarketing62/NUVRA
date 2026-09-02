@@ -6,6 +6,7 @@ import {
   BusinessEntityTarget,
   DiscoveredSourceType,
 } from "./entity-matcher";
+import { selectPrimaryInstagram } from "./source-selection";
 
 export interface DiscoveryResult {
   target: BusinessEntityTarget;
@@ -103,7 +104,10 @@ export class BusinessDiscoveryService {
 
     // Seleccionar sitios/perfiles principales de forma única priorizando la relación de entidad
     const bestWeb = this.selectBestWebUrl(validSources, target.declaredWebUrl);
-    const bestInstagram = validSources.find((c) => c.type === "instagram")?.url || target.declaredInstagram || null;
+    const bestInstagram = selectPrimaryInstagram(
+      target.declaredInstagram,
+      validSources.find((c) => c.type === "instagram")?.url,
+    );
     const bestMaps = validSources.find((c) => c.type === "google_maps")?.url || null;
 
     console.log("[BUSINESS_DISCOVERY] Discovery completed:", {

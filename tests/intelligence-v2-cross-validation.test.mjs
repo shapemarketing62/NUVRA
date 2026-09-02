@@ -66,6 +66,11 @@ test("validación cruzada Intelligence V2 produce seis planes específicos y coh
     assert.equal(opportunities.selected.some((action) => /mejorar redes|publicar contenido|optimizar web|canal informado|\.\.\.|…/i.test(`${action.title} ${action.description}`)), false, fixture.name);
     if (fixture.budget === 0 || fixture.allowPaid === false) assert.equal(opportunities.selected.some((action) => action.lever === "paid_test"), false, fixture.name);
     assert.ok(diagnosis.bottleneck.title && strategy.distanciaObjetivo && strategy.actions.length >= 3, fixture.name);
+    assert.ok(opportunities.selected[0]?.causalDecision?.hypothesis, fixture.name);
+    assert.ok(opportunities.selected[0]?.causalDecision?.unknowns?.length, fixture.name);
+    assert.ok(opportunities.selected[0]?.causalDecision?.alternativesNotPrioritized?.length, fixture.name);
+    assert.ok(opportunities.selected[0]?.experimentDesign?.successCriteria, fixture.name);
+    assert.doesNotMatch(opportunities.selected[0]?.experimentDesign?.hypothesis || "", /si\s*,/i, fixture.name);
     for (let i = 0; i < opportunities.selected.length; i++) for (let j = i + 1; j < opportunities.selected.length; j++) assert.ok(similarity(opportunities.selected[i].title, opportunities.selected[j].title) < .68, `${fixture.name}: acciones duplicadas`);
   }
   const noma = outputs[0].opportunities.selected;
@@ -76,7 +81,7 @@ test("validación cruzada Intelligence V2 produce seis planes específicos y coh
   assert.ok(gym.some((action) => /Google Maps/i.test(action.title) && action.dependencies.length > 0));
   const rejectedGeneric = outputs.find((item) => item.fixture.id === "shop").opportunities.considered.find((action) => /Concentrar la propuesta/i.test(action.title));
   assert.ok(rejectedGeneric && !rejectedGeneric.quality.accepted && rejectedGeneric.quality.reasons.some((reason) => /intercambiable/i.test(reason)));
-  console.log("NUVRA_CROSS_VALIDATION=" + JSON.stringify(outputs.map(({ fixture, diagnosis, strategy, opportunities }) => ({ business: fixture.name, partialEvidence: opportunities.decisionContext.evidence.isPartial, budget: fixture.budget, capacity: fixture.capacity, conclusion: diagnosis.bottleneck, priority: strategy.prioridades[0], strategy: strategy.distanciaObjetivo, kpi: strategy.actions[0]?.kpi, actions: opportunities.selected.slice(0, 3).map((action) => ({ title: action.title, why: action.purpose, where: action.where, audience: action.audience, steps: action.executionSteps, metric: action.metric, cost: action.estimatedCost })) }))));
+  console.log("NUVRA_CROSS_VALIDATION=" + JSON.stringify(outputs.map(({ fixture, diagnosis, strategy, opportunities }) => ({ business: fixture.name, partialEvidence: opportunities.decisionContext.evidence.isPartial, budget: fixture.budget, capacity: fixture.capacity, conclusion: diagnosis.bottleneck, causal: opportunities.selected[0]?.causalDecision, priority: strategy.prioridades[0], strategy: strategy.distanciaObjetivo, kpi: strategy.actions[0]?.kpi, experiment: opportunities.selected[0]?.experimentDesign, actions: opportunities.selected.slice(0, 3).map((action) => ({ title: action.title, why: action.purpose, where: action.where, audience: action.audience, steps: action.executionSteps, metric: action.metric, cost: action.estimatedCost })) }))));
 });
 
 test("quality gate rechaza canal inexistente y complejidad incompatible con capacidad baja", () => {

@@ -22,7 +22,7 @@ export function AnalysisFreshnessNotice({ freshness, businessId, context = "gene
   } else if (goalChanged) {
     message = `El objetivo cambió después del último análisis.${details}`;
   }
-  return <aside className="strategic-callout" style={{ marginBottom: 28, borderLeftColor: COLORS.copper }}>
+  return <aside className="strategic-callout" style={{ marginBottom: 28, borderLeftColor: COLORS.blue }}>
     <h2 style={{ fontSize: 16, fontWeight: 650 }}>{title}</h2>
     <p className="section-description" style={{ marginTop: 6 }}>{message} Volvé a analizar para actualizar el diagnóstico y el plan.</p>
     {businessId && <Btn size="sm" onClick={() => { window.location.href = `/analyze?businessId=${encodeURIComponent(businessId)}`; }} style={{ marginTop: 14 }}>Volver a analizar</Btn>}

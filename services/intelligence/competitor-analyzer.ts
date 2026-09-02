@@ -1,5 +1,6 @@
 import { SourceAnalyzer, type SourceEvidence, type SourceRelevance, type SourceType, type EvidenceFinding, type SourceAnalysisContext } from "./source-analyzer.ts";
 import { SmartSearchProvider } from "./search-source-analyzer.ts";
+import type { SearchProvider } from "./providers/search-provider.ts";
 import type { Business } from "@prisma/client";
 
 export interface CompetitorEvidence {
@@ -38,16 +39,51 @@ interface PresenceInfo {
   evidence: CompetitorEvidence[];
 }
 
+export type CompetitorCandidateOrigin = "title" | "title_segment" | "numbered_list" | "comparison" | "snippet";
+
+export interface RawCompetitorCandidate {
+  rawText: string;
+  normalizedName: string | null;
+  sourceTitle: string;
+  sourceSnippet: string;
+  sourceUrl: string;
+  query: string;
+  origin: CompetitorCandidateOrigin;
+  extractor: "extractRawCandidates";
+}
+
+export interface PlausibleCompetitorEntity {
+  name: string;
+  source: string;
+  sourceUrls: string[];
+  origins: CompetitorCandidateOrigin[];
+  reasons: string[];
+}
+
+export interface RejectedCompetitorCandidate {
+  rawText: string;
+  normalizedName: string | null;
+  sourceUrl: string;
+  stage: "normalization" | "plausibility";
+  reason: string;
+}
+
+export interface CompetitorCandidatePipeline {
+  rawCandidates: RawCompetitorCandidate[];
+  plausibleEntities: PlausibleCompetitorEntity[];
+  rejectedCandidates: RejectedCompetitorCandidate[];
+}
+
 export class CompetitorSourceAnalyzer extends SourceAnalyzer {
   type = "competitor" as SourceType;
   requiresAuth = false;
   requiresPermission = false;
 
-  private searchProvider: SmartSearchProvider;
+  private searchProvider: SearchProvider;
 
-  constructor() {
+  constructor(searchProvider?: SearchProvider) {
     super();
-    this.searchProvider = new SmartSearchProvider();
+    this.searchProvider = searchProvider || new SmartSearchProvider();
   }
 
   isAvailable(business: Business): boolean {
@@ -119,32 +155,40 @@ export class CompetitorSourceAnalyzer extends SourceAnalyzer {
         return this.insufficient("No se encontraron resultados para análisis de competencia");
       }
 
-      const candidateNames = this.extractCompetitorNames(allResults, nombre, rubro);
+      const candidatePipeline = this.inspectCandidatePipeline(allResults, nombre, rubro);
+      const candidateNames = candidatePipeline.plausibleEntities.map(({ name, source }) => ({ name, source }));
 
       if (candidateNames.length === 0) {
         return this.insufficient("No se identificaron empresas competidoras con suficiente precisión en las fuentes analizadas");
       }
 
       const validatedCompetitors: Competitor[] = [];
+      const validationAudit: Array<Record<string, unknown>> = [];
 
       for (const { name, source } of candidateNames) {
-        if (this.isTargetBusiness(name, nombre)) continue;
+        if (this.isTargetBusiness(name, nombre)) {
+          validationAudit.push({ name, stage: "plausible_business_entity", decision: "rejected", reason: "target_business" });
+          continue;
+        }
 
         const presenceInfo = await this.searchOfficialPresence(name, rubro, ubicacion, nombre, context?.signal);
 
         if (!presenceInfo || presenceInfo.evidence.filter((item) => item.type !== "irrelevant").length === 0) {
+          validationAudit.push({ name, stage: "entity_validation", decision: "rejected", reason: "no_entity_evidence", evidenceUrls: presenceInfo?.discoveryEvidenceUrls || [] });
           continue;
         }
 
         const entityResult = this.calculateEntityConfidence(presenceInfo, name, rubro, ubicacion);
         const entityMatchConfidence = entityResult.score;
         if (entityMatchConfidence < 0.55) {
+          validationAudit.push({ name, stage: "entity_validation", decision: "rejected", entityMatchConfidence, reasons: entityResult.reasons, evidenceUrls: presenceInfo.discoveryEvidenceUrls });
           continue;
         }
 
         const relevanceResult = this.calculateCompetitorRelevance(presenceInfo, name, rubro, ubicacion, business.tipoCliente || undefined);
         const competitorRelevanceScore = relevanceResult.score;
         if (competitorRelevanceScore < 0.35) {
+          validationAudit.push({ name, stage: "validated_entity", decision: "not_comparable", entityMatchConfidence, competitorRelevanceScore, reasons: relevanceResult.reasons, evidenceUrls: presenceInfo.discoveryEvidenceUrls });
           continue;
         }
 
@@ -177,6 +221,7 @@ export class CompetitorSourceAnalyzer extends SourceAnalyzer {
           entityConfidenceReasons: entityResult.reasons,
           competitorRelevanceReasons: relevanceResult.reasons,
         });
+        validationAudit.push({ name, stage: "comparable_competitor", decision: "accepted", entityMatchConfidence, competitorRelevanceScore, classification, evidenceUrls: presenceInfo.discoveryEvidenceUrls });
       }
 
       const uniqueCompetitors = this.deduplicateCompetitors(validatedCompetitors);
@@ -205,6 +250,12 @@ export class CompetitorSourceAnalyzer extends SourceAnalyzer {
           totalCandidatesExtracted: candidateNames.length,
           totalValidated: topCompetitors.length,
           competitors: topCompetitors,
+          candidatePipeline: {
+            rawCandidates: candidatePipeline.rawCandidates,
+            plausibleEntities: candidatePipeline.plausibleEntities,
+            rejectedCandidates: candidatePipeline.rejectedCandidates,
+            validation: validationAudit,
+          },
         },
       };
     } catch (error) {
@@ -217,28 +268,74 @@ export class CompetitorSourceAnalyzer extends SourceAnalyzer {
     targetName: string,
     rubro: string
   ): Array<{ name: string; source: string }> {
-    const names: Array<{ name: string; source: string }> = [];
-    const seen = new Set<string>();
+    return this.inspectCandidatePipeline(results, targetName, rubro).plausibleEntities
+      .map(({ name, source }) => ({ name, source }));
+  }
 
-    for (const { result } of results) {
-      if (!this.isValidDiscoverySource(result)) {
-        continue;
-      }
+  /** Trazabilidad explícita: resultado crudo -> entidad comercial plausible. */
+  public inspectCandidatePipeline(
+    results: Array<{ result: any; query: string }>,
+    targetName: string,
+    rubro: string
+  ): CompetitorCandidatePipeline {
+    const rawCandidates: RawCompetitorCandidate[] = [];
+    const rejectedCandidates: RejectedCompetitorCandidate[] = [];
+    const grouped = new Map<string, {
+      name: string;
+      sourceUrls: Set<string>;
+      origins: Set<CompetitorCandidateOrigin>;
+      raw: RawCompetitorCandidate[];
+    }>();
 
-      const title = result.title || "";
-      const snippet = result.snippet || "";
-      const candidates = this.extractNameCandidatesFromText(title, snippet, rubro);
+    for (const { result, query } of results) {
+      if (!this.isValidDiscoverySource(result)) continue;
+      const extracted = this.extractRawCandidates(result.title || "", result.snippet || "", result.url || "", query || "");
+      rawCandidates.push(...extracted);
 
-      for (const candidate of candidates) {
-        const normalized = candidate.toLowerCase();
-        if (!seen.has(normalized) && !this.isTargetBusiness(candidate, targetName)) {
-          seen.add(normalized);
-          names.push({ name: candidate, source: result.url });
+      for (const raw of extracted) {
+        if (!raw.normalizedName) {
+          rejectedCandidates.push({ rawText: raw.rawText, normalizedName: null, sourceUrl: raw.sourceUrl, stage: "normalization", reason: "empty_or_malformed" });
+          continue;
         }
+        const key = this.normalizeForComparison(raw.normalizedName);
+        const current = grouped.get(key) || {
+          name: raw.normalizedName,
+          sourceUrls: new Set<string>(),
+          origins: new Set<CompetitorCandidateOrigin>(),
+          raw: [],
+        };
+        current.sourceUrls.add(raw.sourceUrl);
+        current.origins.add(raw.origin);
+        current.raw.push(raw);
+        if (raw.normalizedName.length > current.name.length) current.name = raw.normalizedName;
+        grouped.set(key, current);
       }
     }
 
-    return names;
+    const plausibleEntities: PlausibleCompetitorEntity[] = [];
+    for (const group of Array.from(grouped.values())) {
+      const decision = this.evaluateBusinessPlausibility(group.name, group.raw, rubro);
+      const isTarget = this.isTargetBusiness(group.name, targetName);
+      if (!decision.plausible || isTarget) {
+        rejectedCandidates.push({
+          rawText: group.raw[0]?.rawText || group.name,
+          normalizedName: group.name,
+          sourceUrl: group.raw[0]?.sourceUrl || "",
+          stage: "plausibility",
+          reason: isTarget ? "target_business" : decision.reason,
+        });
+        continue;
+      }
+      plausibleEntities.push({
+        name: group.name,
+        source: group.raw[0]?.sourceUrl || "",
+        sourceUrls: Array.from(group.sourceUrls),
+        origins: Array.from(group.origins),
+        reasons: decision.reasons,
+      });
+    }
+
+    return { rawCandidates, plausibleEntities, rejectedCandidates };
   }
 
   private isValidDiscoverySource(result: any): boolean {
@@ -249,75 +346,115 @@ export class CompetitorSourceAnalyzer extends SourceAnalyzer {
     if (excludedDomains.some((domain) => url.includes(domain))) {
       return false;
     }
+
     return true;
   }
 
-  private extractNameCandidatesFromText(title: string, snippet: string, rubro: string): string[] {
-    const categoryHints = this.getCategoryHints(rubro);
-    const candidates = new Set<string>();
-    const textBlocks = [title, ...title.split(/[-|:·]/g), ...snippet.split(/[.;•]/g)];
+  private extractRawCandidates(title: string, snippet: string, sourceUrl: string, query: string): RawCompetitorCandidate[] {
+    const found: Array<{ text: string; origin: CompetitorCandidateOrigin }> = [];
+    const add = (text: string, origin: CompetitorCandidateOrigin) => {
+      const value = text.replace(/\s+/g, " ").trim();
+      if (value) found.push({ text: value, origin });
+    };
 
-    for (const rawBlock of textBlocks) {
-      const block = rawBlock
-        .replace(/^\d+\.\s*/, "")
-        .replace(/\b(mejores|best|ranking|top|lista|alternativas|vs|versus|review|reseña|guía|guide)\b/gi, "")
-        .replace(/\s+/g, " ")
-        .trim();
-
-      if (!block) continue;
-
-      const properNouns = block.match(/[A-ZÁÉÍÓÚÑ][A-Za-zÁÉÍÓÚÑáéíóúñ&'.-]+(?:\s+[A-ZÁÉÍÓÚÑ][A-Za-zÁÉÍÓÚÑáéíóúñ&'.-]+){0,3}/g) || [];
-      for (const rawCandidate of properNouns) {
-        const candidate = this.normalizeCandidateName(rawCandidate);
-        if (candidate && this.looksLikeBusinessCandidate(candidate, categoryHints.tokens)) {
-          candidates.add(candidate);
-        }
-      }
+    for (const segment of title.split(/\s+(?:\||–|—|·|:)\s+/g)) {
+      add(segment, segment === title ? "title" : "title_segment");
     }
 
-    return Array.from(candidates);
+    const combined = `${title}. ${snippet}`;
+    const listPattern = /(?:^|[.;•]\s*|\s)(?:\d{1,2}[.)]|[-•])\s*([^.;|•]+)/g;
+    for (const match of Array.from(combined.matchAll(listPattern))) add(match[1], "numbered_list");
+
+    const comparisonPattern = /([^.;|]+?)\s+(?:vs\.?|versus)\s+([^.;|]+)/gi;
+    for (const match of Array.from(combined.matchAll(comparisonPattern))) {
+      add(match[1], "comparison");
+      add(match[2], "comparison");
+    }
+
+    const namedEntityPattern = /\b([A-ZÁÉÍÓÚÑ][A-Za-zÁÉÍÓÚÑáéíóúñ0-9&'’.-]*(?:\s+(?:(?:de|del|la|las|los|y|&)\s+)?[A-ZÁÉÍÓÚÑ][A-Za-zÁÉÍÓÚÑáéíóúñ0-9&'’.-]*)*)/g;
+    for (const sentence of snippet.split(/[.;•]/g)) {
+      for (const match of Array.from(sentence.matchAll(namedEntityPattern))) add(match[1], "snippet");
+    }
+
+    const seen = new Set<string>();
+    return found.map(({ text, origin }) => ({
+      rawText: text,
+      normalizedName: this.normalizeCandidateName(text),
+      sourceTitle: title,
+      sourceSnippet: snippet,
+      sourceUrl,
+      query,
+      origin,
+      extractor: "extractRawCandidates" as const,
+    })).filter((item) => {
+      const key = `${item.origin}:${item.normalizedName || item.rawText}`.toLocaleLowerCase("es");
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
   }
 
-  private normalizeCandidateName(value: string): string | null {
+  public normalizeCandidateName(value: string): string | null {
     const cleaned = value
+      .replace(/[’‘]/g, "'")
+      .replace(/^\s*(?:\d{1,2}[.)]|[-•])\s*/, "")
+      .replace(/\s+(?:en|cerca de)\s+[^,.;|]+$/i, "")
       .replace(/^[^A-Za-zÁÉÍÓÚÑáéíóúñ0-9]+/, "")
-      .replace(/[^A-Za-zÁÉÍÓÚÑáéíóúñ0-9]+$/, "")
+      .replace(/[^A-Za-zÁÉÍÓÚÑáéíóúñ0-9'&.-]+$/, "")
       .replace(/\s+/g, " ")
       .trim();
 
-    if (cleaned.length < 3 || cleaned.length > 60) {
-      return null;
-    }
-
-    return cleaned;
+    return cleaned || null;
+  }
+  public looksLikeBusinessCandidate(candidate: string, categoryTokens: string[]): boolean {
+    const raw: RawCompetitorCandidate = { rawText: candidate, normalizedName: candidate, sourceTitle: candidate, sourceSnippet: "", sourceUrl: "test://candidate", query: "", origin: "numbered_list", extractor: "extractRawCandidates" };
+    return this.evaluateBusinessPlausibility(candidate, [raw], categoryTokens.join(" ")).plausible;
   }
 
-  private looksLikeBusinessCandidate(candidate: string, categoryTokens: string[]): boolean {
-    const lower = candidate.toLowerCase();
-
-    const genericStandaloneCandidates = new Set([
-      "cafe", "café", "cafeteria", "cafetería", "coffee", "shop", "shops", "specialty", "store", "tienda",
-    ]);
-    if (genericStandaloneCandidates.has(lower)) {
-      return false;
+  private evaluateBusinessPlausibility(candidate: string, raw: RawCompetitorCandidate[], rubro: string): { plausible: boolean; reason: string; reasons: string[] } {
+    const normalized = this.normalizeForComparison(candidate);
+    const genericCategories = new Set(["cafe", "cafeteria", "coffee", "shop", "store", "tienda", "restaurant", "restaurante", "bar", "bakery", "panaderia", "gimnasio", "gym"]);
+    if (genericCategories.has(normalized)) return { plausible: false, reason: "generic_category_only", reasons: [] };
+    if (!/[A-Za-zÁÉÍÓÚÑáéíóúñ0-9]/.test(candidate)) return { plausible: false, reason: "no_name_characters", reasons: [] };
+    if (/\b(?:ranking|lista|mejores|alternativas|resultados|búsqueda|noticia|artículo|review|reseña|vs|versus)\b/i.test(candidate)) {
+      return { plausible: false, reason: "editorial_or_query_fragment", reasons: [] };
     }
 
-    if (/\b(diario|art[ií]culo|noticia|blog|review|ranking|lista|foro|comunidad)\b/i.test(lower)) {
+    const origins = new Set(raw.map((item) => item.origin));
+    const independentUrls = new Set(raw.map((item) => item.sourceUrl).filter(Boolean));
+    const categoryTokens = this.getCategoryHints(rubro).tokens.map((token) => this.normalizeForComparison(token)).filter((token) => token.length > 2);
+    const hasCategoryDescriptor = categoryTokens.some((token) => normalized.includes(token));
+    const urlAligned = raw.some((item) => this.urlContainsCandidate(item.sourceUrl, candidate));
+    const structuredMention = ["numbered_list", "comparison"].some((origin) => origins.has(origin as CompetitorCandidateOrigin));
+    const properNameForm = /^[A-ZÁÉÍÓÚÑ0-9][A-Za-zÁÉÍÓÚÑáéíóúñ0-9&'’.-]*(?:\s+[A-Za-zÁÉÍÓÚÑáéíóúñ0-9&'’.-]+)*$/.test(candidate);
+    const reasons: string[] = [];
+    if (structuredMention) reasons.push("structured_search_result_mention");
+    if (urlAligned) reasons.push("source_url_matches_name");
+    if (independentUrls.size >= 2) reasons.push("repeated_across_sources");
+    if (hasCategoryDescriptor) reasons.push("contains_business_category_descriptor");
+
+    const plausible = properNameForm && (structuredMention || urlAligned || independentUrls.size >= 2 || hasCategoryDescriptor);
+    return { plausible, reason: plausible ? "plausible_business_entity" : "insufficient_business_context", reasons };
+  }
+
+  private normalizeForComparison(value: string): string {
+    return value.toLocaleLowerCase("es").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
+  }
+
+  private urlContainsCandidate(url: string, candidate: string): boolean {
+    try {
+      const parsed = new URL(url);
+      const haystack = this.normalizeForComparison(`${parsed.hostname.replace(/^www\./, "")} ${parsed.pathname}`);
+      const tokens = this.normalizeForComparison(candidate).split(" ").filter((token) => token.length > 1);
+      return tokens.length > 0 && tokens.every((token) => haystack.includes(token));
+    } catch {
       return false;
     }
-
-    if (/^(los|las|el|la|mejores|best|ranking|top|lista)$/i.test(lower)) {
-      return false;
-    }
-
-    const businessSignals = /(café|cafe|coffee|cafetería|tienda|store|studio|estudio|clínica|clinica|consultora|agency|lab|market|bar|burger|pizza|pizzeria|pizzería|bakery|resto)/i;
-    const properSingleWordName = !candidate.includes(" ") && /^[A-ZÁÉÍÓÚÑ][A-Za-zÁÉÍÓÚÑáéíóúñ0-9&'-]{2,}$/.test(candidate);
-    return properSingleWordName || businessSignals.test(candidate) || categoryTokens.some((token) => token.length > 3 && lower.includes(token));
   }
 
   private isTargetBusiness(candidateName: string, targetName: string): boolean {
-    const normCandidate = candidateName.toLowerCase().trim();
-    const normTarget = targetName.toLowerCase().trim();
+    const normCandidate = this.normalizeForComparison(candidateName);
+    const normTarget = this.normalizeForComparison(targetName);
 
     if (normCandidate === normTarget) return true;
     if (normCandidate.startsWith(normTarget) || normTarget.startsWith(normCandidate)) return true;
@@ -430,7 +567,7 @@ export class CompetitorSourceAnalyzer extends SourceAnalyzer {
   private isValidOfficialWebsite(url: string, candidateName: string): boolean {
     try {
       const hostname = new URL(url).hostname.toLowerCase().replace(/^www\./, "");
-      const normalizedName = candidateName.toLowerCase().replace(/\s+/g, "");
+      const normalizedName = this.normalizeForComparison(candidateName).replace(/\s+/g, "");
 
       const ecommercePlatforms = [
         "mitiendanube.com", "tiendanube.com", "shopify.com", "wix.com",
@@ -452,7 +589,7 @@ export class CompetitorSourceAnalyzer extends SourceAnalyzer {
       const parsed = new URL(url);
       const hostname = parsed.hostname.toLowerCase().replace(/^www\./, "");
       const pathname = parsed.pathname.toLowerCase();
-      const normalizedName = candidateName.toLowerCase().replace(/\s+/g, "");
+      const normalizedName = this.normalizeForComparison(candidateName).replace(/\s+/g, "");
       const handle = pathname.split("/").filter(Boolean)[0] || "";
       const slug = hostname.replace(/\..+$/, "");
 
@@ -469,7 +606,7 @@ export class CompetitorSourceAnalyzer extends SourceAnalyzer {
   private urlMatchesTarget(url: string, targetName: string): boolean {
     try {
       const hostname = new URL(url).hostname.toLowerCase().replace(/^www\./, "");
-      const normTarget = targetName.toLowerCase().replace(/\s+/g, "");
+      const normTarget = this.normalizeForComparison(targetName).replace(/\s+/g, "");
       return hostname.includes(normTarget) || normTarget.includes(hostname);
     } catch {
       return false;
@@ -483,38 +620,81 @@ export class CompetitorSourceAnalyzer extends SourceAnalyzer {
     ubicacion: string,
     tipoCliente?: string
   ): { score: number; reasons: string[] } {
-    let weightedEvidence = 0;
-    let observedWeight = 0;
+    let score = 0.0;
     const reasons: string[] = [];
-    const text = presenceInfo.evidence.map((item) => `${item.label} ${item.snippet || ""}`).join(" ").toLowerCase();
+    const evidenceText = presenceInfo.evidence.map((item) => `${item.label} ${item.snippet || ""}`).join(" ").toLowerCase();
+    const allUrls = `${presenceInfo.officialWebsite || ""} ${presenceInfo.officialSocialProfile || ""} ${presenceInfo.discoveryEvidenceUrls.join(" ")}`.toLowerCase();
+    const fullText = `${evidenceText} ${allUrls}`;
     const categoryHints = this.getCategoryHints(rubro);
-    const addFactor = (weight: number, matches: boolean, reason: string) => {
-      observedWeight += weight;
-      if (matches) {
-        weightedEvidence += weight;
-        reasons.push(reason);
-      }
-    };
 
-    addFactor(0.3, categoryHints.tokens.some((token) => text.includes(token)), `Mismo rubro comprobado (${rubro})`);
-
-    const locationTokens = ubicacion.toLowerCase().split(/[\s,]+/).filter((token) => token.length > 3);
-    addFactor(0.2, locationTokens.length > 0 && locationTokens.some((token) => text.includes(token)), `Mismo mercado comprobado (${ubicacion})`);
-    addFactor(0.16, /menu|carta|caf[eé]|coffee|producto|servicio|especialidad|consulta|turno|reserva|software|plataforma/i.test(text), "Productos o servicios comparables");
-    addFactor(0.1, /desayuno|merienda|almuerzo|cena|takeaway|delivery|trabajar|reuni[oó]n|consulta|reserva/i.test(text), "Ocasión de consumo comparable");
-    addFactor(0.08, /cadena|franquicia|sucursal|local|tienda|suscripci[oó]n|marketplace|venta online/i.test(text), "Modelo comercial comparable");
-    addFactor(0.06, /premium|especialidad|artesanal|rápido|rapido|económico|economico|experiencia|calidad/i.test(text), "Propuesta de valor comparable");
-    addFactor(0.06, /local|sucursal|sede|direcci[oó]n|horario/i.test(text), "Presencia física en el mercado");
-    if (tipoCliente) {
-      const expectsBusiness = /b2b|empresa|corporativo|profesional/i.test(tipoCliente);
-      const comparableAudience = expectsBusiness
-        ? /empresa|corporativo|profesional|equipos/i.test(text)
-        : /personas|consumidor|familia|público|publico|clientes/i.test(text);
-      addFactor(0.04, comparableAudience, "Tipo de cliente comparable");
+    if (categoryHints.tokens.some((token) => token.length > 3 && fullText.includes(token))) {
+      score += 0.25;
+      reasons.push(`Mismo rubro comprobado (${rubro})`);
     }
 
-    const score = observedWeight === 0 ? 0 : weightedEvidence / observedWeight;
-    return { score: Math.round(Math.min(score, 0.95) * 100) / 100, reasons };
+    const locationTokens = ubicacion.toLowerCase().split(/[\s,]+/).filter((token) => token.length > 3);
+    if (locationTokens.some((token) => evidenceText.includes(token) || allUrls.includes(token))) {
+      score += 0.20;
+      reasons.push(`Mismo mercado comprobado (${ubicacion})`);
+    }
+
+    if (/menu|carta|caf[eé]|coffee|producto|servicio|especialidad|tostado|grano|bean|latte|cappuccino|americano|medialunas|facturas|pastelería|pizza|hamburguesa/i.test(evidenceText)) {
+      score += 0.20;
+      reasons.push("Productos o servicios comparables detectados en evidencia");
+    }
+
+    if (/desayuno|merienda|almuerzo|cena|takeaway|delivery|trabajar|reuni[oó]n|consulta|reserva/i.test(evidenceText)) {
+      score += 0.10;
+      reasons.push("Ocasión de consumo comparable");
+    }
+
+    if (/cadena|franquicia|sucursal|local|tienda|suscripci[oó]n|marketplace|venta online/i.test(evidenceText)) {
+      score += 0.10;
+      reasons.push("Modelo comercial comparable");
+    }
+
+    if (/premium|especialidad|artesanal|rápido|rapido|económico|economico|experiencia|calidad/i.test(evidenceText)) {
+      score += 0.05;
+      reasons.push("Propuesta de valor comparable");
+    }
+
+    if (/local|sucursal|sede|direcci[oó]n|horario/i.test(evidenceText)) {
+      score += 0.05;
+      reasons.push("Presencia física en el mercado");
+    }
+
+    if (tipoCliente && /b2c|consumidor|retail|personas/i.test(tipoCliente.toLowerCase())) {
+      if (/consumidor|cliente|retail|personas|familiar|amigos|reunión|trabajo|oficina|estudiar/i.test(evidenceText)) {
+        score += 0.15;
+        reasons.push("Público objetivo coincidente (B2C)");
+      }
+    } else if (tipoCliente && /b2b|empresa|corporativo/i.test(tipoCliente.toLowerCase())) {
+      if (/empresa|corporativo|profesional|equipos/i.test(evidenceText)) {
+        score += 0.15;
+        reasons.push("Público objetivo coincidente (B2B)");
+      }
+    }
+
+    if (ubicacion) {
+      const locLower = ubicacion.toLowerCase();
+      const hasLocalDomain = presenceInfo.officialWebsite && (
+        (locLower.includes("argentina") && /\.ar$/i.test(presenceInfo.officialWebsite)) ||
+        (locLower.includes("chile") && /\.cl$/i.test(presenceInfo.officialWebsite)) ||
+        (locLower.includes("mexico") && /\.mx$/i.test(presenceInfo.officialWebsite))
+      );
+      if (hasLocalDomain) {
+        score += 0.05;
+        reasons.push("Dominio local (.ar)");
+      }
+    }
+
+    const evidenceQualityBonus = presenceInfo.evidence.filter((e) => e.type !== "irrelevant").length >= 3 ? 0.05 : 0;
+    if (evidenceQualityBonus > 0) {
+      score += evidenceQualityBonus;
+      reasons.push("Múltiples fuentes de evidencia corroboran");
+    }
+
+    return { score: Math.min(Math.max(score, 0), 0.95), reasons };
   }
 
   private calculateCompetitorType(
@@ -594,45 +774,72 @@ export class CompetitorSourceAnalyzer extends SourceAnalyzer {
     rubro: string,
     ubicacion: string
   ): { score: number; reasons: string[] } {
-    let score = 0;
-    const reasons: string[] = [];
-    const normalizedName = candidateName.toLowerCase().replace(/\s+/g, "");
-    const text = presenceInfo.evidence.map((item) => `${item.label} ${item.snippet || ""}`).join(" ").toLowerCase();
+    let score = 0.15;
+    const reasons: string[] = ["Presencia en línea detectada"];
+    const normalizedName = this.normalizeForComparison(candidateName).replace(/\s+/g, "");
     const normalizedWords = candidateName.toLowerCase().split(/\s+/).filter((word) => word.length > 2);
+    const evidenceText = presenceInfo.evidence.map((item) => `${item.label} ${item.snippet || ""}`).join(" ").toLowerCase();
+    const allUrls = `${presenceInfo.officialWebsite || ""} ${presenceInfo.officialSocialProfile || ""} ${presenceInfo.discoveryEvidenceUrls.join(" ")}`.toLowerCase();
+
+    let hasWebsite = false;
+    let hasSocial = false;
+    let domainNameMatches = false;
+    let handleMatches = false;
+    let nameInEvidence = false;
+    let rubroInEvidence = false;
 
     if (presenceInfo.officialWebsite) {
+      hasWebsite = true;
       try {
         const hostname = new URL(presenceInfo.officialWebsite).hostname.toLowerCase().replace(/^www\./, "");
-        if (hostname.includes(normalizedName) || normalizedName.includes(hostname.replace(/\..+$/, ""))) {
-          score += 0.45;
-          reasons.push("Nombre del negocio visible en el dominio oficial");
+        domainNameMatches = hostname.includes(normalizedName) || normalizedName.includes(hostname.replace(/\..+$/, ""));
+        if (domainNameMatches) {
+          score += 0.35;
+          reasons.push("Nombre visible en el dominio del sitio web oficial");
+        } else {
+          score += 0.05;
+          reasons.push("Sitio web encontrado pero el dominio no coincide con el nombre del negocio");
         }
       } catch {
-        // noop
+        score += 0.05;
       }
     }
 
     if (presenceInfo.officialSocialProfile) {
+      hasSocial = true;
       try {
         const pathname = new URL(presenceInfo.officialSocialProfile).pathname.toLowerCase();
         const handle = pathname.split("/").filter(Boolean)[0] || "";
-        if (handle.includes(normalizedName) || normalizedName.includes(handle)) {
+        handleMatches = handle.includes(normalizedName) || normalizedName.includes(handle);
+        if (handleMatches) {
           score += 0.25;
-          reasons.push("Handle social alineado con el nombre del negocio");
+          reasons.push("Handle de red social coincide con el nombre del negocio");
+        } else {
+          score += 0.05;
+          reasons.push("Perfil social encontrado pero el handle no coincide con el nombre del negocio");
         }
       } catch {
-        // noop
+        score += 0.05;
       }
     }
 
-    if (normalizedWords.length > 0 && normalizedWords.every((word) => text.includes(word))) {
-      score += 0.2;
-      reasons.push("El nombre completo aparece en la evidencia pública");
+    nameInEvidence = normalizedWords.length > 0 && normalizedWords.every((word) => evidenceText.includes(word));
+    if (nameInEvidence) {
+      score += 0.15;
+      reasons.push("Nombre del negocio referenciado en evidencia pública");
     }
 
-    if (presenceInfo.officialWebsite && presenceInfo.officialSocialProfile) {
-      score += 0.1;
-      reasons.push("Website y red social se corroboran entre sí");
+    const rubroTokens = rubro.toLowerCase().split(/\s+/).filter((t) => t.length > 3);
+    rubroInEvidence = rubroTokens.some((token) => token.length > 3 && (evidenceText.includes(token) || allUrls.includes(token)));
+    if (rubroInEvidence) {
+      score += 0.10;
+      reasons.push(`Rubro (${rubro}) mencionado en la evidencia`);
+    }
+
+    const locationTokens = ubicacion.toLowerCase().split(/[\s,]+/).filter((t) => t.length > 3 && t !== "buenos" && t !== "aires");
+    if (locationTokens.some((token) => evidenceText.includes(token) || allUrls.includes(token))) {
+      score += 0.05;
+      reasons.push("Ubicación mencionada en la evidencia");
     }
 
     const corroboratingSources = new Set(
@@ -640,16 +847,43 @@ export class CompetitorSourceAnalyzer extends SourceAnalyzer {
         .filter((item) => item.type === "earned_media" || item.type === "directory" || item.type === "community")
         .map((item) => item.url)
         .filter(Boolean)
-    ).size;
-    if (corroboratingSources >= 2) {
-      score += 0.15;
-      reasons.push("Dos o más fuentes independientes corroboran la entidad");
-    } else if (corroboratingSources === 1) {
-      score += 0.08;
+    );
+    const corroboratingCount = Array.from(corroboratingSources).length;
+    if (corroboratingCount >= 2) {
+      score += 0.10;
+      reasons.push("Múltiples fuentes independientes corroboran la entidad");
+    } else if (corroboratingCount === 1) {
+      score += 0.05;
       reasons.push("Una fuente independiente corrobora la entidad");
     }
 
-    return { score: Math.min(score, 0.95), reasons };
+    if (hasWebsite && hasSocial && domainNameMatches && handleMatches) {
+      score += 0.05;
+      reasons.push("Website y perfil social son consistentes entre sí");
+    }
+
+    if (!nameInEvidence && !domainNameMatches && !handleMatches) {
+      score -= 0.15;
+      reasons.push("Sin evidencia directa del nombre del negocio");
+    }
+
+    if (!rubroInEvidence) {
+      score -= 0.05;
+      reasons.push("Rubro no verificado en evidencia");
+    }
+
+    if (presenceInfo.officialWebsite && !domainNameMatches) {
+      const hostname = (() => {
+        try { return new URL(presenceInfo.officialWebsite).hostname.toLowerCase().replace(/^www\./, ""); } catch { return ""; }
+      })();
+      const thirdPartyIndicators = ["mitiendanube", "tiendanube", "shopify", "wix", "squarespace", "latamcoffeetrip", "buenosairesconnect", "yolk-projects"];
+      if (thirdPartyIndicators.some((indicator) => hostname.includes(indicator))) {
+        score -= 0.20;
+        reasons.push("Sitio web es una plataforma de terceros, no un dominio propio");
+      }
+    }
+
+    return { score: Math.min(Math.max(score, 0.1), 0.95), reasons };
   }
 
   private deduplicateCompetitors(competitors: Competitor[]): Competitor[] {
