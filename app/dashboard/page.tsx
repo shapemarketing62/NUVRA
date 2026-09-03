@@ -30,10 +30,10 @@ export default function DashboardHomePage() {
         <ScoreRing value={score?.total ?? null} status={score?.total == null ? "PENDIENTE" : "COMPLETO"} />
         <div>
           <strong className="dashboard-score-reading" style={{ fontSize: "20px", fontWeight: 700, color: "var(--text-primary)" }}>
-            {score?.total == null ? "Lectura en construcción" : score.total >= 70 ? "Base sólida" : score.total >= 50 ? "Base aprovechable" : "Hay fricciones importantes"}
+            {score?.total == null && areas.length === 0 ? "Todavía falta información para evaluar el negocio" : score?.total == null ? "Lectura en construcción" : score.total >= 70 ? "Base sólida" : score.total >= 50 ? "Base aprovechable" : "Hay fricciones importantes"}
           </strong>
           <p style={{ marginTop: "var(--space-3)", color: "var(--text-secondary)", fontSize: "15px", lineHeight: 1.5 }}>
-            El puntaje da contexto. La prioridad se define por tu objetivo y la información comprobada.
+            {score?.total == null && areas.length === 0 ? "No obtuvimos suficiente información pública todavía. Las fuentes revisadas y pendientes aparecen más abajo." : "El puntaje da contexto. La prioridad se define por tu objetivo y la información comprobada."}
           </p>
         </div>
       </div>
@@ -70,7 +70,7 @@ export default function DashboardHomePage() {
             ))}
           </div>
         ) : (
-          <p className="section-description">Sin áreas evaluables por ahora.</p>
+          <p className="section-description">Sin áreas evaluables: las fuentes disponibles no alcanzaron para puntuar sin hacer suposiciones.</p>
         )}
         <p className="section-description" style={{ marginTop: "var(--space-4)" }}>
           Este resultado se calcula con la información disponible hasta el momento.

@@ -5,7 +5,7 @@ import { buildCausalDecision, buildExperimentDesign, type CausalDecision, type E
 
 export type ActionOpportunityType = "corrective" | "growth" | "validation";
 export type ActionLever = "commercial_path" | "local_discovery" | "reputation" | "offer" | "content" | "retention" | "channel_mix" | "paid_test" | "measurement";
-export interface ActionOpportunityContext { businessName: string; industry: string; location?: string | null; budget?: number | null; capacity?: string | null; timeframeDays: number; timeframeLabel?: string }
+export interface ActionOpportunityContext { businessName: string; industry: string; location?: string | null; budget?: number | null; capacity?: string | null; timeframeDays: number; timeframeLabel?: string; evaluableDimensions?: number | null }
 export interface ActionQualityAssessment { accepted: boolean; score: number; reasons: string[] }
 export interface ActionOpportunity {
   id: string; type: ActionOpportunityType; lever: ActionLever; intentKey: string; title: string; description: string; where: string; audience: string;
@@ -17,8 +17,10 @@ export interface ActionOpportunity {
 
 export class ActionOpportunityEngine {
   static generate(profile: BusinessProfile, input: ActionOpportunityContext): { selected: ActionOpportunity[]; considered: ActionOpportunity[]; decisionContext: MarketingDecisionContext } {
-    const decision = buildMarketingDecisionContext(profile, { timeframeDays: input.timeframeDays, timeframeLabel: input.timeframeLabel, budget: input.budget, capacity: input.capacity });
-    const candidates = [...correctiveActions(profile, decision), ...decisionActions(profile, decision), measurementAction(profile, decision)].filter((item): item is ActionOpportunity => Boolean(item));
+    const decision = buildMarketingDecisionContext(profile, { timeframeDays: input.timeframeDays, timeframeLabel: input.timeframeLabel, budget: input.budget, capacity: input.capacity, evaluableDimensions: input.evaluableDimensions });
+    const candidates = decision.evidence.status === "insufficient"
+      ? [measurementAction(profile, decision)].filter((item): item is ActionOpportunity => Boolean(item))
+      : [...correctiveActions(profile, decision), ...decisionActions(profile, decision), measurementAction(profile, decision)].filter((item): item is ActionOpportunity => Boolean(item));
     const assessed = candidates.map((item) => ({ ...item, quality: assessActionQuality(item, decision) }));
     const unique = deduplicate(assessed).sort((a, b) => (b.priority + b.quality.score) - (a.priority + a.quality.score));
     const accepted = unique.filter((item) => item.quality.accepted);
@@ -96,7 +98,7 @@ function decisionActions(profile: BusinessProfile, decision: MarketingDecisionCo
   if (referralSignal) result.push(makeGrowth(profile, decision, evidence, { id: "referrals", lever: "channel_mix", intentKey: "repeat-referrals", priority: 88, title: "Convertir las recomendaciones en una forma fácil de generar nuevas consultas", description: "Preparar un pedido de recomendación breve para usar después de una experiencia satisfactoria.", where: `el cierre de la experiencia y ${contactChannel(decision)}`, audience: "clientes satisfechos y las personas que podrían recomendar", steps: ["Definir en qué momento pedir una recomendación sin interrumpir la experiencia.", "Preparar un mensaje y un enlace directo que el cliente pueda compartir.", "Registrar quién recomendó y si la nueva persona avanzó."], why: "El negocio declaró que las recomendaciones ya participan en la llegada de clientes; la acción busca volver ese origen medible y repetible.", result: "Más consultas nuevas provenientes de recomendaciones.", metric: "nuevas consultas por recomendación" }));
   else if (channelSignal) {
     const namedChannel = channelSignal.evidence.match(/Instagram|WhatsApp|Google(?: Maps)?|tel[eé]fono|email/i)?.[0] || where;
-    const channelAlreadyExecutesGoal = result.some((item) => item.type === "growth" && item.where.toLowerCase().includes(namedChannel.toLowerCase()));
+    const channelAlreadyExecutesGoal = result.some((item) => item.where.toLowerCase().includes(namedChannel.toLowerCase()));
     if (goal === "consultations") result.push(makeGrowth(profile, decision, evidence, { id: "qualified-channel", lever: "channel_mix", intentKey: "qualify-before-meeting", priority: 82, title: `Calificar por ${namedChannel} antes de ${profile.primaryCustomerAction}`, description: `Pedir solo los datos necesarios para saber si ${decision.offer} encaja antes de agendar una conversación.`, where: namedChannel, audience, steps: [`Definir dos o tres datos que permitan reconocer si ${decision.offer} puede ayudar.`, "Preparar una respuesta breve para casos adecuados y otra derivación clara para los que no encajan.", `Registrar cuántas conversaciones calificadas avanzan a ${profile.primaryCustomerAction}.`], why: "El objetivo no es recibir cualquier contacto, sino consultas calificadas que puedan avanzar a reunión.", result: decision.goal.outcome, metric: decision.decision.primaryKpi }));
     else if (!channelAlreadyExecutesGoal) result.push(makeGrowth(profile, decision, evidence, { id: "declared-channel", lever: "channel_mix", intentKey: "activate-declared-channel", priority: 82, title: `Conectar ${namedChannel} con ${profile.primaryCustomerAction}`, description: `Usar ${namedChannel} para presentar una propuesta concreta y llevarla a un próximo paso medible.`, where: namedChannel, audience, steps: ["Elegir una sola propuesta relacionada con el objetivo.", `Conectar el mensaje, la prueba y el paso para ${profile.primaryCustomerAction}.`, "Registrar cuántos avances empiezan en ese canal."], why: "El negocio informó que este canal participa en la llegada de clientes; se usa como contexto, no como una métrica verificada.", result: decision.goal.outcome, metric: decision.decision.primaryKpi }));
   }
@@ -126,14 +128,18 @@ function recurrenceOpportunity(profile: BusinessProfile, decision: MarketingDeci
 }
 
 function measurementAction(profile: BusinessProfile, decision: MarketingDecisionContext): ActionOpportunity | null {
-  const evidence = goalEvidence(profile); if (!evidence.length) return null;
+  const evidence = decision.evidence.status === "insufficient"
+    ? profile.commercialEvidence.filter((item) => item.id === "declared:goal" || item.id === "declared:additional").slice(0, 2)
+    : goalEvidence(profile);
+  if (!evidence.length) return null;
   const retentionProblem = profile.problemCandidates.find((item) => item.validationStatus === "validated" && item.pattern === "retention");
   const metric = retentionProblem ? "clientes que continúan después del período crítico y bajas semanales" : decision.decision.primaryKpi;
-  return makeGrowth(profile, decision, evidence, { id: "measurement", type: "validation", lever: "measurement", intentKey: "measure-decision", priority: decision.evidence.isPartial ? 84 : 45, title: `Medir semanalmente ${metric}`, description: "Usar un registro simple para separar resultados por fecha, canal y acción realizada.", where: "una planilla compartida por el equipo", audience: "el equipo responsable de ejecutar el plan", steps: ["Anotar el valor inicial antes de cambiar nada.", "Registrar una vez por semana el resultado y su origen.", "Revisar al final del primer mes si la intervención merece continuar."], why: decision.evidence.isPartial ? "La evidencia pública es parcial; medir este resultado evita convertir una hipótesis en una certeza." : "La medición permite decidir qué sostener sin sumar complejidad.", result: "Una lectura comparable del avance hacia el objetivo.", metric });
+  return makeGrowth(profile, decision, evidence, { id: "measurement", type: "validation", lever: "measurement", intentKey: "measure-decision", priority: decision.evidence.isPartial ? 84 : 45, title: `Medir semanalmente ${metric}`, description: "Durante dos semanas, registrar cuántas personas consultan, desde qué canal llegan y cuántas completan el resultado buscado.", where: "una planilla compartida por el equipo", audience: "el equipo responsable de atender las consultas", steps: ["Anotar el valor inicial antes de cambiar nada.", "Registrar cada consulta, su origen y si avanzó al resultado buscado durante dos semanas.", "Revisar qué canal y qué paso necesitan validarse antes de decidir una intervención."], why: decision.evidence.status === "insufficient" ? "Todavía no hay evidencia suficiente para afirmar dónde está el problema; esta medición permite encontrarlo sin convertir el objetivo en diagnóstico." : decision.evidence.isPartial ? "La evidencia pública es parcial; medir este resultado evita convertir una hipótesis en una certeza." : "La medición permite decidir qué sostener sin sumar complejidad.", result: "Datos suficientes para decidir qué parte del recorrido conviene trabajar primero.", metric });
 }
 
 function makeGrowth(profile: BusinessProfile, decision: MarketingDecisionContext, evidence: BusinessProfile["commercialEvidence"], spec: { id: string; type?: ActionOpportunityType; lever: ActionLever; intentKey: string; priority: number; title: string; description: string; where: string; audience: string; steps: string[]; why: string; result: string; metric: string }) {
-  return makeAction({ id: `${spec.type || "growth"}:${spec.id}`, type: spec.type || "growth", lever: spec.lever, intentKey: spec.intentKey, profile, decision, evidence, priority: spec.priority, problem: spec.type === "validation" ? "Hace falta medir antes de ampliar la intervención." : `El objetivo requiere una decisión específica sobre ${spec.metric}.`, inference: spec.why, where: spec.where, confidence: averageConfidence(evidence), title: spec.title, description: spec.description, audience: spec.audience, executionSteps: spec.steps, purpose: spec.why, expectedResult: spec.result, metric: spec.metric });
+  const type = spec.type || (decision.evidence.status === "partial" ? "validation" : "growth");
+  return makeAction({ id: `${type}:${spec.id}`, type, lever: spec.lever, intentKey: spec.intentKey, profile, decision, evidence, priority: spec.priority, problem: type === "validation" ? "Hace falta validar esta oportunidad antes de ampliarla." : `El objetivo requiere una decisión específica sobre ${spec.metric}.`, inference: spec.why, where: spec.where, confidence: averageConfidence(evidence), title: spec.title, description: spec.description, audience: spec.audience, executionSteps: spec.steps, purpose: spec.why, expectedResult: spec.result, metric: spec.metric });
 }
 
 function makeAction(input: Omit<Partial<ActionOpportunity>, "evidence"> & { id: string; type: ActionOpportunityType; lever: ActionLever; intentKey: string; profile: BusinessProfile; decision: MarketingDecisionContext; evidence: BusinessProfile["commercialEvidence"]; priority: number; problem: string; inference: string; where: string; confidence: number }): ActionOpportunity {
@@ -141,7 +147,21 @@ function makeAction(input: Omit<Partial<ActionOpportunity>, "evidence"> & { id: 
   const difficulty = input.decision.resources.capacityBand === "low" ? "baja" : input.executionSteps && input.executionSteps.length > 3 ? "alta" : "media";
   const title = input.title || ""; const description = input.description || ""; const audience = input.audience || input.decision.audience; const metric = input.metric || input.decision.decision.primaryKpi; const expectedResult = input.expectedResult || input.decision.goal.outcome;
   const relatedProblem = input.profile.problemCandidates.find((problem) => Array.isArray(problem.evidenceFor) && problem.evidenceFor.some((id) => input.evidence.some((item) => item.id === id)));
-  return { id: input.id, type: input.type, lever: input.lever, intentKey: input.intentKey, title, description, where: input.where, audience, executionSteps: input.executionSteps || [], purpose: input.purpose || input.inference, expectedResult, estimatedCost: cost, metric, evidenceIds: Array.from(new Set(input.evidence.map((item) => item.id))), evidence: Array.from(new Set(input.evidence.map((item) => item.text))).slice(0, 4).join(" · "), inference: input.inference, problem: input.problem, priority: input.priority, impact: input.priority >= 85 ? "alto" : input.priority >= 60 ? "medio" : "bajo", difficulty, timeframe: timing(input.decision.goal.timeframeDays), dependencies: input.dependencies || [], conclusionConfidence: input.confidence, quality: { accepted: false, score: 0, reasons: [] }, causalDecision: buildCausalDecision(input.profile, input.decision, relatedProblem), experimentDesign: buildExperimentDesign(input.decision, { title, description, audience, metric, expectedResult }) };
+  return { id: input.id, type: input.type, lever: input.lever, intentKey: input.intentKey, title, description, where: input.where, audience, executionSteps: input.executionSteps || [], purpose: input.purpose || input.inference, expectedResult, estimatedCost: cost, metric, evidenceIds: Array.from(new Set(input.evidence.map((item) => item.id))), evidence: Array.from(new Set(input.evidence.map((item) => item.text))).slice(0, 4).join(" · "), inference: input.inference, problem: input.problem, priority: input.priority, impact: input.priority >= 85 ? "alto" : input.priority >= 60 ? "medio" : "bajo", difficulty, timeframe: timing(input.decision.goal.timeframeDays), dependencies: input.dependencies || [], conclusionConfidence: input.confidence, quality: { accepted: false, score: 0, reasons: [] }, causalDecision: buildCausalDecision(input.profile, input.decision, relatedProblem), experimentDesign: input.type === "validation" && input.decision.evidence.status === "insufficient" ? buildEvidenceValidationExperiment(input.decision, { description, audience, metric }) : buildExperimentDesign(input.decision, { title, description, audience, metric, expectedResult }) };
+}
+
+function buildEvidenceValidationExperiment(decision: MarketingDecisionContext, action: { description: string; audience: string; metric: string }) {
+  return {
+    hypothesis: `Todavía no está validado qué parte del recorrido limita ${action.metric}.`,
+    intervention: action.description,
+    audience: action.audience,
+    duration: "2 semanas",
+    baselineMetric: `Registrar ${action.metric}, el origen de cada consulta y cuántas avanzan, sin cambiar la definición durante la medición.`,
+    targetMetric: action.metric,
+    successCriteria: "La validación se completa cuando existen dos semanas comparables y cada consulta tiene origen y resultado registrados.",
+    ifWorks: "Usar los datos para elegir una intervención sobre el paso con mayor pérdida comprobada.",
+    ifNot: "Extender la observación o conectar una fuente adicional antes de decidir sobre pauta, canales o recorrido comercial.",
+  };
 }
 
 export function assessActionQuality(action: ActionOpportunity, context?: MarketingDecisionContext): ActionQualityAssessment {

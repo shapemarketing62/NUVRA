@@ -34,6 +34,13 @@ export interface StrategyResult extends StrategyOutput {
   engineType: "deterministic" | "ai";
   frameworks?: Array<{ id: string; title: string; rationale: string; useCase: string; dimension?: string; priority?: number }>;
   audit?: {
+    decisionEvidence?: {
+      status: "sufficient" | "partial" | "insufficient";
+      evaluableDimensions: number | null;
+      observed: number;
+      validatedProblems: number;
+      supportedStrengths: number;
+    };
     candidates: Array<{
       findingId: string;
       problemCandidateId?: string;
@@ -146,7 +153,9 @@ export function buildProfileStrategy(context: StrategyContext, diagnosis: Diagno
     seen.add(key);
     return true;
   }).slice(0, 5);
-  const opportunities = ActionOpportunityEngine.generate(profile, { businessName: context.nombre, industry: context.rubro, location: context.ubicacion, budget: context.presupuesto, capacity: context.capacidad, timeframeDays: context.plazoDias, timeframeLabel: context.plazoLabel });
+  const evaluatedCount = scoreResult.dimensions.filter((dimension) => dimension.points !== null).length;
+  const evaluableDimensions = scoreResult.dimensions.length > 0 ? evaluatedCount : scoreResult.total === null ? 0 : null;
+  const opportunities = ActionOpportunityEngine.generate(profile, { businessName: context.nombre, industry: context.rubro, location: context.ubicacion, budget: context.presupuesto, capacity: context.capacidad, timeframeDays: context.plazoDias, timeframeLabel: context.plazoLabel, evaluableDimensions });
   const decision = opportunities.decisionContext;
   const selectedOpportunityIds = new Set(opportunities.selected.map((item) => item.id));
   const actions: StrategyOutput["actions"] = opportunities.selected.map((opportunity, index) => ({
@@ -214,15 +223,28 @@ export function buildProfileStrategy(context: StrategyContext, diagnosis: Diagno
   return {
     engineType: "deterministic",
     objetivo: `${context.objetivo}${context.magnitud ? ` (+${context.magnitud}%)` : ""} en ${context.plazoLabel}`,
-    situacionActual: primary
+    situacionActual: decision.evidence.status === "insufficient"
+      ? `${context.nombre} fue analizado con la información disponible, pero todavía no hay evidencia suficiente para confirmar dónde se frenan las consultas o decisiones comerciales.`
+      : primary
       ? `${scoreResult.total === null ? `${context.nombre} fue analizado con la información disponible.` : `${context.nombre} tiene un Nuvra Score de ${scoreResult.total}/100.`} La evidencia más firme señala: ${primary.hypothesis}`
       : `${scoreResult.total === null ? `${context.nombre} fue analizado con la información disponible.` : `${context.nombre} tiene un Nuvra Score de ${scoreResult.total}/100.`} No hay una única falla comprobada; la decisión más útil es trabajar el objetivo con una prueba acotada y medible.`,
-    distanciaObjetivo: `Durante ${decision.goal.timeframeLabel}, conviene ${primary && actions[0] ? actions[0].title.toLowerCase() : decision.decision.strategicBet}. Por ahora no conviene ${decision.decision.notPriority}.`,
+    distanciaObjetivo: decision.evidence.status === "insufficient"
+      ? `Durante ${decision.goal.timeframeLabel}, el próximo paso es medir ${decision.decision.primaryKpi}, el origen de las consultas y cuántas avanzan. Con esos datos recién podrá decidirse qué intervención conviene priorizar.`
+      : decision.evidence.status === "partial"
+        ? `Durante ${decision.goal.timeframeLabel}, la información disponible permite probar como hipótesis: ${actions[0]?.title.toLowerCase() || `medir ${decision.decision.primaryKpi}`}. Las decisiones sobre inversión y canales quedan por validar.`
+        : `Durante ${decision.goal.timeframeLabel}, conviene ${primary && actions[0] ? actions[0].title.toLowerCase() : decision.decision.strategicBet}. Por ahora no conviene ${decision.decision.notPriority}.`,
     principalProblema: diagnosis.bottleneck.explanation,
     prioridades: actions.slice(0, 3).map((action) => action.title),
     frameworks: [{ id: frameworkSelection.primary, title: FRAMEWORKS[frameworkSelection.primary]?.name || frameworkSelection.primary, rationale: "Selección interna basada en la hipótesis causal, el objetivo y el recorrido comercial.", useCase: FRAMEWORKS[frameworkSelection.primary]?.description || "", dimension: primary?.journeyStage, priority: 1 }],
     actions,
     audit: {
+      decisionEvidence: {
+        status: decision.evidence.status,
+        evaluableDimensions: decision.evidence.evaluableDimensions,
+        observed: decision.evidence.observed,
+        validatedProblems: decision.evidence.validatedProblems,
+        supportedStrengths: decision.evidence.supportedStrengths,
+      },
       candidates: [...candidates.map((candidate) => ({
         findingId: candidate.problem.evidenceFor[0] || candidate.problem.id,
         problemCandidateId: candidate.problem.id,

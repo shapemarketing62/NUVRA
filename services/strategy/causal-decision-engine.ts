@@ -30,14 +30,14 @@ export interface ExperimentDesign {
 const clean = (value: string) => value.replace(/[.!?]+$/, "").trim();
 
 export function buildCausalDecision(profile: BusinessProfile, context: MarketingDecisionContext, problem?: ProblemCandidate): CausalDecision {
-  const evidenceFor = problem ? evidenceText(profile, problem.evidenceFor) : context.declaredContext.slice(0, 2);
+  const evidenceFor = problem ? evidenceText(profile, problem.evidenceFor) : [];
   const evidenceAgainst = problem ? evidenceText(profile, problem.evidenceAgainst) : [];
   const demand = context.demandPattern ? clean(context.demandPattern) : null;
   const observation = problem
     ? evidenceFor[0] || problem.hypothesis
     : demand
       ? `El negocio concentra actividad en algunos momentos y mantiene capacidad disponible en otros: ${demand}.`
-      : `El objetivo es ${context.goal.original}, pero todavía faltan mediciones comparables del recorrido hasta ${profile.primaryCustomerAction}.`;
+      : `El objetivo es ${clean(context.goal.original)}, pero todavía faltan mediciones comparables del recorrido hasta ${profile.primaryCustomerAction}.`;
   const hypothesis = problem
     ? problem.hypothesis
     : demand
@@ -56,7 +56,7 @@ export function buildCausalDecision(profile: BusinessProfile, context: Marketing
       ]
     : demand
       ? ["Ya existe demanda, aunque está concentrada.", `El negocio dispone de ${context.channels.active.join(", ") || "canales activos"}.`, "Una prueba acotada permite aprender antes de aumentar inversión."]
-      : ["No existe una causa única suficientemente comprobada.", "Medir una intervención pequeña reduce el riesgo de actuar sobre una suposición.", "La decisión respeta el presupuesto y la capacidad disponibles."];
+      : ["No existe una causa única suficientemente comprobada.", "Una medición acotada reduce el riesgo de actuar sobre una suposición.", "La decisión respeta el presupuesto y la capacidad disponibles."];
   const alternativesNotPrioritized = alternatives(context, problem);
   return {
     observation,
@@ -66,8 +66,10 @@ export function buildCausalDecision(profile: BusinessProfile, context: Marketing
     unknowns,
     counterfactual: problem
       ? `Si esta hipótesis fuera falsa, el resultado debería mantenerse aun después de corregir la señal observada.`
-      : `Si la propuesta no modifica ${context.decision.primaryKpi}, la concentración de demanda probablemente tenga otra causa y habrá que revisar horario, visibilidad o hábito.`,
-    decision: problem ? `Intervenir primero sobre ${problem.hypothesis.toLowerCase()}` : context.decision.strategicBet,
+      : demand
+        ? `Si la propuesta no modifica ${context.decision.primaryKpi}, la concentración de demanda probablemente tenga otra causa y habrá que revisar horario, visibilidad o hábito.`
+        : `Si la medición no permite localizar una pérdida consistente, no debe afirmarse que exista una fricción en un paso específico.`,
+    decision: problem ? `Intervenir primero sobre ${problem.hypothesis.toLowerCase()}` : `medir ${context.decision.primaryKpi} y el origen de las consultas antes de elegir una intervención`,
     whyThisDecision,
     alternativesNotPrioritized,
     confidenceLabel: problem?.evidenceSufficiency.status === "strong" ? "Evidencia fuerte" : problem?.validationStatus === "validated" || evidenceFor.length >= 2 ? "Evidencia parcial" : "Por validar",
@@ -102,8 +104,9 @@ function unknownsForProblem(problem: ProblemCandidate, context: MarketingDecisio
 
 function alternatives(context: MarketingDecisionContext, problem?: ProblemCandidate) {
   const values: string[] = [];
-  if (context.evidence.isPartial || !context.resources.paidTestAllowed) values.push(`No priorizar pauta paga todavía: primero hace falta validar ${context.decision.primaryKpi}.`);
-  if (context.channels.active.length) values.push("No abrir nuevos canales antes de aprovechar y medir los que ya están activos.");
+  if (context.evidence.status === "insufficient") return ["Todavía no hay evidencia suficiente para decidir si conviene invertir en pauta o sumar canales."];
+  if (context.evidence.isPartial || !context.resources.paidTestAllowed) values.push(`La conveniencia de la pauta paga queda por validar con ${context.decision.primaryKpi}.`);
+  if (context.channels.active.length) values.push("La necesidad de sumar nuevos canales queda por validar con datos comparables de los canales actuales.");
   if (problem?.journeyStage === "action") values.push("No ampliar alcance mientras el paso comercial observado siga incompleto.");
   return Array.from(new Set(values)).slice(0, 2);
 }

@@ -84,6 +84,7 @@ export interface AnalysisTrace {
     rule: string;
     explanation: string;
   };
+  decisionEvidence: NonNullable<StrategyResult["audit"]>["decisionEvidence"] | null;
   actionConsiderations: NonNullable<StrategyResult["audit"]>["candidates"];
   finalActions: Array<{ title: string; problem: string | undefined; evidenceIds: string[] | undefined; metric: string | undefined; confidence: string | undefined }>;
   conclusionContributions: {
@@ -197,6 +198,7 @@ export function buildAnalysisTrace(input: {
       rule: "señal → hipótesis → evidencia que confirma → evidencia que contradice → validación; luego impacto sobre objetivo × relevancia comercial × posibilidad de solución",
       explanation: selectedProblem ? `${selectedProblem.hypothesis} quedó validada con fuerza ${selectedProblem.evidenceStrength}, contradicción ${selectedProblem.contradictionStrength} y prioridad ${selectedProblem.priorityScore}/100.` : "No se seleccionó un problema sin una hipótesis validada.",
     },
+    decisionEvidence: input.strategy.audit?.decisionEvidence || null,
     actionConsiderations: actionCandidates,
     finalActions: (Array.isArray(input.strategy.actions) ? input.strategy.actions : []).map((action) => ({ title: action.title, problem: action.problem, evidenceIds: action.findingIds, metric: action.kpi || action.indicatorToImprove, confidence: action.confidence })),
     conclusionContributions: {

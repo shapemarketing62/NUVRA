@@ -3,6 +3,7 @@ import type { BusinessProfile } from "../intelligence/business-profile.ts";
 export type DecisionGoal = "local_visits" | "recurrence" | "average_ticket" | "orders" | "appointments" | "consultations" | "sales" | "awareness" | "growth";
 export type BudgetBand = "none" | "small" | "medium" | "large" | "unknown";
 export type CapacityBand = "low" | "medium" | "high" | "unknown";
+export type DecisionEvidenceStatus = "sufficient" | "partial" | "insufficient";
 
 export interface MarketingDecisionContext {
   business: { name: string; industry: string; model: BusinessProfile["commercialModel"]; location: string | null; operatingMode: BusinessProfile["operatingMode"] };
@@ -13,13 +14,13 @@ export interface MarketingDecisionContext {
   channels: { active: string[]; primary: string; contactMethods: string[] };
   demandPattern: string | null;
   declaredContext: string[];
-  evidence: { observed: number; declared: number; inferred: number; isPartial: boolean };
+  evidence: { observed: number; declared: number; inferred: number; isPartial: boolean; status: DecisionEvidenceStatus; evaluableDimensions: number | null; validatedProblems: number; supportedStrengths: number };
   decision: { strategicBet: string; notPriority: string; primaryKpi: string };
 }
 
 const normalize = (value: unknown) => String(value ?? "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 
-export function buildMarketingDecisionContext(profile: BusinessProfile, input: { timeframeDays?: number; timeframeLabel?: string; budget?: number | null; capacity?: string | null } = {}): MarketingDecisionContext {
+export function buildMarketingDecisionContext(profile: BusinessProfile, input: { timeframeDays?: number; timeframeLabel?: string; budget?: number | null; capacity?: string | null; evaluableDimensions?: number | null } = {}): MarketingDecisionContext {
   const goalText = profile.goal?.goalOriginalText || profile.goal?.text || "hacer crecer el negocio";
   const goalType = decisionGoal(goalText, profile);
   const budget = input.budget ?? profile.resources.monthlyBudget ?? null;
@@ -33,11 +34,25 @@ export function buildMarketingDecisionContext(profile: BusinessProfile, input: {
   const active = Array.from(new Set(activeChannels.map(friendlyChannel)));
   const primary = friendlyChannel(profile.primaryChannel || activeChannels[0] || "other");
   const demandPattern = (profile.declaredSignals || []).find((signal) => signal.type === "demand_pattern")?.evidence || null;
+  const observed = profile.commercialEvidence.filter((item) => item.kind === "ObservedEvidence" || (!item.kind && !["onboarding", "business_profile"].includes(item.source)));
+  const validatedProblems = (profile.problemCandidates || []).filter((item) => item.validationStatus === "validated").length;
+  const supportedStrengths = (profile.strengthCandidates || []).filter((item) => ["sufficient", "strong"].includes(item.evidenceSufficiency?.status || "")).length;
+  const evaluableDimensions = input.evaluableDimensions ?? null;
+  const unavailableDominates = (profile.unavailableChannels || []).length > activeChannels.length;
+  const status: DecisionEvidenceStatus = evaluableDimensions === 0 || observed.length === 0
+    ? "insufficient"
+    : evaluableDimensions !== null
+      ? (evaluableDimensions >= 2 && (validatedProblems > 0 || supportedStrengths > 0) ? "sufficient" : "partial")
+      : (observed.length >= 3 && !unavailableDominates && (validatedProblems > 0 || supportedStrengths > 0) ? "sufficient" : "partial");
   const evidence = {
-    observed: profile.commercialEvidence.filter((item) => item.kind === "ObservedEvidence").length,
+    observed: observed.length,
     declared: profile.commercialEvidence.filter((item) => item.kind === "DeclaredEvidence").length,
     inferred: profile.commercialEvidence.filter((item) => item.kind === "InferredEvidence").length,
-    isPartial: profile.commercialEvidence.filter((item) => item.kind === "ObservedEvidence").length < 3 || (profile.unavailableChannels || []).length > activeChannels.length,
+    isPartial: status !== "sufficient",
+    status,
+    evaluableDimensions,
+    validatedProblems,
+    supportedStrengths,
   };
   const outcome = outcomeFor(goalType, profile);
   return {

@@ -50,24 +50,26 @@ export async function runDiagnosticEngine(business: BusinessContext, scoreResult
 }
 
 export function buildProfileDiagnosis(business: BusinessContext, scoreResult: NuvraScoreResult, profile: BusinessProfile): DiagnosisResult {
-  const decision = buildMarketingDecisionContext(profile, { timeframeDays: business.plazoDias, timeframeLabel: business.plazoLabel });
+  const evaluatedCount = scoreResult.dimensions.filter((dimension) => dimension.points !== null).length;
+  const evaluableDimensions = scoreResult.dimensions.length > 0 ? evaluatedCount : scoreResult.total === null ? 0 : null;
+  const decision = buildMarketingDecisionContext(profile, { timeframeDays: business.plazoDias, timeframeLabel: business.plazoLabel, evaluableDimensions });
   const problems = [...profile.problemCandidates].filter((candidate) => candidate.validationStatus === "validated").sort((a, b) => b.priorityScore - a.priorityScore);
   const strengthsFound = [...profile.strengthCandidates].filter((candidate) => ["sufficient", "strong"].includes(candidate.evidenceSufficiency?.status || "limited")).sort((a, b) => b.priorityScore - a.priorityScore);
   const primary = problems[0];
   const primaryStrength = strengthsFound[0];
-  const objective = String(business.objetivo || profile.goal?.text || "hacer crecer el negocio").toLowerCase();
+  const objective = String(business.objetivo || profile.goal?.text || "hacer crecer el negocio").toLowerCase().replace(/[.!?]+$/, "");
   const demandPatternQuote = decision.demandPattern?.replace(/[.!?]+$/, "");
   const scoreContext = scoreResult.total === null
     ? `${business.nombre} fue analizado para su objetivo de ${objective}.`
     : `${business.nombre} obtiene un Nuvra Score de ${scoreResult.total}/100 para su objetivo de ${objective}.`;
-  const mainTitle = primary ? primary.hypothesis : decision.demandPattern ? "La oportunidad más concreta está en equilibrar los momentos de menor demanda" : primaryStrength ? `La base comercial más aprovechable está en ${stageLabel(primaryStrength.journeyStage).toLowerCase()}` : `La próxima decisión debe validarse alrededor de ${decision.decision.primaryKpi}`;
-  const mainExplanation = primary ? candidateExplanation(profile, primary) : decision.demandPattern ? `El negocio informó: “${demandPatternQuote}”. Como el objetivo es “${decision.goal.original}”, la decisión más defendible es trabajar ese desbalance y medirlo, sin asumir una falla en los canales que no fue comprobada.` : primaryStrength ? `${primaryStrength.statement} Conviene usar esa base para avanzar hacia ${profile.goal.text.toLowerCase()}.` : `La información disponible no demuestra una única falla. Sí permite proponer una prueba acotada para ${decision.decision.strategicBet}, medida con ${decision.decision.primaryKpi}.`;
+  const mainTitle = decision.evidence.status === "insufficient" ? "Todavía falta información para confirmar el principal freno" : primary ? primary.hypothesis : decision.demandPattern ? "La oportunidad más concreta está en equilibrar los momentos de menor demanda" : primaryStrength ? `La base comercial más aprovechable está en ${stageLabel(primaryStrength.journeyStage).toLowerCase()}` : `La próxima decisión debe validarse alrededor de ${decision.decision.primaryKpi}`;
+  const mainExplanation = decision.evidence.status === "insufficient" ? `El objetivo orienta qué conviene medir, pero no demuestra por sí solo dónde se frenan las consultas. Primero hace falta registrar ${decision.decision.primaryKpi}, su origen y el paso en que cada consulta avanza o se detiene.` : primary ? candidateExplanation(profile, primary) : decision.demandPattern ? `El negocio informó: “${demandPatternQuote}”. Como el objetivo es “${decision.goal.original}”, la decisión más defendible es trabajar ese desbalance y medirlo, sin asumir una falla en los canales que no fue comprobada.` : primaryStrength ? `${primaryStrength.statement} Conviene usar esa base para avanzar hacia ${profile.goal.text.toLowerCase()}.` : `La información disponible no demuestra una única falla. El siguiente paso es validar ${decision.decision.primaryKpi} antes de elegir una intervención.`;
   const strengths = strengthsFound.slice(0, 4).map((candidate) => ({ title: candidate.statement, evidence: evidenceText(profile, candidate.evidence) }));
   const weaknesses = problems.slice(0, 5).map((candidate) => ({ title: candidate.hypothesis, evidence: candidateExplanation(profile, candidate), findingId: candidate.evidenceFor[0] }));
   const opportunities = buildProfileOpportunities(profile, problems, strengthsFound, decision);
   const priorities = problems.slice(0, 3).map((candidate, index) => ({ title: candidate.hypothesis, reason: candidateExplanation(profile, candidate), order: index + 1 }));
   const risks = buildProfileRisks(profile, problems);
-  const summaryEvidence = primary ? `El freno más probable está en ${stageLabel(primary.journeyStage).toLowerCase()}: ${primary.hypothesis}` : decision.demandPattern ? "El contexto aportado permite elegir una oportunidad comercial concreta, aunque todavía no prueba una causa única." : primaryStrength ? `La señal más firme es: ${primaryStrength.statement}` : "La evidencia no alcanza para afirmar una causa única; el siguiente paso será una validación medible, no una recomendación genérica.";
+  const summaryEvidence = decision.evidence.status === "insufficient" ? "No obtuvimos suficiente información pública para confirmar qué parte del recorrido comercial necesita una corrección." : primary ? `El freno más probable está en ${stageLabel(primary.journeyStage).toLowerCase()}: ${primary.hypothesis}` : decision.demandPattern ? "El contexto aportado permite elegir una oportunidad comercial concreta, aunque todavía no prueba una causa única." : primaryStrength ? `La señal más firme es: ${primaryStrength.statement}` : "La evidencia no alcanza para afirmar una causa única; el siguiente paso será una validación medible, no una recomendación genérica.";
   return {
     engineType: "deterministic",
     summary: `${scoreContext} ${summaryEvidence}`,
