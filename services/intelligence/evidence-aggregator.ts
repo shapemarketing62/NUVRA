@@ -57,14 +57,20 @@ export class EvidenceAggregator {
     this.sources.set(analyzer.type, analyzer);
   }
 
-  async aggregate(business: Business, context: { signal?: AbortSignal } = {}): Promise<AggregatedEvidence> {
+  async aggregate(
+    business: Business,
+    context: { signal?: AbortSignal } = {},
+    options: { includeSources?: SourceType[]; preloaded?: Partial<Record<SourceType, SourceEvidence>> } = {}
+  ): Promise<AggregatedEvidence> {
     const businessWithGoals = business as BusinessWithGoals;
-    const evidenceMap: Record<SourceType, SourceEvidence> = {} as any;
-    const allFindings: EvidenceFinding[] = [];
+    const evidenceMap: Record<SourceType, SourceEvidence> = { ...(options.preloaded || {}) } as Record<SourceType, SourceEvidence>;
+    const allFindings: EvidenceFinding[] = Object.values(options.preloaded || {}).flatMap((evidence) => evidence?.findings || []);
 
     // Las fuentes se ejecutan de forma concurrente y aislada. Una excepción, un
     // timeout o un proveedor caído solo modifica el estado de esa fuente.
-    const entries = Array.from(this.sources.entries());
+    const selected = options.includeSources ? new Set(options.includeSources) : null;
+    const preloaded = new Set(Object.keys(options.preloaded || {}) as SourceType[]);
+    const entries = Array.from(this.sources.entries()).filter(([type]) => (!selected || selected.has(type)) && !preloaded.has(type));
     const settled = await Promise.allSettled(entries.map(async ([type, analyzer]) => {
       const relevance = analyzer.isRelevant(business);
       

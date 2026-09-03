@@ -137,6 +137,7 @@ export interface PageAnalysisData {
   formSignals: PageFormSignal[];
   brandSignals: PageBrandSignals;
   renderedMarketingSignals?: PageRenderedMarketingSignals;
+  outboundLinks?: import("../discovery/website-cross-link-extractor.ts").WebsiteCrossLink[];
 }
 
 export interface WebsiteJourneyValidation {

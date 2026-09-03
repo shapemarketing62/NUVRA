@@ -64,7 +64,8 @@ export class SocialPlatformSourceAnalyzer extends SourceAnalyzer {
 }
 
 function toTarget(business: BusinessWithGoals): SocialBusinessTarget {
-  return { businessId: business.id, name: business.nombre, industry: business.rubro, location: business.ubicacion || business.ciudad, website: business.webUrl, customerType: business.tipoCliente, objective: business.goals?.[0]?.objetivo, declaredChannels: `${business.canales || ""} ${business.otrosCanales || ""}` };
+  const discovery = business as BusinessWithGoals & Pick<SocialBusinessTarget, "validatedPlatformLinks" | "platformDiscoveryQueryCaps" | "platformDiscoveryGlobalMaxQueries">;
+  return { businessId: business.id, name: business.nombre, industry: business.rubro, location: business.ubicacion || business.ciudad, website: business.webUrl, customerType: business.tipoCliente, objective: business.goals?.[0]?.objetivo, declaredChannels: `${business.canales || ""} ${business.otrosCanales || ""}`, validatedPlatformLinks: discovery.validatedPlatformLinks, platformDiscoveryQueryCaps: discovery.platformDiscoveryQueryCaps, platformDiscoveryGlobalMaxQueries: discovery.platformDiscoveryGlobalMaxQueries };
 }
 
 function reputationFinding(source: EvidenceFinding["source"], topic: ReturnType<typeof ReputationIntelligence.analyze>["topics"][number], type: "positive" | "negative", url?: string, acquisitionMethod?: EvidenceFinding["acquisitionMethod"]): EvidenceFinding {

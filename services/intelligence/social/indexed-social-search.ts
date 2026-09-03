@@ -25,16 +25,30 @@ export class IndexedSocialSearchService {
 
   async collect(platform: SocialPlatform, target: SocialBusinessTarget, context: { signal?: AbortSignal } = {}): Promise<SocialRawCollection> {
     const startedAt = Date.now(); const key = cacheKey(platform, target);
+    const officialCrossLink = target.validatedPlatformLinks?.[platform];
+    if (officialCrossLink) {
+      return {
+        identity: { displayName: target.name, username: usernameFromUrl(officialCrossLink), description: null, location: target.location, category: target.industry, profileUrl: officialCrossLink, linkedUrls: target.website ? [target.website] : [] },
+        profile: { profileDiscovered: true, contentAnalyzed: false, ownershipSource: "validated_official_website" },
+        content: [], comments: [], mentions: [], mechanism: "public_page", accessLevel: "discovered",
+        entityResolution: { confidence: .94, validated: true }, coverage: 0,
+        sourceCoverage: { profile: true, bio: false, content: "none", comments: "none", mentions: "none", metrics: "none" },
+        limitations: ["El perfil fue validado desde el sitio oficial; no se obtuvo contenido suficiente para evaluar desempeño."],
+        acquisitionReport: { queries: [], queryCount: 0, cacheHit: false, durationMs: Date.now() - startedAt, stopReason: "validated_website_cross_link" },
+      };
+    }
     const cached = cache.get(key);
     if (cached && cached.expiresAt > Date.now()) return { ...cached.value, acquisitionReport: { ...(cached.value.acquisitionReport || { queries: [], queryCount: 0, durationMs: 0 }), cacheHit: true } };
     if (!process.env.TAVILY_API_KEY && this.provider instanceof TavilySearchProvider) return emptyRaw("unavailable", startedAt, [], "TAVILY_API_KEY no configurada para el fallback indexado.");
     const plan = SourceRelevancePlanner.forPlatform(target, platform);
-    const allowed = Math.min(this.limits.maxQueriesPerSource, plan.priority === "primary" ? 3 : plan.priority === "secondary" ? 2 : 1);
+    const plannedCap = target.platformDiscoveryQueryCaps?.[platform];
+    const allowed = Math.min(this.limits.maxQueriesPerSource, plannedCap ?? (plan.priority === "primary" ? 3 : plan.priority === "secondary" ? 2 : 1));
+    const globalLimit = Math.min(this.limits.maxGlobalQueries, target.platformDiscoveryGlobalMaxQueries ?? this.limits.maxGlobalQueries);
     const queries = buildQueries(platform, target).slice(0, allowed);
     const usedQueries: string[] = []; const results: SearchResult[] = [];
     for (const query of queries) {
       if (context.signal?.aborted) break;
-      if (this.budget.used >= this.limits.maxGlobalQueries) break;
+      if (this.budget.used >= globalLimit) break;
       const normalized = query.toLowerCase().replace(/\s+/g, " ").trim();
       if (this.budget.seenQueries.has(normalized)) continue;
       this.budget.seenQueries.add(normalized); this.budget.used += 1; usedQueries.push(query);
@@ -62,7 +76,7 @@ export class IndexedSocialSearchService {
       coverage: accessLevel === "partial" ? Math.min(45, 18 + (content.length + mentions.length) * 4 + comments.length * 3) : accessLevel === "discovered" ? 15 : 0,
       sourceCoverage: { profile: Boolean(profileResult), bio: Boolean(profileResult?.result.snippet), content: content.length ? "indexed" : "none", comments: comments.length ? "indexed" : "none", mentions: mentions.length ? "indexed" : "none", metrics: "none" },
       limitations: ["Los resultados provienen de un índice de búsqueda y no representan cobertura completa de la plataforma.", "Los comentarios completos y métricas privadas no fueron consultados."],
-      acquisitionReport: { queries: usedQueries, queryCount: usedQueries.length, cacheHit: false, durationMs: Date.now() - startedAt, stopReason: this.budget.used >= this.limits.maxGlobalQueries ? "global_query_limit" : validated.length >= this.limits.maxResultsPerSource ? "enough_results" : undefined },
+      acquisitionReport: { queries: usedQueries, queryCount: usedQueries.length, cacheHit: false, durationMs: Date.now() - startedAt, stopReason: this.budget.used >= globalLimit ? "global_query_limit" : validated.length >= this.limits.maxResultsPerSource ? "enough_results" : undefined },
     };
     cache.set(key, { expiresAt: Date.now() + freshnessTtl(platform), value: raw });
     return raw;

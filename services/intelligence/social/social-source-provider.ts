@@ -16,6 +16,11 @@ export interface SocialBusinessTarget {
   customerType?: string | null;
   objective?: string | null;
   declaredChannels?: string | null;
+  /** Profiles linked by a validated official website. */
+  validatedPlatformLinks?: Partial<Record<SocialPlatform, string>>;
+  /** Internal discovery budget selected by PlatformDiscoveryPlanner. */
+  platformDiscoveryQueryCaps?: Partial<Record<SocialPlatform, number>>;
+  platformDiscoveryGlobalMaxQueries?: number;
 }
 
 export interface SocialIdentityCandidate {

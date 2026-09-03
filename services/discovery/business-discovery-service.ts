@@ -43,12 +43,13 @@ export class BusinessDiscoveryService {
    * Descubre automáticamente fuentes públicas relevantes para un negocio.
    * Aplica agrupamiento por dominio/entidad para evitar doble conteo.
    */
-  async discover(target: BusinessEntityTarget, context: { signal?: AbortSignal } = {}): Promise<DiscoveryResult> {
+  async discover(target: BusinessEntityTarget, context: { signal?: AbortSignal; intents?: DiscoveryQueryIntent[]; queries?: Array<{ query: string; intent: DiscoveryQueryIntent }> } = {}): Promise<DiscoveryResult> {
     console.log("[BUSINESS_DISCOVERY] Starting discovery for:", target.name, target.category || "", target.location || "");
 
     const rawResults: Array<{ result: SearchResult; query: string; intent: DiscoveryQueryIntent }> = [];
     const queryAttempts: DiscoveryQueryAttempt[] = [];
-    const queries = buildDiscoveryQueries(target);
+    const allowedIntents = context.intents ? new Set(context.intents) : null;
+    const queries = (context.queries || buildDiscoveryQueries(target)).filter((query) => !allowedIntents || allowedIntents.has(query.intent));
 
     const mockBusiness: any = {
       id: "discovery-target",

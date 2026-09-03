@@ -7,6 +7,7 @@ import type { NuvraScoreResult } from "./nuvra-score-calculator.ts";
 import { STRATEGIC_PATTERNS } from "../strategy/strategic-knowledge-base.ts";
 import { buildCrossChannelMarketingIntelligence, type CrossChannelMarketingIntelligence } from "./cross-channel-marketing-intelligence.ts";
 import { marketingKnowledge } from "../knowledge/marketing-knowledge-catalog.ts";
+import type { PlatformDiscoveryReport } from "../discovery/platform-discovery-service.ts";
 
 export interface AnalysisTrace {
   version: "commercial-journey-v1";
@@ -84,6 +85,12 @@ export interface AnalysisTrace {
     usedBy: string[];
   }>;
   crossChannel: CrossChannelMarketingIntelligence;
+  platformDiscovery: {
+    entries: Array<{ platform: string; status: string; url: string | null; reason: string; action: string; relevance: string | null; queries: Array<{ query: string; status: string; resultCount: number }>; crossLinkLevel: string | null; crossLinkUrls: string[]; analyzerStatus: string | null; evidenceCount: number; coverage: number; acquisitionMethods: string[] }>;
+    hadProviderFailure: boolean;
+    durationMs: number;
+    needsSearch: boolean;
+  };
   prioritization: {
     selectedProblemId: string | null;
     rule: string;
@@ -115,6 +122,7 @@ export function buildAnalysisTrace(input: {
   diagnosis: DiagnosisResult;
   strategy: StrategyResult;
   score: NuvraScoreResult;
+  platformDiscovery?: PlatformDiscoveryReport;
 }): AnalysisTrace {
   const discarded = [
     ...(Array.isArray(input.discovery.rejectedSources) ? input.discovery.rejectedSources : []).map((candidate) => ({ item: candidate.url, reason: `Descartado por validación de entidad: ${candidate.status || "rejected"}.` })),
@@ -211,6 +219,26 @@ export function buildAnalysisTrace(input: {
       return match ? [{ ruleId, domain: match.rule.domain, platform: match.rule.platform || null, surface: match.rule.surface || null, evidenceLevel: match.rule.evidenceLevel, version: match.rule.version, sourceTitle: match.source.title, sourceUrl: match.source.url, usedBy: Array.from(usedBy) }] : [];
     }),
     crossChannel: buildCrossChannelMarketingIntelligence(input.profile, input.aggregated),
+    platformDiscovery: {
+      entries: (input.platformDiscovery?.entries || []).map((entry) => ({
+        platform: entry.platform,
+        status: entry.status,
+        url: entry.url || null,
+        reason: entry.reason,
+        action: entry.planEntry.action,
+        relevance: entry.planEntry.relevance?.priority || null,
+        queries: (entry.queryAttempts || []).map((attempt) => ({ query: attempt.query, status: attempt.status, resultCount: attempt.resultCount })),
+        crossLinkLevel: entry.crossLink?.level || null,
+        crossLinkUrls: entry.crossLink?.urls || [],
+        analyzerStatus: entry.analyzer?.sourceStatus || null,
+        evidenceCount: entry.analyzer?.evidenceCount || 0,
+        coverage: entry.analyzer?.coverage || 0,
+        acquisitionMethods: entry.analyzer?.acquisitionMethods || [],
+      })),
+      hadProviderFailure: input.platformDiscovery?.hadProviderFailure || false,
+      durationMs: input.platformDiscovery?.durationMs || 0,
+      needsSearch: (input.platformDiscovery?.entries || []).some((entry) => (entry.queryAttempts || []).length > 0),
+    },
     prioritization: {
       selectedProblemId: selectedProblem?.id || null,
       rule: "señal → hipótesis → evidencia que confirma → evidencia que contradice → validación; luego impacto sobre objetivo × relevancia comercial × posibilidad de solución",

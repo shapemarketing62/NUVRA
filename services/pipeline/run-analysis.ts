@@ -91,23 +91,26 @@ export async function runFullAnalysis(businessId: string, options: { signal?: Ab
     return { success: false, businessId, error };
   }
 
-  // 1.5 Ejecutar BusinessDiscoveryService para fuentes públicas automáticas
+  const inferredCustomerType = business.tipoCliente || inferCustomerType(business);
+  const discoveryLocation = Array.from(new Set([business.ubicacion, business.ciudad, business.pais].filter((value): value is string => Boolean(value?.trim())).map((value) => value.trim()))).join(", ");
+  const declaredWebUrl = business.noWebDeclared ? undefined : business.webUrl || business.websites[0]?.url || undefined;
+  const declaredInstagram = business.noInstagramDeclared ? undefined : business.instagramHandle || undefined;
+  // 1.5 Discover the official identity, website and local presence first.
+  //     Platform-specific searches run later, after website cross-links are known.
   currentStage = "discovery";
   const discoveryStarted = Date.now();
   const discoveryService = new BusinessDiscoveryService();
-  const inferredCustomerType = business.tipoCliente || inferCustomerType(business);
-  const discoveryLocation = Array.from(new Set([business.ubicacion, business.ciudad, business.pais].filter((value): value is string => Boolean(value?.trim())).map((value) => value.trim()))).join(", ");
   const discoveryTarget = {
     name: business.nombre,
     category: business.rubro,
     location: discoveryLocation || undefined,
     tipoCliente: inferredCustomerType,
-    declaredWebUrl: business.noWebDeclared ? undefined : business.webUrl || business.websites[0]?.url || undefined,
-    declaredInstagram: business.noInstagramDeclared ? undefined : business.instagramHandle || undefined,
+    declaredWebUrl,
+    declaredInstagram,
   };
   const discoveryExecution = await executeSource({
     source: "discovery",
-    operation: (signal) => discoveryService.discover(discoveryTarget, { signal }),
+    operation: (signal) => discoveryService.discover(discoveryTarget, { signal, intents: ["identity", "website", "local_reviews"] }),
     policy: { timeoutMs: 15_000, retries: 1, backoffMs: 300 },
     signal: options.signal,
   });
@@ -463,7 +466,15 @@ export async function runFullAnalysis(businessId: string, options: { signal?: Ab
     const historyId = randomUUID();
     let analysisTrace: ReturnType<typeof buildAnalysisTrace> | { version: "commercial-journey-v1"; createdAt: string; failedAt: "analysis_trace"; processingIssues: unknown[] };
     try {
-      analysisTrace = buildAnalysisTrace({ discovery: discoveryResult, aggregated: biResult.aggregatedEvidence, profile: biResult.businessProfile, diagnosis: diagnosisResult, strategy: strategyResult, score: biResult.nuvraScore });
+      analysisTrace = buildAnalysisTrace({
+        discovery: discoveryResult,
+        aggregated: biResult.aggregatedEvidence,
+        profile: biResult.businessProfile,
+        diagnosis: diagnosisResult,
+        strategy: strategyResult,
+        score: biResult.nuvraScore,
+        platformDiscovery: biResult.platformDiscoveryReport,
+      });
     } catch (error) {
       const issue = { stage: "analysis_trace" as const, errorType: error instanceof Error ? error.name : "AnalysisTraceError", message: safeInternalText(error instanceof Error ? error.message : error, 180) };
       biResult.businessProfile.processingIssues.push(issue);
@@ -485,6 +496,10 @@ export async function runFullAnalysis(businessId: string, options: { signal?: Ab
             discoveredInstagram: discoveryResult.primaryInstagram,
             competitorSummary: biResult.aggregatedEvidence.sources.competitor?.data || null,
             externalMentionsSummary: biResult.aggregatedEvidence.sources.external_mentions?.data || null,
+            platformDiscovery: {
+              plan: { entries: biResult.platformDiscoveryReport.plan.entries.map((entry) => ({ platform: String(entry.platform), action: entry.action, priority: entry.priority, reason: entry.reason, maxQueries: entry.maxQueries, timeoutMs: entry.timeoutMs, requiresAuth: entry.requiresAuth, observedCapable: entry.observedCapable, relevance: entry.relevance ? { priority: entry.relevance.priority, score: entry.relevance.score, relevant: entry.relevance.relevant, reasons: entry.relevance.reasons } : null })) },
+              report: { entries: biResult.platformDiscoveryReport.entries.map((entry) => ({ platform: entry.platform, status: entry.status, url: entry.url || null, reason: entry.reason, crossLinkLevel: entry.crossLink?.level || null, crossLinkUrls: entry.crossLink?.urls || [] })), hadProviderFailure: biResult.platformDiscoveryReport.hadProviderFailure, durationMs: biResult.platformDiscoveryReport.durationMs },
+            },
           },
           businessProfile: biResult.businessProfile,
           analysisInput: createAnalysisInputSnapshot(business, goal),

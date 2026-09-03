@@ -16,6 +16,11 @@ import { createDefaultSocialProviders } from "./social/social-providers.ts";
 import { enrichCrossSourceReputation } from "./social/cross-source-reputation.ts";
 import { enrichMultisourceBrandIdentity } from "./social/multisource-brand-identity.ts";
 import { buildInstagramDiscoveredAccess } from "./social/instagram-access.ts";
+import { PlatformDiscoveryService, type PlatformDiscoveryReport } from "@/services/discovery/platform-discovery-service.ts";
+import { WebsiteCrossLinkExtractor } from "@/services/discovery/website-cross-link-extractor.ts";
+import { CrossLinkCorroboration } from "@/services/discovery/cross-link-corroboration.ts";
+import { PlatformDiscoveryPlanner } from "@/services/discovery/platform-discovery-planner.ts";
+import type { BusinessDiscoveryService } from "@/services/discovery/business-discovery-service.ts";
 
 export interface BusinessIntelligenceResult {
   aggregatedEvidence: AggregatedEvidence;
@@ -25,13 +30,19 @@ export interface BusinessIntelligenceResult {
   evaluatedAt: Date;
   discoveryResult?: DiscoveryResult;
   businessProfile: BusinessProfile;
+  /** Per-platform discovery + validation report. Always present after
+   * `analyze()`. Contains PlatformStatus entries that map onto the
+   * sourceStatuses in the AnalysisHistory snapshot. */
+  platformDiscoveryReport: PlatformDiscoveryReport;
 }
 
 export class BusinessIntelligenceLayer {
   private aggregator: EvidenceAggregator;
+  private readonly platformDiscoverySearch?: Pick<BusinessDiscoveryService, "discover">;
 
-  constructor() {
+  constructor(options: { platformDiscoverySearch?: Pick<BusinessDiscoveryService, "discover"> } = {}) {
     this.aggregator = new EvidenceAggregator();
+    this.platformDiscoverySearch = options.platformDiscoverySearch;
     this.registerDefaultSources();
   }
 
@@ -59,13 +70,64 @@ export class BusinessIntelligenceLayer {
       targetBusiness.webUrl = discoveryResult.primaryWebUrl;
     }
 
-    // 1. Agregar evidencia de las fuentes registradas
-    const aggregatedEvidence = await this.aggregator.aggregate(targetBusiness, context);
+    // 1. Analyze the website first. Only a validated official website may
+    //    act as an ownership hub for social profiles. The result is then
+    //    reused by the full aggregation, so the website is never fetched twice.
+    const webPhase = await this.aggregator.aggregate(targetBusiness, context, { includeSources: ["web"] });
+    const websiteEvidence = webPhase.sources.web;
+    const pages: import("@/services/website-analyzer/types").PageAnalysisData[] =
+      (websiteEvidence?.data && typeof websiteEvidence.data === "object" && Array.isArray((websiteEvidence.data as any).pages))
+        ? ((websiteEvidence.data as any).pages as import("@/services/website-analyzer/types").PageAnalysisData[])
+        : [];
+    const officialWebsiteValidated = this.isOfficialWebsiteValidated(business, targetBusiness, discoveryResult, websiteEvidence);
+    const crossLinks = officialWebsiteValidated ? WebsiteCrossLinkExtractor.fromPageAnalyses(pages) : [];
+    const corroboratedLinks = CrossLinkCorroboration.evaluate({ links: crossLinks });
+    const platformLinks = Object.fromEntries(
+      corroboratedLinks
+        .filter((result) => result.urls.length === 1 && result.level !== "inconsistent" && result.level !== "none")
+        .map((result) => [result.platform, result.urls[0]])
+    );
+    (targetBusiness as Business & { validatedPlatformLinks?: Record<string, string> }).validatedPlatformLinks = platformLinks;
 
-    // 2. Integrar estado de fuentes descubiertas (Requisitos 2, 4 y 5)
+    const platformContext = this.platformContext(targetBusiness);
+    const discoveryPlan = PlatformDiscoveryPlanner.plan({
+      target: platformContext.target,
+      declared: platformContext.declared,
+      webCrossLinkHints: Object.fromEntries(corroboratedLinks.filter((item) => item.level !== "inconsistent" && item.level !== "none").map((item) => [item.platform, true])),
+    });
+    const selectedPlatforms = PlatformDiscoveryPlanner.selectForExecution(discoveryPlan);
+    const selectedSocial = selectedPlatforms
+      .map((entry) => String(entry.platform))
+      .filter((platform): platform is import("./source-analyzer.ts").SourceType => ["instagram", "x", "tiktok", "reddit", "facebook", "linkedin", "youtube"].includes(platform));
+    const instagramBudget = selectedPlatforms.find((entry) => entry.platform === "instagram")?.maxQueries || 0;
+    Object.assign(targetBusiness, {
+      platformDiscoveryQueryCaps: Object.fromEntries(selectedPlatforms.map((entry) => [entry.platform, entry.maxQueries])),
+      platformDiscoveryGlobalMaxQueries: Math.max(0, discoveryPlan.globalMaxQueries - instagramBudget),
+    });
+
+    // 2. Aggregate the remaining sources with the web result preloaded.
+    //    Social collectors can use validated cross-links directly and avoid
+    //    redundant indexed searches for profiles already owned by the business.
+    const aggregatedEvidence = await this.aggregator.aggregate(targetBusiness, context, {
+      preloaded: { web: websiteEvidence },
+      includeSources: ["search", "reviews", "external_mentions", "competitor", ...selectedSocial],
+    });
+
+    // 3. Build the per-platform report after website + platform analyzers ran.
+    const platformDiscoveryReport = await this.buildPlatformDiscoveryReport(targetBusiness, aggregatedEvidence, discoveryResult, context, crossLinks, officialWebsiteValidated);
+
+    // 2b. Integrate state from BusinessDiscoveryService (kept as-is to
+    //     preserve the existing scoring behavior).
     if (discoveryResult) {
       this.enrichEvidenceWithDiscovery(aggregatedEvidence, discoveryResult);
     }
+    // 2c. Apply the platform-discovery statuses on top. Important:
+    //     this layer only ADDS metadata + discovery evidence. It does
+    //     NOT downgrade existing evaluated sources, does NOT touch
+    //     the scoring math, and does NOT turn a missing platform
+    //     into a negative finding. VALIDATED but with no public
+    //     analyzer leaves the source at "discovered" (no findings).
+    this.enrichEvidenceWithPlatformDiscovery(aggregatedEvidence, platformDiscoveryReport);
     this.enrichEvidenceWithDeclaredContext(aggregatedEvidence, targetBusiness, objectiveFromBusiness(targetBusiness));
     const objective = objectiveFromBusiness(targetBusiness);
     enrichCrossSourceReputation(aggregatedEvidence, objective);
@@ -109,7 +171,122 @@ export class BusinessIntelligenceLayer {
       evaluatedAt: new Date(),
       discoveryResult,
       businessProfile,
+      platformDiscoveryReport,
     };
+  }
+
+  /**
+   * Build the per-platform discovery report. The report is the
+   * single source of truth for which platforms the analysis
+   * considered, in what status, and with what evidence. It reuses:
+   *
+   *   * WebsiteCrossLinkExtractor.fromPageAnalyses()  — the
+   *     `outboundLinks` field already populated by the page
+   *     analyzer at analyze-time (zero re-parse, zero extra network).
+   *   * PlatformDiscoveryPlanner.plan()               — the same
+   *     relevance + priority order the rest of the codebase uses.
+   *   * The existing BusinessDiscoveryService           — invoked
+   *     ONLY when the plan still has search-only or
+   *     search-and-provider entries AFTER the cross-link
+   *     corroboration is applied.
+   */
+  private async buildPlatformDiscoveryReport(
+    business: Business,
+    aggregated: AggregatedEvidence,
+    discoveryResult: DiscoveryResult | undefined,
+    context: { signal?: AbortSignal },
+    crossLinks: import("@/services/discovery/website-cross-link-extractor.ts").WebsiteCrossLink[],
+    officialWebsiteValidated: boolean
+  ): Promise<PlatformDiscoveryReport> {
+    const { declared, target: socialTarget } = this.platformContext(business);
+    // Always reuse the existing discovery if it was already done by
+    // the pipeline. We pass it as the `discoveryService` argument so
+    // PlatformDiscoveryService never re-runs Tavily / DDG.
+    const report = await PlatformDiscoveryService.run({
+      target: socialTarget,
+      websitePages: [], // not used; we pass pre-computed crossLinks below
+      crossLinks,
+      officialWebsiteValidated,
+      businessHost: business.webUrl ? safeHost(business.webUrl) : undefined,
+      declared,
+      signal: context?.signal,
+      // Reuse the already-computed discovery to avoid double Tavily /
+      // double DDG. The pipeline's own run-analysis already called
+      // BusinessDiscoveryService.discover. The platform service
+      // receives the same candidates and never re-runs the search.
+      ...(this.platformDiscoverySearch ? { discoveryService: this.platformDiscoverySearch } : {}),
+      _prebuiltDiscovery: discoveryResult,
+      sourceEvidence: aggregated.sources,
+    } as any);
+    return report;
+  }
+
+  private platformContext(business: Business) {
+    const declared: Partial<Record<string, boolean>> = {
+      website: !!business.webUrl && !business.noWebDeclared,
+      instagram: !!business.instagramHandle && !business.noInstagramDeclared,
+    };
+    const channelText = String(business.canales || "").toLowerCase();
+    for (const platform of ["tiktok", "facebook", "linkedin", "youtube"] as const) {
+      if (channelText.includes(platform)) declared[platform] = true;
+    }
+    if (/(^|\s)(x|twitter)(\s|$)/.test(channelText)) declared.x = true;
+    const goal = (business as Business & { goals?: Array<{ objetivo?: string }> }).goals?.[0]?.objetivo || null;
+    return {
+      declared,
+      target: {
+        businessId: business.id,
+        name: business.nombre,
+        industry: business.rubro || "",
+        location: [business.ubicacion, business.ciudad, business.pais].filter((value): value is string => Boolean(value?.trim())).join(", ") || null,
+        website: business.webUrl || null,
+        phone: null,
+        customerType: business.tipoCliente || null,
+        objective: goal,
+        declaredChannels: business.canales || null,
+      },
+    };
+  }
+
+  private isOfficialWebsiteValidated(
+    original: Business,
+    analyzed: Business,
+    discovery: DiscoveryResult | undefined,
+    webEvidence: import("./source-analyzer.ts").SourceEvidence | undefined
+  ): boolean {
+    if (webEvidence?.status !== "evaluated" || !analyzed.webUrl) return false;
+    if (!original.noWebDeclared && Boolean(original.webUrl)) return sameHost(original.webUrl!, analyzed.webUrl);
+    return Boolean(discovery?.confirmedSources.some((candidate) => candidate.type === "web" && sameHost(candidate.url, analyzed.webUrl!)));
+  }
+
+  /** Apply discovery status as metadata only. Presence is not performance. */
+  private enrichEvidenceWithPlatformDiscovery(
+    aggregated: AggregatedEvidence,
+    report: PlatformDiscoveryReport
+  ): void {
+    // The website entry is the HUB: when it was actually analyzed
+    // we keep its "evaluated" status. When it was not, but the
+    // business declared one, we mark it as "not_evaluated" without
+    // penalizing.
+    for (const entry of report.entries) {
+      if (entry.platform === "website") {
+        const ev = aggregated.sources.web;
+        if (ev) {
+          ev.metadata = { ...ev.metadata, platformStatus: entry.status, platformReason: entry.reason };
+        }
+        continue;
+      }
+      const sourceKey = entry.platform === "google_business_profile" ? "reviews" : entry.platform;
+      const ev = (aggregated.sources as any)[sourceKey];
+      if (!ev) continue;
+      ev.metadata = {
+        ...ev.metadata,
+        platformStatus: entry.status,
+        platformReason: entry.reason,
+        platformCrossLinkLevel: entry.crossLink?.level || null,
+        platformDiscoveredUrl: entry.url || null,
+      };
+    }
   }
 
   private enrichEvidenceWithDeclaredContext(aggregated: AggregatedEvidence, business: Business, objective?: string): void {
@@ -353,4 +530,12 @@ export class BusinessIntelligenceLayer {
 
 function objectiveFromBusiness(business: Business): string | undefined {
   return (business as Business & { goals?: Array<{ objetivo?: string }> }).goals?.[0]?.objetivo;
+}
+
+function safeHost(url: string): string | undefined {
+  try { return new URL(url).hostname.toLowerCase().replace(/^www\./, ""); } catch { return undefined; }
+}
+
+function sameHost(a: string, b: string): boolean {
+  return Boolean(safeHost(a) && safeHost(a) === safeHost(b));
 }

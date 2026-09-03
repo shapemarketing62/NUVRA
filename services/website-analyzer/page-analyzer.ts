@@ -1,5 +1,7 @@
 import * as cheerio from "cheerio";
 import type { PageActionSignal, PageAnalysisData, PageFormSignal, PageRenderedMarketingSignals, RawFinding, WebsiteJourneyIntent } from "./types";
+import type { WebsiteCrossLink } from "../discovery/website-cross-link-extractor.ts";
+import { classifyCrossLinkHostname, isOwnershipCandidateUrl } from "../discovery/website-cross-link-extractor.ts";
 
 const CTA_PATTERNS = [
   /compr/i, /contact/i, /consult/i, /reserv/i, /whatsapp/i, /pedi/i, /orden/i,
@@ -140,6 +142,7 @@ export function analyzePageHtml(url: string, html: string, loadTimeMs?: number, 
     formSignals,
     brandSignals,
     renderedMarketingSignals,
+    outboundLinks: extractOutboundSocialLinks($, url),
   };
 }
 
@@ -272,4 +275,41 @@ export function discoverInternalLinks(baseUrl: string, html: string, maxLinks = 
   });
 
   return prioritized.slice(0, maxLinks);
+}
+
+/**
+ * Extract OUTBOUND social-profile links from a page. This is the
+ * single source of truth for what counts as a "cross-link" between
+ * the business's own website and an external social platform. The
+ * helper is deliberately narrow: it walks <a href> elements, drops
+ * same-origin links, and asks the cross-link module to classify
+ * what is left. A single page is the unit of analysis; the
+ * CrossLinkCorroboration module is responsible for collapsing
+ * multiple pages into a single ownership signal.
+ */
+export function extractOutboundSocialLinks($: cheerio.CheerioAPI, pageUrl: string): WebsiteCrossLink[] {
+  const baseHost = (() => {
+    try { return new URL(pageUrl).hostname.toLowerCase().replace(/^www\./, ""); } catch { return ""; }
+  })();
+  const seen = new Set<string>();
+  const results: WebsiteCrossLink[] = [];
+  $("a[href]").each((_, el) => {
+    const node = $(el);
+    const href = (node.attr("href") || "").trim();
+    if (!href || href.startsWith("#") || href.startsWith("mailto:") || href.startsWith("tel:") || href.startsWith("javascript:")) return;
+    let abs: URL;
+    try { abs = new URL(href, pageUrl); } catch { return; }
+    const host = abs.hostname.toLowerCase().replace(/^www\./, "");
+    if (!host || host === baseHost) return;
+    abs.hash = "";
+    const platform = classifyCrossLinkHostname(host, abs.toString());
+    if (platform === "other") return;
+    if (!isOwnershipCandidateUrl(platform, abs.toString())) return;
+    const key = `${platform}|${abs.toString()}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    const anchorText = (node.text() || "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim().slice(0, 200);
+    results.push({ platform, url: abs.toString(), sourcePage: pageUrl, anchorText, hostname: host });
+  });
+  return results;
 }
