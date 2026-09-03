@@ -38,6 +38,8 @@ export interface BusinessEntityTarget {
   tipoCliente?: string;
   declaredWebUrl?: string;
   declaredInstagram?: string;
+  phone?: string;
+  address?: string;
 }
 
 const THIRD_PARTY_AGGREGATORS = [
@@ -55,6 +57,10 @@ const THIRD_PARTY_AGGREGATORS = [
   "play.google.com",
   "medium.com",
   "reddit.com",
+  "linktr.ee",
+  "beacons.ai",
+  "bio.site",
+  "wa.me",
 ];
 
 export class EntityMatcher {
@@ -79,12 +85,13 @@ export class EntityMatcher {
 
     let score = 0;
     const reasons: string[] = [];
+    const signals: Record<string, number | boolean | string> = {};
 
     // Detectar relación de entidad (Distinguir Marca de Entidad Comercial)
     const entityRelationship = this.detectRelationship(candidate, target, domain, normTitle);
 
     // 1. Coincidencia de Nombre / Marca (máx 0.35)
-    const brandTokens = normTargetName.split(/\s+/).filter((t) => t.length > 2);
+    const brandTokens = this.identityTokens(normTargetName);
     const matchesBrandInTitle = brandTokens.every(
       (token) => normTitle.includes(token) || domain.includes(token)
     );
@@ -92,9 +99,11 @@ export class EntityMatcher {
 
     if (matchesBrandInTitle) {
       score += 0.35;
+      signals.name = 0.35;
       reasons.push("Nombre de marca presente en título/dominio");
     } else if (matchesBrandInSnippet) {
       score += 0.20;
+      signals.name = 0.2;
       reasons.push("Nombre de marca presente en descripción");
     } else {
       reasons.push("Mención débil o parcial de marca");
@@ -108,23 +117,29 @@ export class EntityMatcher {
 
     if (isDeclaredWeb) {
       score += 0.30;
+      signals.declaredDomain = 0.3;
       reasons.push("Coincide con el sitio web declarado por el negocio");
     } else if (candidate.type === "web") {
       const isThirdParty = THIRD_PARTY_AGGREGATORS.some((agg) => domain.includes(agg));
       if (isThirdParty) {
         score -= 0.35;
+        signals.thirdParty = -0.35;
         reasons.push(`Dominio de terceros o agregador de contenido (${domain}) - no es sitio oficial`);
       } else if (entityRelationship === "local_operation") {
         score += 0.30;
+        signals.domain = 0.3;
         reasons.push(`Sitio web oficial de la operación local (${domain})`);
       } else if (entityRelationship === "brand_global") {
         score += 0.20;
+        signals.domain = 0.2;
         reasons.push(`Sitio web oficial global de la marca (${domain})`);
       } else if (entityRelationship === "licensed_business" || entityRelationship === "sub_brand") {
         score += 0.05;
+        signals.domain = 0.05;
         reasons.push(`Línea de producto o licenciatario de marca (${domain}) - no es la operación comercial directa`);
       } else if (brandTokens.some((t) => domain.includes(t))) {
         score += 0.15;
+        signals.domain = 0.15;
         reasons.push(`El dominio (${domain}) contiene la marca`);
       } else {
         score += 0.05;
@@ -132,18 +147,22 @@ export class EntityMatcher {
     } else if (candidate.type === "instagram") {
       const handleMatch = this.evaluateSocialHandle(candidate.url, normTargetName);
       score += handleMatch.score;
+      signals.socialHandle = handleMatch.score;
       reasons.push(handleMatch.reason);
     } else if (candidate.type === "google_maps") {
       if (domain.includes("support.google.com") || urlLower.includes("support.google")) {
         score -= 0.35;
+        signals.invalidMaps = -0.35;
         reasons.push("Página de soporte de Google Help, no es una ficha de negocio de Google Maps");
       } else if (domain.includes("google.") && (urlLower.includes("/maps") || urlLower.includes("g.page"))) {
         score += 0.25;
+        signals.mapsUrl = 0.25;
         reasons.push("URL oficial de Google Maps / Google Business");
       }
     } else if (["facebook", "linkedin", "x"].includes(candidate.type)) {
       if (brandTokens.some((t) => urlLower.includes(t))) {
         score += 0.20;
+        signals.socialHandle = 0.2;
         reasons.push(`Perfil en ${candidate.type} alineado con la marca`);
       }
     }
@@ -152,14 +171,15 @@ export class EntityMatcher {
     if (target.location) {
       const locTokens = this.normalizeText(target.location)
         .split(/[\s,]+/)
-        .filter((t) => (t.length > 3 && !["buenos", "aires"].includes(t)) || t === "argentina");
+        .filter((t) => t.length > 3 && !["buenos", "aires", "argentina"].includes(t));
 
       const hasLocationMatch = locTokens.some(
-        (loc) => normTitle.includes(loc) || normSnippet.includes(loc) || urlLower.includes(loc) || domain.endsWith(".ar")
+        (loc) => normTitle.includes(loc) || normSnippet.includes(loc) || urlLower.includes(loc)
       );
 
       if (hasLocationMatch) {
         score += 0.20;
+        signals.location = 0.2;
         reasons.push(`Coincidencia geográfica con '${target.location}'`);
       } else {
         const contradictoryLocation = this.detectContradictoryLocation(
@@ -167,7 +187,8 @@ export class EntityMatcher {
           target.location
         );
         if (contradictoryLocation) {
-          score -= 0.25;
+          score -= 0.45;
+          signals.locationConflict = -0.45;
           reasons.push(`Conflicto de ubicación (menciona '${contradictoryLocation}')`);
         }
       }
@@ -184,8 +205,34 @@ export class EntityMatcher {
 
       if (hasCategoryMatch) {
         score += 0.15;
+        signals.category = 0.15;
         reasons.push(`Coincidencia con el rubro '${target.category}'`);
       }
+    }
+
+    const contactMatch = this.contactMatch(candidate, target);
+    score += contactMatch.score;
+    if (contactMatch.score > 0) {
+      signals.contact = contactMatch.score;
+      reasons.push(contactMatch.reason);
+    }
+
+    const metadataConflict = this.metadataConflict(candidate, target);
+    if (metadataConflict) {
+      score -= 0.45;
+      signals.structuredConflict = -0.45;
+      reasons.push(metadataConflict);
+    }
+
+    const corroboratingSources = Array.isArray(candidate.metadata?.corroboratingSources)
+      ? candidate.metadata.corroboratingSources.filter((value): value is string => typeof value === "string")
+      : [];
+    const directCorroborationCount = Number(candidate.metadata?.directCorroborationCount || 0);
+    if (corroboratingSources.length > 0) {
+      const corroborationWeight = Math.min(0.12, directCorroborationCount * 0.08 + Math.max(0, corroboratingSources.length - directCorroborationCount) * 0.03);
+      score += corroborationWeight;
+      signals.corroboration = corroborationWeight;
+      reasons.push(`Corroborado por ${corroboratingSources.length} fuente(s) independiente(s)`);
     }
 
     // Normalizar score final entre 0 y 1
@@ -215,12 +262,29 @@ export class EntityMatcher {
       status = status === "confirmed" ? "uncertain" : "rejected";
     }
 
+    const domainSupportsBrand = brandTokens.some((token) => domain.includes(token));
+    if (candidate.type === "web" && !isDeclaredWeb && !domainSupportsBrand && directCorroborationCount === 0) {
+      status = matchScore >= 0.35 ? "uncertain" : "rejected";
+      reasons.push("No hay dominio de marca ni enlace cruzado suficiente para tratarlo como sitio oficial");
+    }
+
+    const isSocial = ["instagram", "facebook", "linkedin", "x"].includes(candidate.type);
+    if (isSocial && Number(signals.socialHandle || 0) < 0.15 && directCorroborationCount === 0) {
+      status = matchScore >= 0.35 ? "uncertain" : "rejected";
+      reasons.push("El perfil social no tiene handle coincidente ni corroboración directa");
+    }
+
+    if (metadataConflict || Number(signals.locationConflict || 0) < 0) {
+      status = "rejected";
+    }
+
     return {
       ...candidate,
       matchScore,
       status,
       entityRelationship,
       rationale: `${status.toUpperCase()} (${Math.round(matchScore * 100)}% - ${entityRelationship}): ${reasons.join("; ")}`,
+      metadata: { ...candidate.metadata, matchingSignals: signals, corroboratingSources },
     };
   }
 
@@ -232,7 +296,7 @@ export class EntityMatcher {
   ): EntityRelationship {
     // Si el dominio pertenece a la marca oficial local, forzar tipo web y local_operation
     const normTarget = this.normalizeText(target.name);
-    const brandToken = normTarget.split(/\s+/)[0];
+    const brandToken = this.identityTokens(normTarget)[0];
 
     if (brandToken && domain.includes(brandToken)) {
       if (THIRD_PARTY_AGGREGATORS.some((agg) => domain.includes(agg))) {
@@ -326,6 +390,17 @@ export class EntityMatcher {
       "santiago",
       "bogota",
       "lima",
+      "cordoba",
+      "rosario",
+      "mendoza",
+      "la plata",
+      "mar del plata",
+      "palermo",
+      "belgrano",
+      "caballito",
+      "recoleta",
+      "villa crespo",
+      "san isidro",
     ];
 
     for (const loc of locations) {
@@ -333,6 +408,57 @@ export class EntityMatcher {
         return loc;
       }
     }
+    return null;
+  }
+
+  private static contactMatch(candidate: CandidateSource, target: BusinessEntityTarget): { score: number; reason: string } {
+    const text = `${candidate.title} ${candidate.snippet} ${JSON.stringify(candidate.metadata || {})}`;
+    const targetPhone = String(target.phone || "").replace(/\D/g, "");
+    if (targetPhone.length >= 7) {
+      const candidateDigits = text.replace(/\D/g, "");
+      const comparable = targetPhone.slice(-8);
+      if (candidateDigits.includes(comparable)) return { score: 0.22, reason: "Coincide el teléfono público" };
+    }
+    const targetAddress = this.normalizeText(target.address || "");
+    if (targetAddress.length >= 8 && this.normalizeText(text).includes(targetAddress)) {
+      return { score: 0.15, reason: "Coincide la dirección pública" };
+    }
+    return { score: 0, reason: "" };
+  }
+
+  private static metadataConflict(candidate: CandidateSource, target: BusinessEntityTarget): string | null {
+    const candidateLocation = this.normalizeText(String(candidate.metadata?.location || ""));
+    const targetLocation = this.normalizeText(target.location || "");
+    if (candidateLocation && targetLocation) {
+      const targetSpecific = targetLocation.split(" ").filter((token) => token.length > 3 && !["buenos", "aires", "argentina"].includes(token));
+      const candidateSpecific = candidateLocation.split(" ").filter((token) => token.length > 3 && !["buenos", "aires", "argentina"].includes(token));
+      if (targetSpecific.length && candidateSpecific.length && !targetSpecific.some((token) => candidateSpecific.includes(token))) {
+        return `La ubicación estructurada del candidato (${candidate.metadata?.location}) contradice la del negocio`;
+      }
+    }
+
+    const candidateCategory = this.normalizeText(String(candidate.metadata?.category || ""));
+    const targetCategory = this.normalizeText(target.category || "");
+    if (candidateCategory && targetCategory) {
+      const targetTokens = targetCategory.split(" ").filter((token) => token.length > 4);
+      const candidateTokens = candidateCategory.split(" ").filter((token) => token.length > 4);
+      const targetFamily = this.categoryFamily(targetCategory);
+      const candidateFamily = this.categoryFamily(candidateCategory);
+      if (targetTokens.length && candidateTokens.length && targetFamily && candidateFamily && targetFamily !== candidateFamily && !targetTokens.some((token) => candidateTokens.includes(token))) {
+        return `El rubro estructurado del candidato (${candidate.metadata?.category}) contradice el rubro declarado`;
+      }
+    }
+    return null;
+  }
+
+  private static categoryFamily(category: string): string | null {
+    if (/estetic|salud|clinic|odont|dental|medic|dermat|belleza/.test(category)) return "health_beauty";
+    if (/abog|jurid|legal|escriban/.test(category)) return "legal";
+    if (/caf|restaurant|gastronom|comida|bar|pasteler/.test(category)) return "food";
+    if (/gimnas|fitness|entren|deport/.test(category)) return "fitness";
+    if (/inmobil|propiedad|real estate/.test(category)) return "real_estate";
+    if (/contab|consult|estudio profesional|servicio b2b/.test(category)) return "professional";
+    if (/tienda|retail|comercio|venta|ecommerce/.test(category)) return "commerce";
     return null;
   }
 
@@ -344,6 +470,13 @@ export class EntityMatcher {
     } catch {
       return false;
     }
+  }
+
+  private static identityTokens(normalizedName: string): string[] {
+    const tokens = normalizedName.split(/\s+/).filter((token) => token.length > 2);
+    const generic = new Set(["cafe", "tienda", "store", "centro", "clinica", "estudio", "servicios", "grupo", "company", "local", "casa", "home"]);
+    const distinctive = tokens.filter((token) => !generic.has(token));
+    return distinctive.length ? distinctive : tokens;
   }
 
   private static normalizeText(text: string): string {

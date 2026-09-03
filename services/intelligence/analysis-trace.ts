@@ -12,6 +12,11 @@ export interface AnalysisTrace {
   version: "commercial-journey-v1";
   createdAt: string;
   searched: Array<{ source: string; purpose: string; status: string }>;
+  discovery: {
+    status: string;
+    queries: Array<{ query: string; intent: string; status: string; resultCount: number }>;
+    candidates: Array<{ url: string; type: string; status: string; matchScore: number; signals: unknown; reason: string; corroboratingSources: string[] }>;
+  };
   found: Array<{ evidenceId: string; kind: string; source: string; stage: string; text: string; confidence: string }>;
   evidenceQuality: Array<{
     evidenceId: string;
@@ -127,6 +132,19 @@ export function buildAnalysisTrace(input: {
     version: "commercial-journey-v1",
     createdAt: new Date().toISOString(),
     searched: Object.entries(input.aggregated.sources).map(([source, evidence]) => ({ source, purpose: `Obtener evidencia comercial para ${input.profile.primaryCustomerAction}.`, status: evidence.status })),
+    discovery: {
+      status: input.discovery.status || "legacy_unknown",
+      queries: (input.discovery.queryAttempts || []).map((attempt) => ({ query: attempt.query, intent: attempt.intent, status: attempt.status, resultCount: attempt.resultCount })),
+      candidates: (input.discovery.allCandidates || []).map((candidate) => ({
+        url: candidate.url,
+        type: candidate.type,
+        status: candidate.status || "unknown",
+        matchScore: candidate.matchScore || 0,
+        signals: candidate.metadata?.matchingSignals || null,
+        reason: candidate.rationale || "Sin evaluación de entidad",
+        corroboratingSources: Array.isArray(candidate.metadata?.corroboratingSources) ? candidate.metadata.corroboratingSources.filter((value): value is string => typeof value === "string") : [],
+      })),
+    },
     found: (Array.isArray(input.profile.commercialEvidence) ? input.profile.commercialEvidence : []).map((evidence) => ({ evidenceId: evidence.id, kind: evidence.kind, source: evidence.source, stage: evidence.journeyStage, text: evidence.text, confidence: evidence.confidence })),
     evidenceQuality: (Array.isArray(input.profile.commercialEvidence) ? input.profile.commercialEvidence : []).map((evidence) => ({
       evidenceId: evidence.id,

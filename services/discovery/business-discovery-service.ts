@@ -1,12 +1,21 @@
-import { SmartSearchProvider } from "@/services/intelligence/search-source-analyzer";
-import { SearchResult } from "@/services/intelligence/providers/search-provider";
+import { SearchProviderUnavailableError, SmartSearchProvider } from "../intelligence/search-source-analyzer.ts";
+import type { SearchProvider, SearchResult } from "../intelligence/providers/search-provider.ts";
 import {
   EntityMatcher,
-  CandidateSource,
-  BusinessEntityTarget,
-  DiscoveredSourceType,
-} from "./entity-matcher";
-import { selectPrimaryInstagram } from "./source-selection";
+} from "./entity-matcher.ts";
+import type { CandidateSource, BusinessEntityTarget, DiscoveredSourceType } from "./entity-matcher.ts";
+import { selectPrimaryInstagram } from "./source-selection.ts";
+import { buildDiscoveryQueries, type DiscoveryQueryIntent } from "./discovery-query-builder.ts";
+
+export type DiscoveryStatus = "completed" | "partial" | "no_results" | "provider_unavailable" | "not_attempted";
+
+export interface DiscoveryQueryAttempt {
+  query: string;
+  intent: DiscoveryQueryIntent;
+  status: "completed" | "no_results" | "provider_unavailable";
+  resultCount: number;
+  errorType?: string;
+}
 
 export interface DiscoveryResult {
   target: BusinessEntityTarget;
@@ -18,14 +27,16 @@ export interface DiscoveryResult {
   probableSources: CandidateSource[];
   uncertainSources: CandidateSource[];
   rejectedSources: CandidateSource[];
+  status?: DiscoveryStatus;
+  queryAttempts?: DiscoveryQueryAttempt[];
   discoveredAt: Date;
 }
 
 export class BusinessDiscoveryService {
-  private searchProvider: SmartSearchProvider;
+  private searchProvider: SearchProvider;
 
-  constructor() {
-    this.searchProvider = new SmartSearchProvider();
+  constructor(searchProvider: SearchProvider = new SmartSearchProvider()) {
+    this.searchProvider = searchProvider;
   }
 
   /**
@@ -35,17 +46,9 @@ export class BusinessDiscoveryService {
   async discover(target: BusinessEntityTarget, context: { signal?: AbortSignal } = {}): Promise<DiscoveryResult> {
     console.log("[BUSINESS_DISCOVERY] Starting discovery for:", target.name, target.category || "", target.location || "");
 
-    const rawResults: Array<{ result: SearchResult; queryCategory: string }> = [];
-
-    const loc = target.location ? target.location : "";
-    const cat = target.category ? target.category : "";
-
-    const queries = [
-      { q: `${target.name} ${cat} ${loc} sitio oficial`.trim(), cat: "web" },
-      { q: `${target.name} ${loc} instagram facebook linkedin twitter x`.trim(), cat: "social" },
-      { q: `${target.name} ${loc} reseñas opiniones google maps`.trim(), cat: "reviews" },
-      { q: `competidores de ${target.name} ${cat} ${loc}`.trim(), cat: "competitors" },
-    ];
+    const rawResults: Array<{ result: SearchResult; query: string; intent: DiscoveryQueryIntent }> = [];
+    const queryAttempts: DiscoveryQueryAttempt[] = [];
+    const queries = buildDiscoveryQueries(target);
 
     const mockBusiness: any = {
       id: "discovery-target",
@@ -54,29 +57,30 @@ export class BusinessDiscoveryService {
       ubicacion: target.location || "",
     };
 
-    for (const item of queries) {
+    await runWithConcurrency(queries, 3, async (item) => {
       if (context.signal?.aborted) throw Object.assign(new Error("discovery_canceled"), { name: "AbortError" });
       try {
-        const results = await this.searchProvider.search(item.q, mockBusiness, { signal: context.signal });
-        for (const r of results) {
-          rawResults.push({ result: r, queryCategory: item.cat });
-        }
-      } catch (err) {
-        if (context.signal?.aborted) throw err;
-        console.warn(`[BUSINESS_DISCOVERY] Search query failed for "${item.q}":`, err instanceof Error ? err.message : String(err));
+        const results = await this.searchProvider.search(item.query, mockBusiness, { signal: context.signal });
+        queryAttempts.push({ query: item.query, intent: item.intent, status: results.length ? "completed" : "no_results", resultCount: results.length });
+        for (const result of results) rawResults.push({ result, query: item.query, intent: item.intent });
+      } catch (error) {
+        if (context.signal?.aborted) throw error;
+        queryAttempts.push({ query: item.query, intent: item.intent, status: "provider_unavailable", resultCount: 0, errorType: error instanceof SearchProviderUnavailableError ? error.name : error instanceof Error ? error.name : "ProviderError" });
+        console.warn(`[BUSINESS_DISCOVERY] Search query unavailable for "${item.query}":`, error instanceof Error ? error.name : "ProviderError");
       }
-    }
+    });
 
     // 2. Clasificar candidatos brutos
     const rawCandidates: CandidateSource[] = [];
-    for (const { result, queryCategory } of rawResults) {
+    for (const { result, query, intent } of rawResults) {
       if (!result.url) continue;
-      const type = this.classifyResultType(result.url, result.title, result.snippet, queryCategory);
+      const type = this.classifyResultType(result.url, result.title, result.snippet, intent);
       rawCandidates.push({
         title: result.title,
         url: result.url,
         snippet: result.snippet,
         type,
+        metadata: { ...result.metadata, queries: [query], queryIntents: [intent] },
       });
     }
 
@@ -84,11 +88,9 @@ export class BusinessDiscoveryService {
     const groupedCandidates = this.groupCandidatesByDomainOrProfile(rawCandidates);
 
     // 4. Evaluar cada candidato agrupado con EntityMatcher
-    const evaluatedCandidates: CandidateSource[] = [];
-    for (const candidate of groupedCandidates) {
-      const evaluated = EntityMatcher.evaluateCandidate(candidate, target);
-      evaluatedCandidates.push(evaluated);
-    }
+    const initiallyEvaluated = groupedCandidates.map((candidate) => EntityMatcher.evaluateCandidate(candidate, target));
+    const corroboratedCandidates = this.addCrossSourceCorroboration(initiallyEvaluated);
+    const evaluatedCandidates = corroboratedCandidates.map((candidate) => EntityMatcher.evaluateCandidate(candidate, target));
 
     // Ordenar por matchScore descendente
     evaluatedCandidates.sort((a, b) => (b.matchScore || 0) - (a.matchScore || 0));
@@ -109,6 +111,7 @@ export class BusinessDiscoveryService {
       validSources.find((c) => c.type === "instagram")?.url,
     );
     const bestMaps = validSources.find((c) => c.type === "google_maps")?.url || null;
+    const status = discoveryStatus(queryAttempts, evaluatedCandidates.length);
 
     console.log("[BUSINESS_DISCOVERY] Discovery completed:", {
       totalGroupedCandidates: evaluatedCandidates.length,
@@ -119,6 +122,7 @@ export class BusinessDiscoveryService {
       bestWeb,
       bestInstagram,
       bestMaps,
+      status,
     });
 
     return {
@@ -131,6 +135,8 @@ export class BusinessDiscoveryService {
       probableSources,
       uncertainSources,
       rejectedSources,
+      status,
+      queryAttempts: queryAttempts.sort((a, b) => queries.findIndex((item) => item.query === a.query) - queries.findIndex((item) => item.query === b.query)),
       discoveredAt: new Date(),
     };
   }
@@ -188,10 +194,11 @@ export class BusinessDiscoveryService {
         entityGroups.set(key, { primary: c, subResources: [] });
       } else {
         const group = entityGroups.get(key)!;
+        group.primary.metadata = mergeCandidateMetadata(group.primary.metadata, c.metadata);
         // Mantener la URL con menor longitud o mejor título como principal
         if (c.url.length < group.primary.url.length || (group.primary.url.includes("/local/") && !c.url.includes("/local/"))) {
           group.subResources.push(group.primary.url);
-          group.primary = c;
+          group.primary = { ...c, metadata: mergeCandidateMetadata(c.metadata, group.primary.metadata) };
         } else {
           group.subResources.push(c.url);
         }
@@ -241,6 +248,9 @@ export class BusinessDiscoveryService {
       if (candidate.type === "google_maps") {
         return `google_maps:${host}${path.slice(0, 20)}`;
       }
+      if (candidate.type === "mentions" || candidate.type === "competitors") {
+        return `${candidate.type}:${host}${path.slice(0, 120)}`;
+      }
 
       // Para páginas web generales, agrupar por el hostname/dominio principal
       return `web:${host}`;
@@ -253,7 +263,7 @@ export class BusinessDiscoveryService {
     url: string,
     title: string,
     snippet: string,
-    queryCategory: string
+    queryIntent: DiscoveryQueryIntent
   ): DiscoveredSourceType {
     const u = url.toLowerCase();
     const t = title.toLowerCase();
@@ -264,14 +274,88 @@ export class BusinessDiscoveryService {
     if (u.includes("twitter.com") || u.includes("x.com")) return "x";
     if (u.includes("google.com/maps") || u.includes("maps.google.com") || u.includes("g.page")) return "google_maps";
 
-    if (queryCategory === "competitors" || /competidor|alternativa|vs|ranking/i.test(t)) {
+    if (/competidor|alternativa|\bvs\b|ranking/i.test(t)) {
       return "competitors";
     }
 
-    if (/noticia|diario|prensa|nota|blog|articulo|entrevista/i.test(t + " " + snippet)) {
+    if (isExternalDomain(u) || /noticia|diario|prensa|nota|blog|articulo|entrevista|directorio|gu[ií]a/i.test(t + " " + snippet)) {
       return "mentions";
     }
 
+    if (queryIntent === "local_reviews" && /maps|mapa/i.test(`${t} ${snippet}`)) return "google_maps";
+
     return "web";
   }
+
+  private addCrossSourceCorroboration(candidates: CandidateSource[]): CandidateSource[] {
+    return candidates.map((candidate) => {
+      const directReferences = candidates.filter((other) => other.url !== candidate.url && (candidate.matchScore || 0) >= 0.35 && (other.matchScore || 0) >= 0.35 && (referencesCandidate(candidate, other) || referencesCandidate(other, candidate)));
+      const contextualMatches = candidates.filter((other) => other.url !== candidate.url && other.type !== candidate.type && (other.matchScore || 0) >= 0.55 && (candidate.matchScore || 0) >= 0.35 && hasContextSignal(candidate) && hasContextSignal(other));
+      const corroboratingSources = Array.from(new Set([...directReferences, ...contextualMatches].map((item) => item.url)));
+      return {
+        ...candidate,
+        metadata: {
+          ...candidate.metadata,
+          corroboratingSources,
+          directCorroborationCount: directReferences.length,
+        },
+      };
+    });
+  }
+}
+
+function discoveryStatus(attempts: DiscoveryQueryAttempt[], candidateCount: number): DiscoveryStatus {
+  if (!attempts.length) return "not_attempted";
+  const unavailable = attempts.filter((attempt) => attempt.status === "provider_unavailable").length;
+  if (unavailable === attempts.length) return "provider_unavailable";
+  if (unavailable > 0) return "partial";
+  return candidateCount > 0 ? "completed" : "no_results";
+}
+
+async function runWithConcurrency<T>(items: T[], concurrency: number, operation: (item: T) => Promise<void>): Promise<void> {
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (cursor < items.length) {
+      const index = cursor++;
+      await operation(items[index]);
+    }
+  });
+  await Promise.all(workers);
+}
+
+function referencesCandidate(source: CandidateSource, target: CandidateSource): boolean {
+  const text = `${source.title} ${source.snippet} ${JSON.stringify(source.metadata?.subResources || [])}`.toLowerCase();
+  try {
+    const parsed = new URL(target.url);
+    const host = parsed.hostname.toLowerCase().replace(/^www\./, "");
+    const handle = parsed.pathname.split("/").filter(Boolean)[0]?.toLowerCase();
+    return text.includes(host) || Boolean(handle && handle.length >= 4 && text.includes(`@${handle}`));
+  } catch {
+    return false;
+  }
+}
+
+function hasContextSignal(candidate: CandidateSource): boolean {
+  const signals = candidate.metadata?.matchingSignals;
+  if (!signals || typeof signals !== "object") return false;
+  const values = signals as Record<string, unknown>;
+  return Number(values.location || 0) > 0 || Number(values.category || 0) > 0 || Number(values.contact || 0) > 0;
+}
+
+function isExternalDomain(url: string): boolean {
+  try {
+    const host = new URL(url).hostname.toLowerCase().replace(/^www\./, "");
+    return ["tripadvisor.", "yelp.", "foursquare.", "paginasamarillas.", "reddit.", "medium.", "mercadolibre.", "rappi.", "pedidosya.", "linktr.ee", "beacons.ai", "bio.site", "wa.me"].some((domain) => host.includes(domain))
+      || /(^|\.)(guia|directorio)[a-z0-9-]*\./.test(host);
+  } catch {
+    return false;
+  }
+}
+
+function mergeCandidateMetadata(a?: Record<string, unknown>, b?: Record<string, unknown>): Record<string, unknown> {
+  const mergeStrings = (key: string) => Array.from(new Set([
+    ...(Array.isArray(a?.[key]) ? a?.[key] as unknown[] : []),
+    ...(Array.isArray(b?.[key]) ? b?.[key] as unknown[] : []),
+  ].filter((value): value is string => typeof value === "string")));
+  return { ...a, ...b, queries: mergeStrings("queries"), queryIntents: mergeStrings("queryIntents") };
 }

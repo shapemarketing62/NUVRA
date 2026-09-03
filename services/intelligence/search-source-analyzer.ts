@@ -17,13 +17,17 @@ export class SmartSearchProvider implements SearchProvider {
 
   async search(query: string, business: Business, options: { signal?: AbortSignal } = {}): Promise<SearchResult[]> {
     const hasTavilyKey = !!process.env.TAVILY_API_KEY;
+    const attempts: SearchProviderAttempt[] = [];
 
     if (hasTavilyKey) {
       try {
         console.log("[SmartSearchProvider] Intentando búsqueda con Tavily...");
-        return await this.tavily.search(query, business, options);
+        const results = await this.tavily.search(query, business, options);
+        attempts.push({ provider: "tavily", status: results.length ? "completed" : "no_results" });
+        return results;
       } catch (error) {
-        console.error("[SmartSearchProvider] Tavily falló, intentando fallback DuckDuckGo...", error);
+        attempts.push({ provider: "tavily", status: "unavailable", errorType: providerErrorType(error) });
+        console.error("[SmartSearchProvider] Tavily falló, intentando fallback DuckDuckGo...", providerErrorType(error));
         // Fallback a DDG si Tavily falla incluso teniendo la key (ej: error de API, rate limit)
       }
     } else {
@@ -31,12 +35,36 @@ export class SmartSearchProvider implements SearchProvider {
     }
 
     try {
-      return await this.ddg.search(query, business, options);
+      const results = await this.ddg.search(query, business, options);
+      attempts.push({ provider: "duckduckgo", status: results.length ? "completed" : "no_results" });
+      return results;
     } catch (error) {
-      console.error("[SmartSearchProvider] DuckDuckGo también falló:", error);
-      throw error; // Dejar que SearchSourceAnalyzer lo maneje
+      attempts.push({ provider: "duckduckgo", status: "unavailable", errorType: providerErrorType(error) });
+      console.error("[SmartSearchProvider] DuckDuckGo también falló:", providerErrorType(error));
+      throw new SearchProviderUnavailableError(attempts);
     }
   }
+}
+
+export interface SearchProviderAttempt {
+  provider: "tavily" | "duckduckgo";
+  status: "completed" | "no_results" | "unavailable";
+  errorType?: string;
+}
+
+export class SearchProviderUnavailableError extends Error {
+  readonly attempts: SearchProviderAttempt[];
+
+  constructor(attempts: SearchProviderAttempt[]) {
+    super("search_provider_unavailable");
+    this.name = "SearchProviderUnavailableError";
+    this.attempts = attempts;
+  }
+}
+
+function providerErrorType(error: unknown): string {
+  if (error instanceof Error) return error.name || "Error";
+  return "ProviderError";
 }
 
 export class SearchSourceAnalyzer extends SourceAnalyzer {
@@ -111,14 +139,17 @@ export class SearchSourceAnalyzer extends SourceAnalyzer {
         `${rubro} ${ubicacion}`.trim(),
       ])).filter(Boolean);
       const collected: Array<{ result: SearchResult; query: string; kind: "brand" | "reviews" | "category" }> = [];
+      const queryAttempts: Array<{ query: string; kind: "brand" | "reviews" | "category"; status: "completed" | "no_results" | "provider_unavailable"; resultCount: number }> = [];
       for (const query of queries) {
         if (context?.signal?.aborted) throw Object.assign(new Error("search_canceled"), { name: "AbortError" });
+        const kind = /reseñas|opiniones/.test(query) ? "reviews" : query === `${rubro} ${ubicacion}`.trim() ? "category" : "brand";
         try {
-          const kind = /reseñas|opiniones/.test(query) ? "reviews" : query === `${rubro} ${ubicacion}`.trim() ? "category" : "brand";
           const queryResults = await this.provider.search(query, business, { signal: context?.signal });
+          queryAttempts.push({ query, kind, status: queryResults.length ? "completed" : "no_results", resultCount: queryResults.length });
           for (const result of queryResults) collected.push({ result, query, kind });
         } catch (error) {
           if (context?.signal?.aborted) throw error;
+          queryAttempts.push({ query, kind, status: "provider_unavailable", resultCount: 0 });
           console.warn(`[SEARCH_ANALYZER] No se pudo completar la búsqueda "${query}":`, error instanceof Error ? error.message : String(error));
         }
       }
@@ -127,7 +158,13 @@ export class SearchSourceAnalyzer extends SourceAnalyzer {
       const results = Array.from(resultMap.values());
 
       if (results.length === 0) {
-        return this.unavailable("No se encontraron resultados de búsqueda para la marca");
+        const allUnavailable = queryAttempts.length > 0 && queryAttempts.every((attempt) => attempt.status === "provider_unavailable");
+        const partiallyUnavailable = queryAttempts.some((attempt) => attempt.status === "provider_unavailable");
+        return this.unavailable(
+          allUnavailable ? "No se pudo completar la búsqueda pública" : partiallyUnavailable ? "La búsqueda pública se completó solo parcialmente" : "La búsqueda se completó sin resultados validables",
+          allUnavailable ? "provider_unavailable" : partiallyUnavailable ? "partial" : "no_results",
+          queryAttempts,
+        );
       }
 
       // Analizar presencia de marca
@@ -139,6 +176,7 @@ export class SearchSourceAnalyzer extends SourceAnalyzer {
       const domainMatches = domainLower ? results.filter(r => r.url.toLowerCase().includes(domainLower)) : [];
 
       const brandQueryResults = collected.filter((item) => item.kind === "brand").map((item) => item.result);
+      const brandQueryCompleted = queryAttempts.some((attempt) => attempt.kind === "brand" && attempt.status !== "provider_unavailable");
       const brandIndex = brandQueryResults.findIndex(r => this.matchesEntity(r, nombre, rubro, ubicacion));
       const topPosition = brandIndex >= 0 ? brandIndex + 1 : null;
 
@@ -168,7 +206,7 @@ export class SearchSourceAnalyzer extends SourceAnalyzer {
           0.5,
           brandMentions.length >= 3 ? "ALTA" : "MEDIA"
         ));
-      } else {
+      } else if (brandQueryCompleted) {
         findings.push(this.generateFinding(
           "posicionamiento",
           "negative",
@@ -200,7 +238,7 @@ export class SearchSourceAnalyzer extends SourceAnalyzer {
           0.4,
           "MEDIA"
         ));
-      } else {
+      } else if (brandQueryCompleted) {
         findings.push(this.generateFinding(
           "adquisicion",
           "negative",
@@ -281,6 +319,8 @@ export class SearchSourceAnalyzer extends SourceAnalyzer {
         requiresAuth: false,
         metadata: {
           queries,
+          queryAttempts,
+          outcome: queryAttempts.some((attempt) => attempt.status === "provider_unavailable") ? "partial" : "completed",
           resultsCount: results.length,
           brandMentions: brandMentions.length,
           topPosition,
@@ -317,7 +357,7 @@ export class SearchSourceAnalyzer extends SourceAnalyzer {
     return Math.round((consistent / results.length) * 100);
   }
 
-  private unavailable(reason: string): SourceEvidence {
+  private unavailable(reason: string, outcome: "provider_unavailable" | "no_results" | "partial" = "provider_unavailable", queryAttempts: unknown[] = []): SourceEvidence {
     return {
       source: this.type,
       status: "unavailable",
@@ -327,7 +367,7 @@ export class SearchSourceAnalyzer extends SourceAnalyzer {
       coverage: 0,
       evaluatedAt: new Date(),
       requiresAuth: false,
-      metadata: { error: reason, unavailable: true },
+      metadata: { reason, unavailable: outcome === "provider_unavailable", outcome, queryAttempts },
     };
   }
 }

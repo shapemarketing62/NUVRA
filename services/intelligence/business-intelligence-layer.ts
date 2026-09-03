@@ -142,6 +142,47 @@ export class BusinessIntelligenceLayer {
     aggregated: AggregatedEvidence,
     discovery: DiscoveryResult
   ): void {
+    const searchEvidence = aggregated.sources.search;
+    if (searchEvidence) {
+      searchEvidence.metadata = {
+        ...searchEvidence.metadata,
+        discoveryStatus: discovery.status || "legacy_unknown",
+        discoveryQueryAttempts: discovery.queryAttempts || [],
+        discoveryCandidateCount: discovery.allCandidates.length,
+      };
+    }
+
+    const externalCandidates = discovery.allCandidates.filter((candidate) => candidate.type === "mentions" && ["confirmed", "probable"].includes(candidate.status || ""));
+    if (externalCandidates.length && aggregated.sources.external_mentions) {
+      aggregated.sources.external_mentions.metadata = {
+        ...aggregated.sources.external_mentions.metadata,
+        discoveryCandidates: externalCandidates.map((candidate) => ({ url: candidate.url, status: candidate.status, entityMatchConfidence: candidate.matchScore })),
+        discoveryNote: "Estas fuentes corroboran presencia o identidad; no se convierten automáticamente en un hallazgo positivo.",
+      };
+    }
+
+    const mapsCandidate = discovery.allCandidates.find((candidate) => candidate.type === "google_maps" && ["confirmed", "probable"].includes(candidate.status || ""));
+    if (mapsCandidate && (!aggregated.sources.reviews || aggregated.sources.reviews.status !== "evaluated")) {
+      const previous = aggregated.sources.reviews;
+      aggregated.sources.reviews = {
+        source: "reviews",
+        status: "unavailable",
+        data: { publicListingDiscovered: true, url: mapsCandidate.url, entityMatchConfidence: mapsCandidate.matchScore },
+        findings: previous?.findings || [],
+        confidence: "INSUFICIENTE",
+        coverage: 0,
+        evaluatedAt: new Date(),
+        requiresAuth: previous?.requiresAuth || false,
+        metadata: {
+          ...previous?.metadata,
+          finalStatus: "discovered",
+          discoveredUrl: mapsCandidate.url,
+          entityMatchConfidence: mapsCandidate.matchScore,
+          reason: "Se identificó una ficha pública compatible, pero no se obtuvieron rating ni reseñas verificables.",
+        },
+      };
+    }
+
     // Un perfil público confirmado aporta evidencia aunque las métricas privadas requieran OAuth.
     if (discovery.primaryInstagram && (!aggregated.sources.instagram || aggregated.sources.instagram.status !== "evaluated")) {
       const candidate = discovery.allCandidates.find((item) => item.type === "instagram" && item.url === discovery.primaryInstagram);

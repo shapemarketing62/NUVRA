@@ -4,6 +4,13 @@ export interface SearchResult {
   title: string;
   url: string;
   snippet: string;
+  metadata?: {
+    location?: string;
+    category?: string;
+    phone?: string;
+    address?: string;
+    [key: string]: unknown;
+  };
 }
 
 export interface SearchProvider {

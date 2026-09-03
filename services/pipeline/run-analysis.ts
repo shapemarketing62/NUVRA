@@ -96,10 +96,11 @@ export async function runFullAnalysis(businessId: string, options: { signal?: Ab
   const discoveryStarted = Date.now();
   const discoveryService = new BusinessDiscoveryService();
   const inferredCustomerType = business.tipoCliente || inferCustomerType(business);
+  const discoveryLocation = Array.from(new Set([business.ubicacion, business.ciudad, business.pais].filter((value): value is string => Boolean(value?.trim())).map((value) => value.trim()))).join(", ");
   const discoveryTarget = {
     name: business.nombre,
     category: business.rubro,
-    location: business.ubicacion || undefined,
+    location: discoveryLocation || undefined,
     tipoCliente: inferredCustomerType,
     declaredWebUrl: business.noWebDeclared ? undefined : business.webUrl || business.websites[0]?.url || undefined,
     declaredInstagram: business.noInstagramDeclared ? undefined : business.instagramHandle || undefined,
@@ -121,6 +122,8 @@ export async function runFullAnalysis(businessId: string, options: { signal?: Ab
     primaryWebUrl: discoveryResult.primaryWebUrl,
     primaryInstagram: discoveryResult.primaryInstagram,
     primaryGoogleMaps: discoveryResult.primaryGoogleMaps,
+    status: discoveryResult.status,
+    queryAttempts: discoveryResult.queryAttempts,
     execution: discoveryExecution.audit,
   }, { startedAt: discoveryStarted, endedAt: Date.now(), durationMs: Date.now() - discoveryStarted });
 
@@ -572,6 +575,8 @@ function emptyDiscoveryResult(target: DiscoveryResult["target"]): DiscoveryResul
     probableSources: [],
     uncertainSources: [],
     rejectedSources: [],
+    status: "provider_unavailable",
+    queryAttempts: [],
     discoveredAt: new Date(),
   };
 }
