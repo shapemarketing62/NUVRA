@@ -1,5 +1,5 @@
 import "server-only";
-import { randomUUID } from "crypto";
+import { randomUUID, createHash } from "crypto";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "./session";
 import { type EntitlementKey } from "@/lib/plans";
@@ -182,6 +182,143 @@ export async function buildCandidateConsistencyProbe(
   });
 
   return { requestId, timestamp, probes: enriched };
+}
+
+export type DatabaseConnectionFingerprint = {
+  requestId: string;
+  timestamp: string;
+  runtimeDatasource: "postgresql" | "sqlite" | "unknown";
+  databaseIdentityHash: string | null;
+  serverIdentityHash: string | null;
+  currentSchema: string | null;
+  searchPathHash: string | null;
+  backendPid: number | null;
+  connectionMode: "DIRECT" | "PROXY" | "PGBOUNCER" | "UNKNOWN";
+};
+
+export async function buildDatabaseConnectionFingerprint(): Promise<DatabaseConnectionFingerprint> {
+  const requestId = randomUUID();
+  const timestamp = new Date().toISOString();
+
+  const databaseUrl = process.env.DATABASE_URL || "";
+  let runtimeDatasource: DatabaseConnectionFingerprint["runtimeDatasource"] = "unknown";
+  let connectionMode: DatabaseConnectionFingerprint["connectionMode"] = "UNKNOWN";
+
+  if (databaseUrl.startsWith("postgresql://") || databaseUrl.startsWith("postgres://")) {
+    runtimeDatasource = "postgresql";
+    if (databaseUrl.includes("pgbouncer=true") || databaseUrl.includes("pooling") || databaseUrl.includes("transaction") || databaseUrl.includes("statement")) {
+      connectionMode = "PGBOUNCER";
+    } else if (databaseUrl.includes("proxy") || databaseUrl.includes("railway") || databaseUrl.includes("render.com") || databaseUrl.includes("supabase.co") || databaseUrl.includes("neon.tech")) {
+      connectionMode = "PROXY";
+    } else {
+      connectionMode = "DIRECT";
+    }
+  } else if (databaseUrl.startsWith("file:")) {
+    runtimeDatasource = "sqlite";
+  }
+
+  let databaseIdentityHash: string | null = null;
+  let serverIdentityHash: string | null = null;
+  let backendPid: number | null = null;
+  let currentSchema: string | null = null;
+  let searchPathHash: string | null = null;
+
+  if (runtimeDatasource === "postgresql") {
+    try {
+      const rows = await prisma.$queryRaw<Array<Record<string, unknown>>>`
+        SELECT current_database() AS database, current_schema() AS schema, current_setting('search_path') AS search_path, pg_backend_pid() AS backend_pid, inet_server_addr() AS server_addr
+      `;
+      const row = rows[0];
+      if (row) {
+        const databaseName = String(row.database ?? "");
+        const schemaName = String(row.schema ?? "");
+        const searchPath = String(row.search_path ?? "");
+        const serverAddr = row.server_addr ? String(row.server_addr) : "";
+
+        const databaseIdentity = `${databaseName}:${schemaName}`;
+        databaseIdentityHash = createHash("sha256").update(databaseIdentity).digest("hex").slice(0, 32);
+
+        const serverIdentity = serverAddr ? `addr:${serverAddr}` : "addr:unknown";
+        serverIdentityHash = createHash("sha256").update(serverIdentity).digest("hex").slice(0, 32);
+
+        backendPid = Number(row.backend_pid);
+        currentSchema = schemaName || null;
+        searchPathHash = createHash("sha256").update(searchPath).digest("hex").slice(0, 32);
+      }
+    } catch {
+      databaseIdentityHash = null;
+      serverIdentityHash = null;
+      backendPid = null;
+      currentSchema = null;
+      searchPathHash = null;
+    }
+  }
+
+  return { requestId, timestamp, runtimeDatasource, databaseIdentityHash, serverIdentityHash, currentSchema, searchPathHash, backendPid, connectionMode };
+}
+
+export type DirectConsistencyProbe = {
+  requestId: string;
+  timestamp: string;
+  businessId: string;
+  orm: {
+    findUniqueFound: boolean;
+    findFirstFound: boolean;
+    findManyCount: number;
+    relationFound: boolean;
+    organizationId: string | null;
+  };
+  raw: {
+    found: boolean;
+    organizationId: string | null;
+  };
+  consistency: {
+    sameResult: boolean;
+  };
+};
+
+export async function buildDirectConsistencyProbe(businessId: string): Promise<DirectConsistencyProbe> {
+  const requestId = randomUUID();
+  const timestamp = new Date().toISOString();
+
+  const result = await prisma.$transaction(async (tx) => {
+    const [uniqueResult, firstResult, manyResults, withRelation] = await Promise.all([
+      tx.business.findUnique({ where: { id: businessId }, select: { id: true, organizationId: true } }),
+      tx.business.findFirst({ where: { id: businessId }, select: { id: true, organizationId: true } }),
+      tx.business.findMany({ where: { id: businessId }, select: { id: true, organizationId: true } }),
+      tx.business.findFirst({ where: { id: businessId }, include: { organization: { select: { id: true } } } }),
+    ]);
+
+    let rawFound = false;
+    let rawOrganizationId: string | null = null;
+    try {
+      const rawRows = await tx.$queryRaw<Array<{ id: string; organizationId: string | null }>>`
+        SELECT id, organizationId FROM "Business" WHERE id = ${businessId} LIMIT 1
+      `;
+      const rawRow = rawRows[0];
+      rawFound = Boolean(rawRow);
+      rawOrganizationId = rawRow?.organizationId ?? null;
+    } catch {
+      rawFound = false;
+      rawOrganizationId = null;
+    }
+
+    const uniqueFound = Boolean(uniqueResult);
+    const firstFound = Boolean(firstResult);
+    const manyCount = manyResults.length;
+    const relationFound = Boolean(withRelation?.organization?.id);
+
+    const organizationId = uniqueResult?.organizationId ?? firstResult?.organizationId ?? manyResults[0]?.organizationId ?? null;
+    const sameResult = (uniqueFound === firstFound && firstFound === (manyCount > 0) && relationFound === Boolean(organizationId)) && organizationId === rawOrganizationId;
+
+    return {
+      orm: { findUniqueFound: uniqueFound, findFirstFound: firstFound, findManyCount: manyCount, relationFound, organizationId },
+      raw: { found: rawFound, organizationId: rawOrganizationId },
+      consistency: { sameResult },
+    };
+  });
+
+  return { requestId, timestamp, businessId, ...result };
 }
 
 export async function authorizeBusiness(businessId: string, permission: Permission = "business.read", feature?: EntitlementKey) {

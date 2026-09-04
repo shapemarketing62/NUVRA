@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { apiError, handleApiError } from "@/lib/server/api-response";
-import { authorizeBusiness, requireUser, buildAuthorizationDebug, buildCandidateConsistencyProbe } from "@/lib/server/authorization";
+import { authorizeBusiness, requireUser, buildAuthorizationDebug, buildCandidateConsistencyProbe, buildDatabaseConnectionFingerprint, buildDirectConsistencyProbe } from "@/lib/server/authorization";
 import { resolveAuthorizedBusinessForInternalAudit } from "@/lib/internal-analysis-audit-access";
 import { roleCan } from "@/lib/access-policy";
 import { randomUUID } from "crypto";
@@ -130,6 +130,7 @@ export async function GET(req: NextRequest) {
   const requestId = randomUUID();
   const timestamp = new Date().toISOString();
   const serverPid = process.pid;
+  const databaseConnection = await buildDatabaseConnectionFingerprint();
   try {
     const auth = await requireUser();
     if (!auth.ok) return apiError("unauthorized", 401);
@@ -144,15 +145,17 @@ export async function GET(req: NextRequest) {
             .filter((m) => roleCan(m.role, "business.read"))
             .map((m) => m.organizationId)
         );
-        return NextResponse.json({ requestId, timestamp, serverPid, error: resolved.reason, candidates: resolved.candidates, authorizationDebug: { requestedBy: "name", candidates: candidateDebug }, consistencyProbe }, { status: 409, headers: { "Cache-Control": "private, no-store" } });
+        return NextResponse.json({ requestId, timestamp, serverPid, databaseConnection, error: resolved.reason, candidates: resolved.candidates, authorizationDebug: { requestedBy: "name", candidates: candidateDebug }, consistencyProbe }, { status: 409, headers: { "Cache-Control": "private, no-store" } });
       }
       const status = resolved.reason === "unauthorized" ? 401 : resolved.reason === "validation_error" ? 400 : resolved.reason === "not_found" ? 404 : 403;
       const debug = await buildAuthorizationDebug(req.nextUrl.searchParams.get("businessId") || req.nextUrl.searchParams.get("id"));
-      return NextResponse.json({ requestId, timestamp, serverPid, ...apiError(resolved.reason, status), authorizationDebug: { requestedBy: "businessId", ...debug } });
+      const directConsistencyProbe = req.nextUrl.searchParams.get("businessId") || req.nextUrl.searchParams.get("id") ? await buildDirectConsistencyProbe(req.nextUrl.searchParams.get("businessId") || req.nextUrl.searchParams.get("id")!) : null;
+      return NextResponse.json({ requestId, timestamp, serverPid, databaseConnection, ...apiError(resolved.reason, status), authorizationDebug: { requestedBy: "businessId", ...debug }, directConsistencyProbe });
     }
     const access = resolved.access;
     const businessId = access.business.id;
     const authorizationDebug = await buildAuthorizationDebug(businessId);
+    const directConsistencyProbe = await buildDirectConsistencyProbe(businessId);
 
     const business = await prisma.business.findUnique({
       where: { id: businessId },
@@ -331,6 +334,8 @@ export async function GET(req: NextRequest) {
       },
       sourceStatuses: Object.fromEntries(allSourceKeys.map((source) => [source, safeText(statusFor(source), 50) || "unknown"])),
       authorizationDebug,
+      databaseConnection,
+      directConsistencyProbe,
     };
 
     return NextResponse.json(response, { headers: { "Cache-Control": "private, no-store" } });
