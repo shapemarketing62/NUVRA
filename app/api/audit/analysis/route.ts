@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { apiError, handleApiError } from "@/lib/server/api-response";
-import { authorizeBusiness, requireUser, buildAuthorizationDebug } from "@/lib/server/authorization";
+import { authorizeBusiness, requireUser, buildAuthorizationDebug, buildCandidateConsistencyProbe } from "@/lib/server/authorization";
 import { resolveAuthorizedBusinessForInternalAudit } from "@/lib/internal-analysis-audit-access";
+import { roleCan } from "@/lib/access-policy";
+import { randomUUID } from "crypto";
 
 const MAX_IDENTIFIER_LENGTH = 100;
 const MAX_BUSINESS_NAME_LENGTH = 160;
@@ -125,6 +127,9 @@ async function resolveRequestedBusiness(req: NextRequest, user: InternalAuditSes
 }
 
 export async function GET(req: NextRequest) {
+  const requestId = randomUUID();
+  const timestamp = new Date().toISOString();
+  const serverPid = process.pid;
   try {
     const auth = await requireUser();
     if (!auth.ok) return apiError("unauthorized", 401);
@@ -132,11 +137,18 @@ export async function GET(req: NextRequest) {
     if (!resolved.ok) {
       if (resolved.reason === "ambiguous_business_name") {
         const candidateDebug = await Promise.all(resolved.candidates.slice(0, 10).map((candidate) => buildAuthorizationDebug(candidate.id)));
-        return NextResponse.json({ error: resolved.reason, candidates: resolved.candidates, authorizationDebug: { requestedBy: "name", candidates: candidateDebug } }, { status: 409, headers: { "Cache-Control": "private, no-store" } });
+        const consistencyProbe = await buildCandidateConsistencyProbe(
+          resolved.candidates.slice(0, 10).map((c) => c.id),
+          req.nextUrl.searchParams.get("name")?.trim() || "",
+          auth.user.memberships
+            .filter((m) => roleCan(m.role, "business.read"))
+            .map((m) => m.organizationId)
+        );
+        return NextResponse.json({ requestId, timestamp, serverPid, error: resolved.reason, candidates: resolved.candidates, authorizationDebug: { requestedBy: "name", candidates: candidateDebug }, consistencyProbe }, { status: 409, headers: { "Cache-Control": "private, no-store" } });
       }
       const status = resolved.reason === "unauthorized" ? 401 : resolved.reason === "validation_error" ? 400 : resolved.reason === "not_found" ? 404 : 403;
       const debug = await buildAuthorizationDebug(req.nextUrl.searchParams.get("businessId") || req.nextUrl.searchParams.get("id"));
-      return NextResponse.json({ ...apiError(resolved.reason, status), authorizationDebug: { requestedBy: "businessId", ...debug } });
+      return NextResponse.json({ requestId, timestamp, serverPid, ...apiError(resolved.reason, status), authorizationDebug: { requestedBy: "businessId", ...debug } });
     }
     const access = resolved.access;
     const businessId = access.business.id;
@@ -183,6 +195,9 @@ export async function GET(req: NextRequest) {
     const auditFor = (source: string) => record(sourceAudit[source === "google_local" ? "reviews" : source]);
 
     const response = {
+      requestId,
+      timestamp,
+      serverPid,
       deployment: {
         commitSha: safeText(process.env.RAILWAY_GIT_COMMIT_SHA || process.env.COMMIT_SHA, 40) || "unknown",
         buildDate: safeText(process.env.BUILD_DATE, 80) || "unknown",

@@ -1,4 +1,5 @@
 import "server-only";
+import { randomUUID } from "crypto";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "./session";
 import { type EntitlementKey } from "@/lib/plans";
@@ -33,6 +34,7 @@ export type AuthorizationDebug = {
   business?: {
     businessId: string;
     organizationId: string | null;
+    organizationResolutionSource: "business.organizationId" | "business.organization.id" | "not_found" | "not_evaluated";
   };
   authorization: {
     membershipFound: boolean;
@@ -72,9 +74,31 @@ export async function buildAuthorizationDebug(businessId: string | null): Promis
 
   if (businessId && sessionUser) {
     const access = await authorizeBusiness(businessId, "business.read");
-    const business = await prisma.business.findUnique({ where: { id: businessId }, select: { organizationId: true } });
-    businessInfo = { businessId, organizationId: business?.organizationId ?? null };
-    const matchingMembership = sessionUser.memberships.find((item) => item.organizationId === business?.organizationId);
+    const businessById = await prisma.business.findUnique({ where: { id: businessId }, select: { organizationId: true } });
+    let organizationResolutionSource: "business.organizationId" | "business.organization.id" | "not_found" | "not_evaluated" = "not_evaluated";
+    let resolvedOrganizationId: string | null = null;
+
+    if (!businessById) {
+      organizationResolutionSource = "not_found";
+    } else if (businessById.organizationId) {
+      resolvedOrganizationId = businessById.organizationId;
+      organizationResolutionSource = "business.organizationId";
+    } else {
+      const businessWithOrg = await prisma.business.findFirst({
+        where: { id: businessId },
+        include: { organization: { select: { id: true } } },
+      });
+      if (businessWithOrg?.organization?.id) {
+        resolvedOrganizationId = businessWithOrg.organization.id;
+        organizationResolutionSource = "business.organization.id";
+      } else {
+        resolvedOrganizationId = null;
+        organizationResolutionSource = "business.organizationId";
+      }
+    }
+
+    businessInfo = { businessId, organizationId: resolvedOrganizationId, organizationResolutionSource };
+    const matchingMembership = sessionUser.memberships.find((item) => item.organizationId === resolvedOrganizationId);
     authorization = {
       membershipFound: Boolean(matchingMembership),
       membershipOrganizationMatch: Boolean(matchingMembership),
@@ -86,6 +110,78 @@ export async function buildAuthorizationDebug(businessId: string | null): Promis
   }
 
   return { session, memberships, business: businessInfo, authorization };
+}
+
+export type CandidateConsistencyProbe = {
+  requestId: string;
+  timestamp: string;
+  probes: Array<{
+    businessId: string;
+    nameLookup: { organizationId: string | null };
+    directRead: { found: boolean; organizationId: string | null };
+    relationRead: { found: boolean; organizationId: string | null };
+    authorization: { result: boolean | null; denialReason: string | null };
+    consistency: { sameOrganizationId: boolean };
+  }>;
+};
+
+export async function buildCandidateConsistencyProbe(
+  candidateIds: string[],
+  exactName: string,
+  authorizedOrganizationIds: string[]
+): Promise<CandidateConsistencyProbe> {
+  const requestId = randomUUID();
+  const timestamp = new Date().toISOString();
+
+  const probes = await prisma.$transaction(async (tx) => {
+    const results = [];
+    for (const businessId of candidateIds) {
+      const [nameMatches, direct, withRelation] = await Promise.all([
+        tx.business.findMany({
+          where: { id: businessId, nombre: exactName, organizationId: { in: authorizedOrganizationIds } },
+          select: { id: true, organizationId: true },
+        }),
+        tx.business.findUnique({
+          where: { id: businessId },
+          select: { organizationId: true },
+        }),
+        tx.business.findFirst({
+          where: { id: businessId },
+          include: { organization: { select: { id: true } } },
+        }),
+      ]);
+
+      const nameOrganizationId = nameMatches[0]?.organizationId ?? null;
+      const directOrganizationId = direct?.organizationId ?? null;
+      const relationOrganizationId = withRelation?.organization?.id ?? null;
+
+      results.push({
+        businessId,
+        nameLookup: { organizationId: nameOrganizationId },
+        directRead: { found: Boolean(direct), organizationId: directOrganizationId },
+        relationRead: { found: Boolean(withRelation?.organization), organizationId: relationOrganizationId },
+        consistency: {
+          sameOrganizationId: nameOrganizationId === directOrganizationId && directOrganizationId === relationOrganizationId,
+        },
+      });
+    }
+    return results;
+  });
+
+  const authResults = await Promise.all(candidateIds.map((id) => authorizeBusiness(id, "business.read")));
+
+  const enriched = probes.map((probe, index) => {
+    const access = authResults[index];
+    return {
+      ...probe,
+      authorization: {
+        result: access.ok,
+        denialReason: access.ok ? null : (access.reason ?? "forbidden"),
+      },
+    };
+  });
+
+  return { requestId, timestamp, probes: enriched };
 }
 
 export async function authorizeBusiness(businessId: string, permission: Permission = "business.read", feature?: EntitlementKey) {
