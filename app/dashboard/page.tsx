@@ -5,8 +5,8 @@ import { useDashboardData } from "@/lib/use-dashboard-data";
 import { Btn, Card, DemoBadge, EmptyState, ErrorState, PageHeader, PageSkeleton, ScoreRing, StatusBadge } from "@/components/ui";
 import { getFriendlyDimensionName, simplifyTechnicalText } from "@/lib/simple-language-presenter";
 import { AnalysisFreshnessNotice } from "@/components/dashboard/analysis-freshness-notice";
+import { getDashboardSourceLabel } from "@/lib/dashboard-view-model";
 
-const sourceLabel = (status: string) => status === "analyzed" ? "Analizada" : status === "partial" ? "Parcial" : status === "requires_auth" ? "Requiere conexión" : status === "not_relevant" ? "No necesaria" : "Pendiente";
 const sourceTone = (status: string) => status === "analyzed" ? "success" as const : status === "partial" ? "warning" as const : "neutral" as const;
 
 export default function DashboardHomePage() {
@@ -152,7 +152,7 @@ export default function DashboardHomePage() {
       {sources.slice(0, 7).map((source) => (
         <div className="source-row" key={source.key}>
           <span style={{ color: "var(--text-primary)", fontSize: "14px" }}>{source.label}</span>
-          <StatusBadge tone={sourceTone(source.status)}>{sourceLabel(source.status)}</StatusBadge>
+          <StatusBadge tone={sourceTone(source.status)}>{getDashboardSourceLabel(source.status)}</StatusBadge>
         </div>
       ))}
       {!sources.length && <p className="section-description">Las fuentes aparecerán con el próximo análisis.</p>}

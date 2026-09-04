@@ -118,10 +118,10 @@ function priorityFor(relevance: PlannedSocialSource | null, crossLinked: boolean
 
 function actionFor(entry: { relevance: PlannedSocialSource | null; crossLinked: boolean; declared: boolean; platform: string; observed: boolean; requiresAuth: boolean }): { action: DiscoveryAction; reason: string; maxQueries: number; timeoutMs: number } {
   if (entry.platform === "website") {
-    // Website is special: it is the HUB, not a discovery target. The plan
-    // intentionally returns "skip" so the orchestrator does not search for
-    // the website via `site:` queries.
-    return { action: "skip", reason: "website is the hub, not a discovery target", maxQueries: 0, timeoutMs: 0 };
+    if (entry.declared || entry.crossLinked) {
+      return { action: "follow_cross_link", reason: "website URL already available for validation", maxQueries: 0, timeoutMs: 0 };
+    }
+    return { action: "search_only", reason: "official website is unknown; bootstrap identity discovery must attempt it", maxQueries: 1, timeoutMs: 5_000 };
   }
   if (entry.platform === "pinterest") {
     // Pinterest has no real provider / analyzer; only Marketing Knowledge.
@@ -173,18 +173,19 @@ export class PlatformDiscoveryPlanner {
 
     const entries: PlatformDiscoveryEntry[] = [];
 
-    // 1) The website is the HUB. It is not a discovery target but the
-    //    plan must still surface it so the trace can explain its
-    //    treatment of the website.
+    // 1) Website is an identity hub, but an unknown URL is a discovery
+    //    question rather than evidence that the source is irrelevant.
+    const websiteDeclared = !!declared.website || Boolean(input.target.website);
+    const websiteDecision = actionFor({ relevance: null, crossLinked: false, declared: websiteDeclared, platform: "website", observed: true, requiresAuth: false });
     entries.push({
       surface: "search",
       platform: "website",
       relevance: null,
-      action: "skip",
+      action: websiteDecision.action,
       priority: 0,
-      reason: "website is the hub; existence is decided before discovery",
-      maxQueries: 0,
-      timeoutMs: 0,
+      reason: websiteDecision.reason,
+      maxQueries: websiteDecision.maxQueries,
+      timeoutMs: websiteDecision.timeoutMs,
       requiresAuth: false,
       observedCapable: true,
     });
@@ -317,8 +318,9 @@ export class PlatformDiscoveryPlanner {
    * against the budget.
    */
   static selectForExecution(plan: PlatformDiscoveryPlan): PlatformDiscoveryEntry[] {
-    return plan.entries
-      .filter((e) => e.action !== "skip" && e.action !== "knowledge_only")
-      .slice(0, plan.maxPlatforms);
+    const executable = plan.entries.filter((e) => e.action !== "skip" && e.action !== "knowledge_only");
+    const core = executable.filter((entry) => entry.platform === "website");
+    const optionalPlatforms = executable.filter((entry) => entry.platform !== "website").slice(0, plan.maxPlatforms);
+    return [...core, ...optionalPlatforms];
   }
 }

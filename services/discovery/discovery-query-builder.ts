@@ -1,4 +1,5 @@
 import type { BusinessEntityTarget } from "./entity-matcher.ts";
+import { businessNameCore } from "./business-name-normalization.ts";
 
 export type DiscoveryQueryIntent = "identity" | "website" | "social" | "local_reviews";
 
@@ -20,21 +21,20 @@ export function buildDiscoveryQueries(target: BusinessEntityTarget): DiscoveryQu
   const location = clean(target.location, 90);
   const locationParts = location.split(",").map((part) => part.trim()).filter(Boolean);
   const neighborhood = locationParts[0] || "";
-  const city = locationParts[1] || "";
-  const country = locationParts.at(-1) || "";
   const anchor = `"${name}"`;
+  const coreName = businessNameCore(name);
+  const coreAnchor = coreName && coreName.toLocaleLowerCase("es") !== name.toLocaleLowerCase("es") ? `"${coreName}"` : anchor;
 
   return uniqueQueries([
     { query: anchor, intent: "identity" },
     category ? { query: `${anchor} ${category}`, intent: "identity" } : null,
     location ? { query: `${anchor} ${location}`, intent: "identity" } : null,
-    neighborhood && neighborhood !== location ? { query: `${anchor} ${neighborhood}`, intent: "identity" } : null,
-    city && city !== neighborhood ? { query: `${anchor} ${city}`, intent: "identity" } : null,
-    country && country !== city && country !== neighborhood ? { query: `${anchor} ${country}`, intent: "identity" } : null,
-    { query: `${anchor} sitio web`, intent: "website" },
-    { query: `${anchor} Instagram`, intent: "social" },
-    { query: `${anchor} opiniones`, intent: "local_reviews" },
-  ]).slice(0, 9);
+    coreAnchor !== anchor && location ? { query: `${coreAnchor} ${location}`, intent: "identity" } : null,
+    coreAnchor !== anchor && category ? { query: `${coreAnchor} ${category}`, intent: "identity" } : null,
+    { query: `${coreAnchor} sitio oficial`, intent: "website" },
+    { query: `${coreAnchor} Instagram`, intent: "social" },
+    { query: `${coreAnchor} opiniones${neighborhood ? ` ${neighborhood}` : ""}`, intent: "local_reviews" },
+  ]).slice(0, 8);
 }
 
 function clean(value: string | undefined, maxLength: number): string {

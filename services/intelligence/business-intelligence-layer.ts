@@ -66,7 +66,7 @@ export class BusinessIntelligenceLayer {
 
     // Si tenemos una URL descubierta confirmed/probable y business no tenía web, usarla dinámicamente
     const targetBusiness: Business = { ...business };
-    if (!targetBusiness.noWebDeclared && !targetBusiness.webUrl && discoveryResult?.primaryWebUrl) {
+    if (!targetBusiness.webUrl && discoveryResult?.primaryWebUrl) {
       targetBusiness.webUrl = discoveryResult.primaryWebUrl;
     }
 
@@ -118,8 +118,9 @@ export class BusinessIntelligenceLayer {
 
     // 2b. Integrate state from BusinessDiscoveryService (kept as-is to
     //     preserve the existing scoring behavior).
-    if (discoveryResult) {
-      this.enrichEvidenceWithDiscovery(aggregatedEvidence, discoveryResult);
+    const effectiveDiscovery = platformDiscoveryReport.rawDiscovery || discoveryResult;
+    if (effectiveDiscovery) {
+      this.enrichEvidenceWithDiscovery(aggregatedEvidence, effectiveDiscovery);
     }
     // 2c. Apply the platform-discovery statuses on top. Important:
     //     this layer only ADDS metadata + discovery evidence. It does
@@ -169,7 +170,7 @@ export class BusinessIntelligenceLayer {
       digitalScore,
       nuvraScore,
       evaluatedAt: new Date(),
-      discoveryResult,
+      discoveryResult: effectiveDiscovery,
       businessProfile,
       platformDiscoveryReport,
     };

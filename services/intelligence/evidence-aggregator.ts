@@ -421,7 +421,7 @@ export class CoverageCalculator {
         // Objetivo de marca/posicionamiento reduce peso (otros canales importan)
         if (/marca|reconoc|posicion|brand/i.test(objetivo)) weight = Math.max(weight - 0.05, 0.2);
 
-        const relevant = !(noWebDeclared && !isEcommerce && !isSaaS && !isB2B);
+        const relevant = Boolean(webUrl) || !(noWebDeclared && !isEcommerce && !isSaaS && !isB2B);
         return { weight, relevant, reason: relevant ? "El sitio web puede aportar información comercial verificable" : "El negocio declaró no tener web y su modelo no depende de ella para operar" };
       }
 

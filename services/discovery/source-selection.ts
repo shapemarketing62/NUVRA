@@ -6,12 +6,13 @@ export interface WebSourceSelectionInput {
 }
 
 /**
- * An explicit "no website" declaration is authoritative for the current
- * business. Discovery may still report candidates for audit, but it must not
- * turn one of them into the website analyzed for that business.
+ * A user's "no website" declaration describes what they know at onboarding
+ * time; it must not suppress a later, independently validated public website.
+ * Declared/stored URLs remain ignored in that case, while a current discovery
+ * candidate may be analyzed and kept as observed evidence.
  */
 export function selectAnalysisWebUrl(input: WebSourceSelectionInput): string | null {
-  if (input.noWebDeclared) return null;
+  if (input.noWebDeclared) return input.discoveredWebUrl || null;
   return input.declaredWebUrl || input.storedWebUrl || input.discoveredWebUrl || null;
 }
 

@@ -19,6 +19,7 @@ export type DashboardSourceStatus =
   | "not_found"
   | "requires_auth"
   | "unavailable"
+  | "not_attempted"
   | "not_relevant"
   | "error"
   | "unknown";
@@ -334,10 +335,26 @@ function sourceStatus(value: unknown): DashboardSourceStatus {
     case "disconnected":
     case "expired": return "requires_auth";
     case "unavailable": return "unavailable";
+    case "not_attempted": return "not_attempted";
     case "not_relevant": return "not_relevant";
     case "error": return "error";
     default: return "unknown";
   }
+}
+
+export function getDashboardSourceLabel(status: DashboardSourceStatus): string {
+  return ({
+    analyzed: "Analizada",
+    partial: "Información parcial",
+    discovered: "Encontrada",
+    not_found: "No encontrada",
+    requires_auth: "Requiere conexión",
+    unavailable: "No disponible",
+    not_attempted: "No evaluada",
+    not_relevant: "No prioritaria",
+    error: "No disponible",
+    unknown: "No evaluada",
+  } satisfies Record<DashboardSourceStatus, string>)[status];
 }
 
 function informationState(value: unknown, fallback: DashboardInformationState): DashboardInformationState {

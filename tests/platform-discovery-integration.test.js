@@ -71,7 +71,7 @@ function pageAnalysisData(url, outboundLinks = []) {
   };
 }
 
-function fakeWebSourceAnalyzer(pages) {
+function fakeWebSourceAnalyzer(pages, findings = []) {
   return {
     type: "web",
     requiresAuth: false,
@@ -82,7 +82,7 @@ function fakeWebSourceAnalyzer(pages) {
       source: "web",
       status: "evaluated",
       data: { pages, pagesAnalyzed: pages.length, status: "completed", findings: [], crawledUrls: [], screenshots: [], performanceSummary: {}, brandIdentity: {}, marketingIntelligence: { areas: [], findings: [] }, analyzedAt: new Date().toISOString() },
-      findings: [],
+      findings,
       confidence: "MEDIA",
       coverage: 50,
       evaluatedAt: new Date(),
@@ -353,4 +353,51 @@ test("critical 6: changing the objective may change relevance but not identical 
   assert.deepEqual(awareness.aggregatedEvidence.sources.instagram.findings, appointments.aggregatedEvidence.sources.instagram.findings);
   assert.equal(awareness.platformDiscoveryReport.entries.find((entry) => entry.platform === "instagram").status, "VALIDATED");
   assert.equal(appointments.platformDiscoveryReport.entries.find((entry) => entry.platform === "instagram").status, "VALIDATED");
+});
+
+test("acceptance: sin URLs declaradas, una web descubierta se analiza y su cross-link valida Instagram", async () => {
+  const business = {
+    ...b2cEsteticaBusiness(),
+    nombre: "Estética Dental Argentina QA",
+    rubro: "Estética dental / Odontología",
+    webUrl: null,
+    noWebDeclared: true,
+    instagramHandle: null,
+    noInstagramDeclared: true,
+    ubicacion: "Recoleta, CABA, Argentina",
+    goals: [{ objetivo: "Aumentar consultas calificadas", plazoDias: 90, plazoLabel: "3 meses" }],
+  };
+  const discoveredUrl = "https://esteticadentalqa-example.com.ar";
+  const webCandidate = {
+    title: "Estética Dental QA",
+    url: discoveredUrl,
+    snippet: "Odontología estética en Recoleta, CABA",
+    type: "web",
+    status: "confirmed",
+    matchScore: .92,
+    entityRelationship: "local_operation",
+  };
+  const discovery = {
+    ...emptyDiscoveryResult(business),
+    target: { name: business.nombre, category: business.rubro, location: business.ubicacion },
+    primaryWebUrl: discoveredUrl,
+    allCandidates: [webCandidate],
+    confirmedSources: [webCandidate],
+    queryAttempts: [{ query: '"estetica dental qa" sitio oficial', intent: "website", status: "completed", resultCount: 1 }],
+  };
+  const pages = [pageAnalysisData(`${discoveredUrl}/`, [
+    { platform: "instagram", url: "https://instagram.com/esteticadentalqa", sourcePage: `${discoveredUrl}/`, anchorText: "Instagram", hostname: "instagram.com" },
+  ])];
+  const finding = { id: "web-offer", category: "propuesta", type: "positive", impact: "medium", evidence: "La web explica los tratamientos y la ubicación.", source: "web", attribution: discoveredUrl, weight: .5, confidence: "MEDIA" };
+  const layer = new BusinessIntelligenceLayer({ platformDiscoverySearch: { discover: async () => discovery } });
+  layer.registerSource(fakeWebSourceAnalyzer(pages, [finding]));
+  for (const type of ["instagram", "search", "reviews", "competitor", "external_mentions", "x", "tiktok", "facebook", "linkedin", "youtube"]) layer.registerSource(unavailableAnalyzer(type));
+
+  const result = await layer.analyze(business, discovery);
+  assert.equal(result.aggregatedEvidence.sources.web.status, "evaluated");
+  assert.equal(findPlatformStatus(result.platformDiscoveryReport, "website"), "ANALYZED");
+  assert.equal(findPlatformStatus(result.platformDiscoveryReport, "instagram"), "VALIDATED");
+  assert.equal(findPlatformUrl(result.platformDiscoveryReport, "instagram"), "https://instagram.com/esteticadentalqa");
+  assert.ok(result.aggregatedEvidence.findings.some((item) => item.id === "web-offer"));
+  assert.ok(result.nuvraScore.dimensions.some((dimension) => dimension.applicable), "real web evidence must reach at least one evaluable score area");
 });

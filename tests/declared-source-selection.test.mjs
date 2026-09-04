@@ -29,13 +29,17 @@ require.extensions[".ts"] = function (module, filename) {
 
 const { selectAnalysisWebUrl, selectPrimaryInstagram } = require("../services/discovery/source-selection.ts");
 
-test("una declaración explícita de que no hay web impide analizar una web descubierta", () => {
+test("una declaración de ausencia no bloquea una web descubierta y validada después", () => {
   assert.equal(selectAnalysisWebUrl({
     noWebDeclared: true,
     declaredWebUrl: null,
     storedWebUrl: null,
     discoveredWebUrl: "https://otra-entidad.example",
-  }), null);
+  }), "https://otra-entidad.example");
+});
+
+test("una declaración de ausencia no reutiliza una URL declarada o guardada sin discovery actual", () => {
+  assert.equal(selectAnalysisWebUrl({ noWebDeclared: true, declaredWebUrl: "https://vieja.example", storedWebUrl: "https://guardada.example", discoveredWebUrl: null }), null);
 });
 
 test("sin declaración de ausencia se conserva el orden web declarada, guardada y descubierta", () => {

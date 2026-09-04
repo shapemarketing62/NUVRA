@@ -16,6 +16,7 @@ import { REBUILD_TIMESTAMP } from "@/lib/rebuild-trigger";
 import { currentLogContext } from "@/lib/server/logger";
 import { inferCustomerType } from "@/lib/business-context";
 import { createAnalysisInputSnapshot } from "@/lib/analysis-freshness";
+import { buildTerminalSourceProjection } from "@/services/discovery/source-status-lifecycle";
 
 // Force recompilation with timestamp: REBUILD_TIMESTAMP
 
@@ -464,10 +465,11 @@ export async function runFullAnalysis(businessId: string, options: { signal?: Ab
     currentStage = "analysis_trace";
     const historyStarted = Date.now();
     const historyId = randomUUID();
+    const terminalSources = buildTerminalSourceProjection(biResult.aggregatedEvidence, biResult.platformDiscoveryReport);
     let analysisTrace: ReturnType<typeof buildAnalysisTrace> | { version: "commercial-journey-v1"; createdAt: string; failedAt: "analysis_trace"; processingIssues: unknown[] };
     try {
       analysisTrace = buildAnalysisTrace({
-        discovery: discoveryResult,
+        discovery: biResult.discoveryResult || discoveryResult,
         aggregated: biResult.aggregatedEvidence,
         profile: biResult.businessProfile,
         diagnosis: diagnosisResult,
@@ -491,9 +493,9 @@ export async function runFullAnalysis(businessId: string, options: { signal?: Ab
           pagesAnalyzed: analysisResult.pagesAnalyzed,
           intelligence: {
             coverage: biResult.coverage.total,
-            sourceStatuses: Object.fromEntries(Object.entries(biResult.aggregatedEvidence.sources).map(([key, value]) => [key, value.status])),
-            sourceMessages: Object.fromEntries(Object.entries(biResult.aggregatedEvidence.sources).map(([key, value]) => [key, sourceUserMessage(key, value.status)])),
-            discoveredInstagram: discoveryResult.primaryInstagram,
+            sourceStatuses: terminalSources.statuses,
+            sourceMessages: terminalSources.messages,
+            discoveredInstagram: biResult.platformDiscoveryReport.entries.find((entry) => entry.platform === "instagram" && (entry.status === "VALIDATED" || entry.status === "ANALYZED"))?.url || biResult.discoveryResult?.primaryInstagram || null,
             competitorSummary: biResult.aggregatedEvidence.sources.competitor?.data || null,
             externalMentionsSummary: biResult.aggregatedEvidence.sources.external_mentions?.data || null,
             platformDiscovery: {
@@ -594,14 +596,6 @@ function emptyDiscoveryResult(target: DiscoveryResult["target"]): DiscoveryResul
     queryAttempts: [],
     discoveredAt: new Date(),
   };
-}
-
-function sourceUserMessage(source: string, status: string): string {
-  if (status === "evaluated") return "Analizada";
-  if (status === "requires_auth") return "Necesita autorización";
-  if (status === "not_relevant") return "No necesaria para este negocio";
-  if (source === "web") return "No pudimos analizarlo";
-  return "No disponible en este momento";
 }
 
 function detectSiteType(input: { businessName?: string; rubro?: string; goal?: string; findings?: Array<{ category: string; title: string; evidence: string }>; url?: string }): string {

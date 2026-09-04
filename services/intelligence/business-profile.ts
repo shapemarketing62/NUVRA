@@ -240,7 +240,7 @@ export function buildBusinessProfile(business: BusinessWithGoal, aggregated: Agg
     primaryChannel,
     unavailableChannels: Object.entries(aggregated.sources).filter(([, evidence]) => evidence.status !== "evaluated").map(([source]) => source as SourceType),
     channelDeclarations: {
-      web: noWebDeclared ? "absent" : business.webUrl ? "present" : "unknown",
+      web: business.webUrl ? "present" : noWebDeclared ? "absent" : "unknown",
       instagram: noInstagramDeclared ? "absent" : business.instagramHandle ? "present" : "unknown",
     },
     contactMethods: Array.from(new Set(contactMethods)),

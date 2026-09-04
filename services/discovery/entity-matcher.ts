@@ -91,7 +91,7 @@ export class EntityMatcher {
     const entityRelationship = this.detectRelationship(candidate, target, domain, normTitle);
 
     // 1. Coincidencia de Nombre / Marca (máx 0.35)
-    const brandTokens = this.identityTokens(normTargetName);
+    const brandTokens = businessNameCoreTokens(normTargetName);
     const matchesBrandInTitle = brandTokens.every(
       (token) => normTitle.includes(token) || domain.includes(token)
     );
@@ -473,20 +473,11 @@ export class EntityMatcher {
   }
 
   private static identityTokens(normalizedName: string): string[] {
-    const tokens = normalizedName.split(/\s+/).filter((token) => token.length > 2);
-    const generic = new Set(["cafe", "tienda", "store", "centro", "clinica", "estudio", "servicios", "grupo", "company", "local", "casa", "home"]);
-    const distinctive = tokens.filter((token) => !generic.has(token));
-    return distinctive.length ? distinctive : tokens;
+    return businessNameCoreTokens(normalizedName);
   }
 
   private static normalizeText(text: string): string {
-    return text
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .replace(/[^a-z0-9\s]/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
+    return normalizeDiscoveryText(text);
   }
 
   private static fuzzyMatch(a: string, b: string): boolean {
@@ -494,3 +485,4 @@ export class EntityMatcher {
     return false;
   }
 }
+import { businessNameCoreTokens, normalizeDiscoveryText } from "./business-name-normalization.ts";

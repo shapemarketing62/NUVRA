@@ -18,9 +18,9 @@ test("discovery genera queries breves por nombre, rubro, ubicación e intención
   assert.ok(queries.includes('"Casa Lumen"'));
   assert.ok(queries.includes('"Casa Lumen" Centro de estética'));
   assert.ok(queries.includes('"Casa Lumen" Palermo, CABA, Argentina'));
-  assert.ok(queries.includes('"Casa Lumen" Instagram'));
-  assert.ok(queries.includes('"Casa Lumen" sitio web'));
-  assert.ok(queries.includes('"Casa Lumen" opiniones'));
+  assert.ok(queries.some((query) => /Instagram$/i.test(query)));
+  assert.ok(queries.some((query) => /sitio oficial$/i.test(query)));
+  assert.ok(queries.some((query) => /opiniones Palermo$/i.test(query)));
   assert.ok(queries.every((query) => query.length < 190));
 });
 

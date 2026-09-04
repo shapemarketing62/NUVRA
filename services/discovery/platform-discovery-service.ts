@@ -208,13 +208,15 @@ export class PlatformDiscoveryService {
     // 3) Build the per-platform report by merging: plan, cross-link
     //    corroboration, and (when present) the search result candidates.
     const reportEntries: PlatformDiscoveryReportEntry[] = [];
-    const queryAttemptsByPlatform = bucketQueryAttemptsByPlatform(discovery?.queryAttempts || []);
+    const allQueryAttempts = discovery?.queryAttempts || [];
+    const queryAttemptsByPlatform = bucketQueryAttemptsByPlatform(allQueryAttempts);
 
     for (const planEntry of plan.entries) {
       const platform = String(planEntry.platform);
       const cross = corroboration.find((c) => c.platform === planEntry.platform);
       const source = sourceForPlatform(platform, input.sourceEvidence);
       const analyzer = analyzerOutcome(source);
+      const platformQueryAttempts = attemptsForPlatform(platform, allQueryAttempts, queryAttemptsByPlatform);
 
       // Resolve status using the documented precedence.
       let status: PlatformStatus = "NOT_ATTEMPTED";
@@ -222,9 +224,31 @@ export class PlatformDiscoveryService {
       let reason = planEntry.reason;
 
       if (platform === "website") {
-        status = analyzer.status === "ANALYZED" && input.officialWebsiteValidated !== false ? "ANALYZED" : input.target.website ? "CANDIDATE_FOUND" : "NOT_ATTEMPTED";
-        url = input.target.website || undefined;
-        reason = status === "ANALYZED" ? "Sitio oficial validado y analizado." : input.target.website ? "Se analizó una web que no alcanzó validación de ownership." : "No se informó ni validó un sitio web.";
+        const webCandidates = (discovery?.allCandidates || []).filter((candidate) => candidate.type === "web");
+        const confirmed = webCandidates.find((candidate) => candidate.status === "confirmed");
+        const probable = webCandidates.find((candidate) => candidate.status === "probable");
+        const websiteAttempts = platformQueryAttempts;
+        const allUnavailable = websiteAttempts.length > 0 && websiteAttempts.every((attempt) => attempt.status === "provider_unavailable");
+        url = input.target.website || confirmed?.url || probable?.url || undefined;
+        if (analyzer.status === "ANALYZED" && input.officialWebsiteValidated !== false) {
+          status = "ANALYZED";
+          reason = "Sitio oficial validado y analizado.";
+        } else if (confirmed) {
+          status = "VALIDATED";
+          reason = `Sitio oficial validado por identidad (${Math.round((confirmed.matchScore || 0) * 100)}%), pero no produjo análisis web completo.`;
+        } else if (probable || input.target.website) {
+          status = "CANDIDATE_FOUND";
+          reason = "Se encontró una web posible, pero no alcanzó validación suficiente o no pudo analizarse.";
+        } else if (allUnavailable) {
+          status = "PROVIDER_UNAVAILABLE";
+          reason = "No se pudo completar la búsqueda del sitio oficial.";
+        } else if (websiteAttempts.length > 0) {
+          status = "NO_RESULTS";
+          reason = "La búsqueda del sitio oficial terminó sin candidatos validables.";
+        } else {
+          status = "NOT_ATTEMPTED";
+          reason = "No se intentó descubrir el sitio oficial en este análisis.";
+        }
       } else if (analyzer.status === "ANALYZED") {
         status = "ANALYZED";
         url = analyzer.url || cross?.urls[0];
@@ -252,7 +276,7 @@ export class PlatformDiscoveryService {
           reason = cross.reasons.join("; ");
         }
       } else if (planEntry.action === "search_only" || planEntry.action === "search_and_provider") {
-        const attempts = [...(queryAttemptsByPlatform.get(platform) || []), ...analyzer.attempts];
+        const attempts = [...platformQueryAttempts, ...analyzer.attempts];
         const candidates = (discovery?.allCandidates || []).filter(
           (c) => platformFromUrl(c.url) === platform
         );
@@ -316,7 +340,7 @@ export class PlatformDiscoveryService {
         reason,
         planEntry,
         crossLink: cross,
-        queryAttempts: [...(queryAttemptsByPlatform.get(platform) || []), ...analyzer.attempts],
+        queryAttempts: [...platformQueryAttempts, ...analyzer.attempts],
         analyzer: source ? {
           sourceStatus: source.status,
           evidenceCount: source.findings.length,
@@ -414,6 +438,12 @@ function bucketQueryAttemptsByPlatform(attempts: DiscoveryQueryAttempt[]): Map<s
     (out.get(platform) || out.set(platform, []).get(platform)!).push(a);
   }
   return out;
+}
+
+function attemptsForPlatform(platform: string, attempts: DiscoveryQueryAttempt[], bucketed: Map<string, DiscoveryQueryAttempt[]>): DiscoveryQueryAttempt[] {
+  if (platform === "website") return attempts.filter((attempt) => attempt.intent === "identity" || attempt.intent === "website");
+  if (platform === "google_business_profile") return attempts.filter((attempt) => attempt.intent === "local_reviews");
+  return bucketed.get(platform) || [];
 }
 
 function mergeDiscovery(base: DiscoveryResult | undefined, extra: DiscoveryResult): DiscoveryResult {
