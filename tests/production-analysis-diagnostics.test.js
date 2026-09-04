@@ -5,12 +5,14 @@ const path = require("node:path");
 
 const root = path.resolve(__dirname, "..");
 const route = fs.readFileSync(path.join(root, "app/api/audit/analysis/route.ts"), "utf8");
+const access = fs.readFileSync(path.join(root, "lib/internal-analysis-audit-access.ts"), "utf8");
 
 test("diagnóstico de producción exige sesión, rol INTERNAL y acceso al negocio", () => {
   assert.match(route, /const auth = await requireUser\(\)/);
-  assert.match(route, /if \(auth\.user\.internalRole !== "INTERNAL"\) return apiError\("forbidden", 403\)/);
-  assert.match(route, /authorizeBusiness\(businessId,\s*"business\.read"\)/);
-  assert.match(route, /if \(access\.user\.internalRole !== "INTERNAL"\) return apiError\("forbidden", 403\)/);
+  assert.match(route, /resolveAuthorizedBusinessForInternalAudit/);
+  assert.match(route, /authorizeBusiness\(id,\s*"business\.read"\)/);
+  assert.match(access, /input\.user\.internalRole !== "INTERNAL"/);
+  assert.match(access, /roleCan\(membership\.role, "business\.read"\)/);
   assert.ok(route.indexOf("const auth = await requireUser()") < route.indexOf("const resolved = await resolveRequestedBusiness"));
 });
 
@@ -24,9 +26,10 @@ test("diagnóstico selecciona el history más reciente y conserva el anterior", 
 test("diagnóstico acepta businessId o nombre exacto sin ampliar el acceso de organización", () => {
   assert.match(route, /searchParams\.get\("businessId"\)/);
   assert.match(route, /searchParams\.get\("name"\)/);
-  assert.match(route, /where:\s*\{\s*nombre:\s*exactName,\s*organization:\s*\{\s*memberships:\s*\{\s*some:\s*\{\s*userId\s*\}/);
-  assert.match(route, /error:\s*"ambiguous_business_name"/);
-  assert.match(route, /candidates:\s*matches\.slice\(0, 10\)/);
+  assert.match(route, /where:\s*\{\s*nombre:\s*name,\s*organizationId:\s*\{\s*in:\s*authorizedOrganizationIds\s*\}/);
+  assert.match(route, /error:\s*resolved\.reason,\s*candidates:\s*resolved\.candidates/);
+  assert.match(access, /const result = await authorize\(candidate\.id\)/);
+  assert.match(access, /authorizedMatches\.slice\(0, 10\)/);
 });
 
 test("diagnóstico expone solo readiness booleana y nunca valores de secretos", () => {

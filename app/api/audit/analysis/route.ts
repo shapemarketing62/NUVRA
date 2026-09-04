@@ -2,9 +2,19 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { apiError, handleApiError } from "@/lib/server/api-response";
 import { authorizeBusiness, requireUser } from "@/lib/server/authorization";
+import { resolveAuthorizedBusinessForInternalAudit } from "@/lib/internal-analysis-audit-access";
 
 const MAX_IDENTIFIER_LENGTH = 100;
 const MAX_BUSINESS_NAME_LENGTH = 160;
+
+type InternalAuditSessionUser = {
+  id: string;
+  internalRole?: string | null;
+  memberships: Array<{
+    organizationId: string;
+    role: string;
+  }>;
+};
 
 function record(value: unknown): Record<string, any> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : {};
@@ -80,46 +90,54 @@ function safeSignals(value: unknown) {
     .slice(0, 20));
 }
 
-async function resolveRequestedBusiness(req: NextRequest, userId: string) {
+async function resolveRequestedBusiness(req: NextRequest, user: InternalAuditSessionUser) {
   const businessId = req.nextUrl.searchParams.get("businessId") || req.nextUrl.searchParams.get("id");
   const exactName = req.nextUrl.searchParams.get("name")?.trim() || null;
-  if ((businessId && exactName) || (!businessId && !exactName)) return { error: apiError("validation_error", 400) };
-  if (businessId) {
-    if (businessId.length > MAX_IDENTIFIER_LENGTH) return { error: apiError("validation_error", 400) };
-    return { businessId };
-  }
-  if (!exactName || exactName.length > MAX_BUSINESS_NAME_LENGTH) return { error: apiError("validation_error", 400) };
-
-  const matches = await prisma.business.findMany({
-    where: { nombre: exactName, organization: { memberships: { some: { userId } } } },
-    select: { id: true, nombre: true },
-    orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
-    take: 11,
+  return resolveAuthorizedBusinessForInternalAudit({
+    user,
+    businessId,
+    exactName,
+    maxIdentifierLength: MAX_IDENTIFIER_LENGTH,
+    maxBusinessNameLength: MAX_BUSINESS_NAME_LENGTH,
+    findByExactName: async (name, authorizedOrganizationIds) => (await prisma.business.findMany({
+      where: { nombre: name, organizationId: { in: authorizedOrganizationIds } },
+      select: {
+        id: true,
+        nombre: true,
+        organizationId: true,
+        createdAt: true,
+        analysisHistory: { orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 1, select: { createdAt: true } },
+      },
+      orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+      take: 11,
+    })).flatMap((match) => match.organizationId ? [{
+      id: match.id,
+      name: match.nombre,
+      organizationId: match.organizationId,
+      createdAt: match.createdAt,
+      latestAnalysisAt: match.analysisHistory[0]?.createdAt || null,
+    }] : []),
+    authorizeById: async (id) => {
+      const access = await authorizeBusiness(id, "business.read");
+      return access.ok ? { ok: true as const, access } : access;
+    },
   });
-  if (!matches.length) return { error: apiError("not_found", 404) };
-  if (matches.length > 1) {
-    return {
-      error: NextResponse.json({
-        error: "ambiguous_business_name",
-        candidates: matches.slice(0, 10).map((match) => ({ id: match.id, name: match.nombre })),
-      }, { status: 409, headers: { "Cache-Control": "private, no-store" } }),
-    };
-  }
-  return { businessId: matches[0].id };
 }
 
 export async function GET(req: NextRequest) {
   try {
     const auth = await requireUser();
     if (!auth.ok) return apiError("unauthorized", 401);
-    if (auth.user.internalRole !== "INTERNAL") return apiError("forbidden", 403);
-
-    const resolved = await resolveRequestedBusiness(req, auth.user.id);
-    if (resolved.error) return resolved.error;
-    const businessId = resolved.businessId!;
-    const access = await authorizeBusiness(businessId, "business.read");
-    if (!access.ok) return apiError(access.reason, access.reason === "unauthorized" ? 401 : 403);
-    if (access.user.internalRole !== "INTERNAL") return apiError("forbidden", 403);
+    const resolved = await resolveRequestedBusiness(req, auth.user);
+    if (!resolved.ok) {
+      if (resolved.reason === "ambiguous_business_name") {
+        return NextResponse.json({ error: resolved.reason, candidates: resolved.candidates }, { status: 409, headers: { "Cache-Control": "private, no-store" } });
+      }
+      const status = resolved.reason === "unauthorized" ? 401 : resolved.reason === "validation_error" ? 400 : resolved.reason === "not_found" ? 404 : 403;
+      return apiError(resolved.reason, status);
+    }
+    const access = resolved.access;
+    const businessId = access.business.id;
 
     const business = await prisma.business.findUnique({
       where: { id: businessId },
