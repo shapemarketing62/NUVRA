@@ -15,8 +15,11 @@ export interface AnalysisTrace {
   searched: Array<{ source: string; purpose: string; status: string }>;
   discovery: {
     status: string;
-    queries: Array<{ query: string; intent: string; status: string; resultCount: number }>;
-    candidates: Array<{ url: string; type: string; status: string; matchScore: number; signals: unknown; reason: string; corroboratingSources: string[] }>;
+    primaryWebUrl: string | null;
+    primaryInstagram: string | null;
+    primaryGoogleMaps: string | null;
+    queries: Array<{ query: string; intent: string; status: string; resultCount: number; providers: Array<{ provider: string; status: string; errorType?: string }> }>;
+    candidates: Array<{ title: string; url: string; type: string; status: string; matchScore: number; signals: unknown; reason: string; corroboratingSources: string[] }>;
   };
   found: Array<{ evidenceId: string; kind: string; source: string; stage: string; text: string; confidence: string }>;
   evidenceQuality: Array<{
@@ -142,8 +145,12 @@ export function buildAnalysisTrace(input: {
     searched: Object.entries(input.aggregated.sources).map(([source, evidence]) => ({ source, purpose: `Obtener evidencia comercial para ${input.profile.primaryCustomerAction}.`, status: evidence.status })),
     discovery: {
       status: input.discovery.status || "legacy_unknown",
-      queries: (input.discovery.queryAttempts || []).map((attempt) => ({ query: attempt.query, intent: attempt.intent, status: attempt.status, resultCount: attempt.resultCount })),
+      primaryWebUrl: input.discovery.primaryWebUrl || null,
+      primaryInstagram: input.discovery.primaryInstagram || null,
+      primaryGoogleMaps: input.discovery.primaryGoogleMaps || null,
+      queries: (input.discovery.queryAttempts || []).map((attempt) => ({ query: attempt.query, intent: attempt.intent, status: attempt.status, resultCount: attempt.resultCount, providers: attempt.providers || [] })),
       candidates: (input.discovery.allCandidates || []).map((candidate) => ({
+        title: candidate.title,
         url: candidate.url,
         type: candidate.type,
         status: candidate.status || "unknown",

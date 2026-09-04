@@ -26,6 +26,7 @@ require.extensions[".ts"] = function (module, filename) {
 
 const { buildDiscoveryQueries } = require("../services/discovery/discovery-query-builder.ts");
 const { BusinessDiscoveryService } = require("../services/discovery/business-discovery-service.ts");
+const { SearchProviderUnavailableError, SmartSearchProvider } = require("../services/intelligence/search-source-analyzer.ts");
 const { EntityMatcher } = require("../services/discovery/entity-matcher.ts");
 const { PlatformDiscoveryPlanner } = require("../services/discovery/platform-discovery-planner.ts");
 const { PlatformDiscoveryService } = require("../services/discovery/platform-discovery-service.ts");
@@ -39,7 +40,7 @@ const target = {
   tipoCliente: "B2C",
 };
 
-function searchResult(title, url, snippet) { return { title, url, snippet }; }
+function searchResult(title, url, snippet, metadata) { return { title, url, snippet, ...(metadata ? { metadata } : {}) }; }
 
 test("bootstrap produce consultas reales por marca, núcleo, ubicación, website y local", () => {
   const queries = buildDiscoveryQueries({ ...target, name: "Estética Dental argentina", category: "Estética dental" });
@@ -114,4 +115,53 @@ test("Search sin resultados y Search caído conservan estados terminales distint
   const base = { businessId: "qa", findings: [], byCategory: {}, byDimension: {}, deduplicated: [], evaluatedAt: new Date() };
   assert.equal(buildTerminalSourceProjection({ ...base, sources: { search: evidence({ outcome: "no_results" }) } }).statuses.search, "not_found");
   assert.equal(buildTerminalSourceProjection({ ...base, sources: { search: evidence({ outcome: "provider_unavailable" }) } }).statuses.search, "unavailable");
+});
+
+test("discovery conserva el provider real por consulta sin exponer credenciales", async () => {
+  const completed = await new BusinessDiscoveryService({
+    search: async () => [searchResult("Clínica QA", "https://clinica-qa.example", "Odontología en Recoleta", { acquisitionProvider: "tavily" })],
+  }).discover({ ...target, name: "Clínica QA" }, { queries: [{ query: '"Clínica QA"', intent: "identity" }] });
+  assert.deepEqual(completed.queryAttempts[0].providers, [{ provider: "tavily", status: "completed" }]);
+
+  const unavailable = await new BusinessDiscoveryService({
+    search: async () => { throw new SearchProviderUnavailableError([
+      { provider: "tavily", status: "unavailable", errorType: "TypeError" },
+      { provider: "duckduckgo", status: "unavailable", errorType: "Error" },
+    ]); },
+  }).discover({ ...target, name: "Clínica QA" }, { queries: [{ query: '"Clínica QA"', intent: "identity" }] });
+  assert.equal(unavailable.status, "provider_unavailable");
+  assert.deepEqual(unavailable.queryAttempts[0].providers, [
+    { provider: "tavily", status: "unavailable", errorType: "TypeError" },
+    { provider: "duckduckgo", status: "unavailable", errorType: "Error" },
+  ]);
+  assert.doesNotMatch(JSON.stringify(unavailable), /api[_-]?key|authorization|database_url/i);
+});
+
+test("discovery conserva provider aun cuando una consulta válida no devuelve resultados", async () => {
+  const provider = {
+    search: async () => [],
+    getAttempts: () => [{ provider: "tavily", status: "no_results" }],
+  };
+  const result = await new BusinessDiscoveryService(provider).discover(
+    { ...target, name: "Clínica sin índice" },
+    { queries: [{ query: '"Clínica sin índice"', intent: "identity" }] },
+  );
+  assert.equal(result.status, "no_results");
+  assert.deepEqual(result.queryAttempts[0].providers, [{ provider: "tavily", status: "no_results" }]);
+});
+
+test("SmartSearchProvider audita Tavily sin resultados sin alterar el fallback", async () => {
+  const previousKey = process.env.TAVILY_API_KEY;
+  process.env.TAVILY_API_KEY = ["configured", "for", "test"].join("-");
+  try {
+    const provider = new SmartSearchProvider();
+    provider.tavily = { search: async () => [] };
+    provider.ddg = { search: async () => { throw new Error("DDG no debe ejecutarse"); } };
+    const results = await provider.search("consulta sin resultados", target);
+    assert.deepEqual(results, []);
+    assert.deepEqual(provider.getAttempts("consulta sin resultados"), [{ provider: "tavily", status: "no_results" }]);
+  } finally {
+    if (previousKey === undefined) delete process.env.TAVILY_API_KEY;
+    else process.env.TAVILY_API_KEY = previousKey;
+  }
 });

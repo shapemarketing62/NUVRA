@@ -15,6 +15,13 @@ export interface SearchResult {
 
 export interface SearchProvider {
   search(query: string, business: Business, options?: { signal?: AbortSignal }): Promise<SearchResult[]>;
+  getAttempts?(query: string): SearchProviderTraceAttempt[];
+}
+
+export interface SearchProviderTraceAttempt {
+  provider: "tavily" | "duckduckgo";
+  status: "completed" | "no_results" | "unavailable";
+  errorType?: string;
 }
 
 /**
@@ -52,7 +59,7 @@ export class DuckDuckGoProvider implements SearchProvider {
       });
 
       options.signal?.removeEventListener("abort", onAbort);
-      return results;
+      return results.map((result) => ({ ...result, metadata: { acquisitionProvider: "duckduckgo" } }));
     } finally {
       if (browser) await browser.close().catch(() => {});
     }

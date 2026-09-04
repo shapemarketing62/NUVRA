@@ -15,6 +15,7 @@ export interface DiscoveryQueryAttempt {
   status: "completed" | "no_results" | "provider_unavailable";
   resultCount: number;
   errorType?: string;
+  providers?: Array<{ provider: string; status: "completed" | "no_results" | "unavailable"; errorType?: string }>;
 }
 
 export interface DiscoveryResult {
@@ -62,11 +63,21 @@ export class BusinessDiscoveryService {
       if (context.signal?.aborted) throw Object.assign(new Error("discovery_canceled"), { name: "AbortError" });
       try {
         const results = await this.searchProvider.search(item.query, mockBusiness, { signal: context.signal });
-        queryAttempts.push({ query: item.query, intent: item.intent, status: results.length ? "completed" : "no_results", resultCount: results.length });
+        const providerTrace = this.searchProvider.getAttempts?.(item.query) || [];
+        const providers = providerTrace.length ? providerTrace : Array.from(new Set(results.map((result) => result.metadata?.acquisitionProvider).filter((value): value is string => typeof value === "string")))
+          .map((provider) => ({ provider, status: results.length ? "completed" as const : "no_results" as const }));
+        queryAttempts.push({ query: item.query, intent: item.intent, status: results.length ? "completed" : "no_results", resultCount: results.length, ...(providers.length ? { providers } : {}) });
         for (const result of results) rawResults.push({ result, query: item.query, intent: item.intent });
       } catch (error) {
         if (context.signal?.aborted) throw error;
-        queryAttempts.push({ query: item.query, intent: item.intent, status: "provider_unavailable", resultCount: 0, errorType: error instanceof SearchProviderUnavailableError ? error.name : error instanceof Error ? error.name : "ProviderError" });
+        queryAttempts.push({
+          query: item.query,
+          intent: item.intent,
+          status: "provider_unavailable",
+          resultCount: 0,
+          errorType: error instanceof SearchProviderUnavailableError ? error.name : error instanceof Error ? error.name : "ProviderError",
+          ...(error instanceof SearchProviderUnavailableError ? { providers: error.attempts } : {}),
+        });
         console.warn(`[BUSINESS_DISCOVERY] Search query unavailable for "${item.query}":`, error instanceof Error ? error.name : "ProviderError");
       }
     });

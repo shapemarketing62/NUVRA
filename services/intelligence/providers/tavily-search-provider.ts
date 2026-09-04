@@ -63,6 +63,7 @@ export class TavilySearchProvider implements SearchProvider {
       url: r.url || "",
       // Tavily devuelve "content" como snippet
       snippet: r.content || "",
+      metadata: { acquisitionProvider: "tavily" },
     }));
   }
 }
