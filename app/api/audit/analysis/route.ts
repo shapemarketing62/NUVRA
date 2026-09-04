@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { apiError, handleApiError } from "@/lib/server/api-response";
-import { authorizeBusiness, requireUser } from "@/lib/server/authorization";
+import { authorizeBusiness, requireUser, buildAuthorizationDebug } from "@/lib/server/authorization";
 import { resolveAuthorizedBusinessForInternalAudit } from "@/lib/internal-analysis-audit-access";
 
 const MAX_IDENTIFIER_LENGTH = 100;
@@ -131,13 +131,16 @@ export async function GET(req: NextRequest) {
     const resolved = await resolveRequestedBusiness(req, auth.user);
     if (!resolved.ok) {
       if (resolved.reason === "ambiguous_business_name") {
-        return NextResponse.json({ error: resolved.reason, candidates: resolved.candidates }, { status: 409, headers: { "Cache-Control": "private, no-store" } });
+        const candidateDebug = await Promise.all(resolved.candidates.slice(0, 10).map((candidate) => buildAuthorizationDebug(candidate.id)));
+        return NextResponse.json({ error: resolved.reason, candidates: resolved.candidates, authorizationDebug: { requestedBy: "name", candidates: candidateDebug } }, { status: 409, headers: { "Cache-Control": "private, no-store" } });
       }
       const status = resolved.reason === "unauthorized" ? 401 : resolved.reason === "validation_error" ? 400 : resolved.reason === "not_found" ? 404 : 403;
-      return apiError(resolved.reason, status);
+      const debug = await buildAuthorizationDebug(req.nextUrl.searchParams.get("businessId") || req.nextUrl.searchParams.get("id"));
+      return NextResponse.json({ ...apiError(resolved.reason, status), authorizationDebug: { requestedBy: "businessId", ...debug } });
     }
     const access = resolved.access;
     const businessId = access.business.id;
+    const authorizationDebug = await buildAuthorizationDebug(businessId);
 
     const business = await prisma.business.findUnique({
       where: { id: businessId },
@@ -312,6 +315,7 @@ export async function GET(req: NextRequest) {
           || 0,
       },
       sourceStatuses: Object.fromEntries(allSourceKeys.map((source) => [source, safeText(statusFor(source), 50) || "unknown"])),
+      authorizationDebug,
     };
 
     return NextResponse.json(response, { headers: { "Cache-Control": "private, no-store" } });
