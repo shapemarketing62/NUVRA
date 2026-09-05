@@ -40,6 +40,11 @@ const TECHNICAL_GLOSSARY: Array<[RegExp, string]> = [
   [/\bcuello de botella\b/gi, "principal obstáculo"],
   [/\btráfico\b/gi, "visitas"],
   [/\bprospectos?\b/gi, "personas interesadas"],
+  [/\bhipótesis causal\b/gi, "explicación por comprobar"],
+  [/\bhipótesis\b/gi, "explicación por comprobar"],
+  [/\bintervención\b/gi, "acción"],
+  [/\bseñales\b/gi, "datos observados"],
+  [/\bseñal\b/gi, "dato observado"],
   [/\bnav\/header\b/gi, "menú superior de la página"],
   [/\balt text\b/gi, "descripciones de texto en imágenes"],
   [/\borgánica\b/gi, "de forma natural y sin pagar publicidad"],
@@ -61,6 +66,34 @@ export function simplifyTechnicalText(text: string | null | undefined): string {
     .replace(/\s+—\s+/g, ", ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+export interface ScorePresentation {
+  label: string;
+  explanation: string;
+  limited: boolean;
+}
+
+export function presentScoreContext(total: number | null, evaluatedAreas: number, totalAreas: number): ScorePresentation {
+  const evaluatedRatio = totalAreas > 0 ? evaluatedAreas / totalAreas : 0;
+  const limited = evaluatedAreas < 4 || evaluatedRatio < .6;
+  if (total === null) return {
+    label: evaluatedAreas ? "Lectura en construcción" : "Todavía falta información para evaluar el negocio",
+    explanation: evaluatedAreas
+      ? `NUVRA pudo evaluar ${evaluatedAreas} ${evaluatedAreas === 1 ? "área" : "áreas"}. El puntaje general se completará cuando haya información suficiente del resto del negocio.`
+      : "No obtuvimos suficiente información pública todavía. Las fuentes revisadas y pendientes aparecen más abajo.",
+    limited: true,
+  };
+  if (limited) return {
+    label: total >= 70 ? "Buenas señales en lo evaluado" : total >= 50 ? "Resultados aprovechables en lo evaluado" : "Hay aspectos importantes para trabajar",
+    explanation: `Este puntaje resume las ${evaluatedAreas} ${evaluatedAreas === 1 ? "área" : "áreas"} que NUVRA pudo evaluar. Todavía falta información para entender el negocio completo y el resultado puede ajustarse cuando analicemos más fuentes.`,
+    limited: true,
+  };
+  return {
+    label: total >= 70 ? "Base sólida" : total >= 50 ? "Base aprovechable" : "Hay fricciones importantes",
+    explanation: "El puntaje da contexto. La prioridad se define por tu objetivo y la información comprobada.",
+    limited: false,
+  };
 }
 
 export const PRESENTATION_LIMITS = {

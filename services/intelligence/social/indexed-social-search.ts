@@ -3,6 +3,7 @@ import type { SearchProvider, SearchResult } from "../providers/search-provider.
 import { TavilySearchProvider } from "../providers/tavily-search-provider.ts";
 import type { AcquisitionMethod, SocialBusinessTarget, SocialCollector, SocialPlatform, SocialPublicContent, SocialRawCollection } from "./social-source-provider.ts";
 import { SourceRelevancePlanner } from "./source-relevance-planner.ts";
+import { businessNameCoreTokens } from "../../discovery/business-name-normalization.ts";
 
 const DOMAINS: Record<SocialPlatform, string> = { x: "x.com", tiktok: "tiktok.com", reddit: "reddit.com", facebook: "facebook.com", linkedin: "linkedin.com", youtube: "youtube.com" };
 const cache = new Map<string, { expiresAt: number; value: SocialRawCollection }>();
@@ -101,7 +102,27 @@ function emptyRaw(level: "not_found" | "partial" | "discovered" | "analyzed" | "
 function toBusiness(target: SocialBusinessTarget) { return { id: target.businessId, nombre: target.name, rubro: target.industry, ubicacion: target.location, webUrl: target.website } as Business; }
 function belongsToPlatform(url: string, platform: SocialPlatform) { try { return new URL(url).hostname.replace(/^www\./, "").endsWith(DOMAINS[platform]); } catch { return false; } }
 function canonicalUrl(url: string) { try { const value = new URL(url); value.hash = ""; value.search = ""; return value.toString().replace(/\/$/, ""); } catch { return url; } }
-function indexedEntityConfidence(result: SearchResult, target: SocialBusinessTarget) { const text = normalize(`${result.title} ${result.snippet}`); const nameTokens = normalize(target.name).split(" ").filter((item) => item.length > 2); let score = nameTokens.length && nameTokens.every((item) => text.includes(item)) ? .48 : nameTokens.some((item) => text.includes(item)) ? .22 : 0; const industryTokens = normalize(target.industry).split(" ").filter((item) => item.length > 4); if (industryTokens.some((item) => text.includes(item))) score += .17; const locationTokens = normalize(target.location).split(" ").filter((item) => item.length > 3); if (locationTokens.some((item) => text.includes(item))) score += .18; if (target.website && result.snippet.toLowerCase().includes(host(target.website))) score += .25; return Math.min(1, Math.round(score * 100) / 100); }
+function indexedEntityConfidence(result: SearchResult, target: SocialBusinessTarget) {
+  const text = normalize(`${result.title} ${result.snippet}`);
+  const coreTokens = businessNameCoreTokens(target.name);
+  const matchedCore = coreTokens.filter((item) => text.includes(item));
+  const exactCore = coreTokens.length > 0 && matchedCore.length === coreTokens.length;
+  let score = exactCore ? .6 : coreTokens.length > 1 && matchedCore.length / coreTokens.length >= .75 ? .3 : 0;
+  const industryTokens = normalize(target.industry).split(" ").filter((item) => item.length > 4);
+  if (industryTokens.some((item) => text.includes(item))) score += .12;
+  const locationTokens = normalize(target.location).split(" ").filter((item) => item.length > 3 && !["buenos", "aires", "argentina"].includes(item));
+  if (locationTokens.some((item) => text.includes(item))) score += .16;
+  const officialHost = host(target.website || "");
+  const officialHostCorroborated = Boolean(officialHost && result.snippet.toLowerCase().includes(officialHost));
+  if (officialHostCorroborated) score += .3;
+  const resultHost = host(result.url);
+  if (countryConflict(resultHost, target.location || "")) return 0;
+  // Category/location can corroborate a name, but never replace the complete
+  // commercial identity. This prevents generic industry accounts from passing.
+  if (!exactCore && !officialHostCorroborated) return Math.min(.59, Math.round(score * 100) / 100);
+  return Math.min(1, Math.round(score * 100) / 100);
+}
+function countryConflict(domain: string, location: string) { const normalized = normalize(location); const expected = normalized.includes("argentina") ? "ar" : normalized.includes("chile") ? "cl" : null; const actual = domain.match(/\.([a-z]{2})$/)?.[1]; return Boolean(expected && actual && ["ar", "cl", "mx", "co", "uy", "pe", "es"].includes(actual) && actual !== expected); }
 function looksLikeProfile(platform: SocialPlatform, url: string, title: string) { const path = (() => { try { return new URL(url).pathname; } catch { return ""; } })(); if (platform === "youtube") return /\/(@|channel\/|c\/)/.test(path); if (platform === "linkedin") return /\/company\//.test(path); if (platform === "reddit") return false; return path.split("/").filter(Boolean).length <= 2 && !/status|video|watch|posts|reel/i.test(path + title); }
 function toContent(platform: SocialPlatform, result: SearchResult, target: SocialBusinessTarget): SocialPublicContent { const external = platform === "youtube" || platform === "reddit" || !normalize(result.title).includes(normalize(target.name)); return { id: `search:${platform}:${hash(result.url)}`, ownerType: external ? (platform === "youtube" ? "creator" : "customer") : "brand", title: result.title, text: result.snippet, url: result.url, publishedAt: extractDate(result.snippet), acquisitionMethod: "search_index", context: platform === "reddit" ? { subreddit: subredditFromUrl(result.url) } : {} }; }
 function opinionBearing(text: string) { return text.length >= 35 && /recomiend|mi experiencia|me atend|excelente|pesim|queja|demora|tardaron|no cumpli|muy buen|muy mal/i.test(text); }

@@ -50,7 +50,8 @@ const business = {
 };
 
 function finding(source, category = "presencia", type = "positive") {
-  return { id: `${source}-finding`, category, type, impact: "medium", evidence: `Evidencia verificable de ${source}`, source, attribution: `${source}.test`, weight: 0.5, confidence: "ALTA" };
+  const attribution = source === "web" ? business.webUrl : `https://${source}.test/numa-home`;
+  return { id: `${source}-finding`, category, type, impact: "medium", evidence: `Evidencia verificable de NÜMA Home en ${source}`, source, attribution, weight: 0.5, confidence: "ALTA" };
 }
 
 function fakeSource(type, outcome = "ok", category = "presencia") {

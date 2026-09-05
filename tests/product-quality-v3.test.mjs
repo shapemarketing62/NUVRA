@@ -46,7 +46,7 @@ test("la UI presenta síntesis y no expone internals técnicos", () => {
   const source = files.map((file) => fs.readFileSync(file, "utf8")).join("\n");
   assert.doesNotMatch(source, /conclusionConfidence|evidenceSufficiency|priorityScore|counterfactual/i);
   assert.match(source, /Lo más importante ahora/);
-  assert.match(source, /Qué necesitamos validar/);
+  assert.match(source, /Qué todavía no sabemos/);
   assert.match(source, /Qué no vamos a priorizar ahora/);
   assert.match(source, /Criterio de éxito/);
 });

@@ -7,6 +7,11 @@ export interface ActionDecisionDetails {
   expectedResult: string;
   estimatedCost: string;
   metric: string;
+  baseline: string | null;
+  timeframe: string;
+  successCriterion: string;
+  ifWorks: string;
+  ifNot: string;
   causal?: import("./causal-decision-engine.ts").CausalDecision;
   experiment?: import("./causal-decision-engine.ts").ExperimentDesign;
 }

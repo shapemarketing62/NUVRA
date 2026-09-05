@@ -3,7 +3,7 @@
 import type { CSSProperties } from "react";
 import { useDashboardData } from "@/lib/use-dashboard-data";
 import { Btn, Card, DemoBadge, EmptyState, ErrorState, PageHeader, PageSkeleton, ScoreRing, StatusBadge } from "@/components/ui";
-import { getFriendlyDimensionName, simplifyTechnicalText } from "@/lib/simple-language-presenter";
+import { getFriendlyDimensionName, presentScoreContext, simplifyTechnicalText } from "@/lib/simple-language-presenter";
 import { AnalysisFreshnessNotice } from "@/components/dashboard/analysis-freshness-notice";
 import { getDashboardSourceLabel } from "@/lib/dashboard-view-model";
 
@@ -13,8 +13,9 @@ export default function DashboardHomePage() {
   const data = useDashboardData();
   if (data.loading) return <PageSkeleton />;
   if (data.error) return <ErrorState message={data.error === "Sin negocio" ? "Primero necesitás registrar un negocio para ver su estado." : data.error} onRetry={() => { window.location.href = "/onboarding"; }} />;
-  const { business, analysis, analysisFreshness, score, canonicalDiagnosis, actionsSummary, sources, isDemo } = data;
+  const { business, analysis, analysisFreshness, score, canonicalDiagnosis, actionsSummary, sources, intelligence, isDemo } = data;
   const areas = score?.dimensions.filter((item) => item.applicable) || [];
+  const scorePresentation = presentScoreContext(score?.total ?? null, areas.length, score?.dimensions.length || 0);
   const action = actionsSummary.immediateAction;
   const priorityActions = [action, ...actionsSummary.inProgress, ...actionsSummary.pending]
     .filter((item): item is NonNullable<typeof action> => Boolean(item))
@@ -30,10 +31,10 @@ export default function DashboardHomePage() {
         <ScoreRing value={score?.total ?? null} status={score?.total == null ? "PENDIENTE" : "COMPLETO"} />
         <div>
           <strong className="dashboard-score-reading" style={{ fontSize: "20px", fontWeight: 700, color: "var(--text-primary)" }}>
-            {score?.total == null && areas.length === 0 ? "Todavía falta información para evaluar el negocio" : score?.total == null ? "Lectura en construcción" : score.total >= 70 ? "Base sólida" : score.total >= 50 ? "Base aprovechable" : "Hay fricciones importantes"}
+            {scorePresentation.label}
           </strong>
           <p style={{ marginTop: "var(--space-3)", color: "var(--text-secondary)", fontSize: "15px", lineHeight: 1.5 }}>
-            {score?.total == null && areas.length === 0 ? "No obtuvimos suficiente información pública todavía. Las fuentes revisadas y pendientes aparecen más abajo." : "El puntaje da contexto. La prioridad se define por tu objetivo y la información comprobada."}
+            {scorePresentation.explanation}
           </p>
         </div>
       </div>
@@ -148,14 +149,20 @@ export default function DashboardHomePage() {
     </div>
     
     <section className="dashboard-sources-panel">
-      <div className="dashboard-card-label">Fuentes</div>
-      {sources.slice(0, 7).map((source) => (
-        <div className="source-row" key={source.key}>
-          <span style={{ color: "var(--text-primary)", fontSize: "14px" }}>{source.label}</span>
+      <div className="dashboard-card-label">Tu presencia digital</div>
+      {intelligence?.crossChannelInterpretation ? <p className="section-description" style={{ gridColumn: "1 / -1", maxWidth: 720, marginBottom: 8 }}>{simplifyTechnicalText(intelligence.crossChannelInterpretation)}</p> : null}
+      {(intelligence?.channelMetrics.length ? intelligence.channelMetrics : sources).slice(0, 8).map((source) => {
+        const metrics = "metrics" in source ? source.metrics : [];
+        return <div className="source-row" key={"source" in source ? source.source : source.key} style={{ alignItems: "start" }}>
+          <div style={{ minWidth: 0 }}>
+            <strong style={{ display: "block", color: "var(--text-primary)", fontSize: "14px", fontWeight: 600 }}>{source.label}</strong>
+            {"summary" in source && source.summary ? <p style={{ color: "var(--text-secondary)", fontSize: "12px", lineHeight: 1.5, marginTop: 4 }}>{simplifyTechnicalText(source.summary)}</p> : null}
+            {metrics.length ? <details style={{ marginTop: 8 }}><summary style={{ color: "var(--text-secondary)", fontSize: "12px", cursor: "pointer" }}>Ver qué observamos</summary><div style={{ display: "grid", gap: 6, marginTop: 8 }}>{metrics.slice(0, 8).map((metric) => <div key={metric.key} style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: "12px", color: "var(--text-secondary)" }}><span>{metric.label}</span><strong style={{ color: "var(--text-primary)", textAlign: "right" }}>{metric.availability === "requires_connection" ? "Disponible al conectar" : metric.value === null ? "Sin información" : typeof metric.value === "boolean" ? metric.value ? "Sí" : "No" : metric.detail || metric.value}</strong></div>)}</div></details> : null}
+          </div>
           <StatusBadge tone={sourceTone(source.status)}>{getDashboardSourceLabel(source.status)}</StatusBadge>
-        </div>
-      ))}
-      {!sources.length && <p className="section-description">Las fuentes aparecerán con el próximo análisis.</p>}
+        </div>;
+      })}
+      {!sources.length && !intelligence?.channelMetrics.length && <p className="section-description">Las fuentes aparecerán con el próximo análisis.</p>}
     </section>
   </div>;
 }

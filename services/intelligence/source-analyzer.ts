@@ -29,6 +29,11 @@ export interface EvidenceFinding {
   reputationEvidenceConfidence?: number;
   reputationTopic?: string;
   acquisitionMethod?: "official_api" | "authenticated_integration" | "public_page" | "search_index" | "declared_by_user";
+  entityValidation?: {
+    status: "CONFIRMED" | "PROBABLE" | "AMBIGUOUS" | "REJECTED";
+    confidence: number;
+    reasons: string[];
+  };
 }
 
 export interface SourceRelevance {

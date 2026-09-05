@@ -61,6 +61,22 @@ export interface DashboardExternalMentionsSummary {
   byType: Record<string, number>;
 }
 
+export interface DashboardChannelMetric {
+  key: string;
+  label: string;
+  value: string | number | boolean | null;
+  availability: "observed" | "requires_connection" | "unavailable";
+  detail: string | null;
+}
+
+export interface DashboardChannelMetricsView {
+  source: string;
+  label: string;
+  status: DashboardSourceStatus;
+  summary: string;
+  metrics: DashboardChannelMetric[];
+}
+
 export interface DashboardActionView {
   id: string;
   title: string;
@@ -150,6 +166,8 @@ export interface DashboardViewModel {
     discoveredInstagram: string | null;
     competitorSummary: DashboardCompetitorSummary | null;
     externalMentionsSummary: DashboardExternalMentionsSummary | null;
+    channelMetrics: DashboardChannelMetricsView[];
+    crossChannelInterpretation: string | null;
   } | null;
   sources: Array<{
     key: string;
@@ -224,6 +242,13 @@ export interface DashboardViewModel {
     kpi: string | null;
     horizon: string | null;
     notPriority: string[];
+    phases: Array<{
+      label: string;
+      objective: string;
+      priorities: string[];
+      metric: string | null;
+      advanceWhen: string;
+    }>;
   } | null;
   actions: DashboardActionView[];
   actionsSummary: {
@@ -473,6 +498,7 @@ export function buildDashboardViewModel(rawValue: unknown, options: { isDemo?: b
   const latestHistory = record(historyRecords[0]);
   const snapshot = record(json(latestHistory.snapshot, {}));
   const intelligenceRecord = record(snapshot.intelligence);
+  const crossChannelRecord = record(record(snapshot.analysisTrace).crossChannel);
   const rawSourceStatuses = record(intelligenceRecord.sourceStatuses);
   const rawSourceMessages = record(intelligenceRecord.sourceMessages);
   const planTier = normalizePlanTier(raw.planTier);
@@ -660,6 +686,28 @@ export function buildDashboardViewModel(rawValue: unknown, options: { isDemo?: b
     totalRejected: nullableNumber(externalMentionsRaw.totalRejected),
     byType: Object.fromEntries(Object.entries(record(externalMentionsRaw.byType)).filter(([, value]) => typeof value === "number")) as Record<string, number>,
   } : null;
+  const channelMetrics: DashboardChannelMetricsView[] = array(intelligenceRecord.channelMetrics).map((item) => {
+    const channel = record(item);
+    const source = text(channel.source);
+    return {
+      source,
+      label: SOURCE_LABELS[source] || source.replaceAll("_", " "),
+      status: sourceStatus(channel.status),
+      summary: text(channel.summary),
+      metrics: array(channel.metrics).map((rawMetric) => {
+        const metric = record(rawMetric);
+        const availability = text(metric.availability);
+        const value = metric.value;
+        return {
+          key: text(metric.key),
+          label: text(metric.label),
+          value: typeof value === "string" || typeof value === "number" || typeof value === "boolean" ? value : null,
+          availability: (availability === "observed" || availability === "requires_connection" ? availability : "unavailable") as DashboardChannelMetric["availability"],
+          detail: nullableText(metric.detail),
+        };
+      }).filter((metric) => metric.key && metric.label),
+    } satisfies DashboardChannelMetricsView;
+  }).filter((channel) => channel.source);
   const competitorSourceStatus = sourceStatus(rawSourceStatuses.competitor);
   const competitionStatus = competitors.length ? "available" : competitorSourceStatus === "analyzed" ? "limited" : "unavailable";
   const businessUnderstanding = buildBusinessUnderstandingView({ business: raw, goal, snapshot });
@@ -740,6 +788,8 @@ export function buildDashboardViewModel(rawValue: unknown, options: { isDemo?: b
         totalCandidatesExtracted: nullableNumber(competitorRaw.totalCandidatesExtracted),
       } : null,
       externalMentionsSummary: externalMentions,
+      channelMetrics,
+      crossChannelInterpretation: nullableText(crossChannelRecord.interpretation),
     } : null,
     sources,
     score: persistedScore ? {
@@ -796,6 +846,7 @@ export function buildDashboardViewModel(rawValue: unknown, options: { isDemo?: b
       kpi: pendingActions[0]?.details?.metric || pendingActions[0]?.indicatorToImprove || actionItems[0]?.details?.metric || actionItems[0]?.indicatorToImprove || null,
       horizon: nullableText(analyzedInputGoal.plazoLabel) || nullableText(analyzedProfileGoal.timeframeLabel) || (nullableNumber(scoreRecord.plazoDias) ? `${nullableNumber(scoreRecord.plazoDias)} días` : null),
       notPriority: primaryCausal?.alternativesNotPrioritized || [],
+      phases: buildStrategyPhases(actionItems, nullableText(analyzedInputGoal.plazoLabel) || nullableText(analyzedProfileGoal.timeframeLabel), pendingActions[0]?.details?.metric || pendingActions[0]?.indicatorToImprove || null),
     } : null,
     actions: actionItems,
     actionsSummary: {
@@ -826,6 +877,28 @@ export function buildDashboardViewModel(rawValue: unknown, options: { isDemo?: b
   };
   viewModel.evidence = evidenceProjection({ snapshot, mainConclusion, objective: analyzedObjective });
   return viewModel;
+}
+
+function buildStrategyPhases(actions: DashboardActionView[], horizon: string | null, primaryMetric: string | null) {
+  if (!actions.length) return [];
+  const ordered = [...actions].sort((a, b) => (a.order || 0) - (b.order || 0));
+  const chunks = [ordered.slice(0, 1), ordered.slice(1, 3), ordered.slice(3, 5)].filter((items) => items.length);
+  const labels = chunks.length >= 3
+    ? ["Validar y corregir", "Aplicar lo que funciona", "Revisar y decidir"]
+    : chunks.length === 2
+      ? ["Primero", "Después"]
+      : ["Primera etapa"];
+  return chunks.map((items, index) => {
+    const details = items[0]?.details;
+    const metric = details?.metric || items[0]?.indicatorToImprove || primaryMetric;
+    return {
+      label: labels[index],
+      objective: details?.expectedResult || items[0]?.description || items[0]?.title || "Avanzar sobre la prioridad actual.",
+      priorities: items.map((item) => item.title),
+      metric: metric || null,
+      advanceWhen: details?.successCriterion || details?.experiment?.successCriteria || (metric ? `Cuando exista una mejora sostenida en ${metric}.` : `Cuando la intervención tenga un resultado observable dentro de ${horizon || "este período"}.`),
+    };
+  });
 }
 
 function friendlyActionArea(value: string) {

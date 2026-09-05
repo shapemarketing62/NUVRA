@@ -17,6 +17,7 @@ import { currentLogContext } from "@/lib/server/logger";
 import { inferCustomerType } from "@/lib/business-context";
 import { createAnalysisInputSnapshot } from "@/lib/analysis-freshness";
 import { buildTerminalSourceProjection } from "@/services/discovery/source-status-lifecycle";
+import { buildChannelMetrics } from "@/services/intelligence/channel-metrics";
 
 // Force recompilation with timestamp: REBUILD_TIMESTAMP
 
@@ -493,6 +494,7 @@ export async function runFullAnalysis(businessId: string, options: { signal?: Ab
           pagesAnalyzed: analysisResult.pagesAnalyzed,
           intelligence: {
             coverage: biResult.coverage.total,
+            channelMetrics: buildChannelMetrics(biResult.aggregatedEvidence),
             sourceStatuses: terminalSources.statuses,
             sourceMessages: terminalSources.messages,
             discoveredInstagram: biResult.platformDiscoveryReport.entries.find((entry) => entry.platform === "instagram" && (entry.status === "VALIDATED" || entry.status === "ANALYZED"))?.url || biResult.discoveryResult?.primaryInstagram || null,

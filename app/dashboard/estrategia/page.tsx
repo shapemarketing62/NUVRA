@@ -64,5 +64,18 @@ export default function EstrategiaPage() {
         <strong>{simplifyTechnicalText(canonicalStrategy.expectedResult || canonicalStrategy.objective || "Resultado por definir")}</strong>
       </div>
     </div>
+
+    {canonicalStrategy.phases.length ? <section className="analysis-module analysis-module-wide" style={{ marginTop: 18 }}>
+      <div className="analysis-kicker">Plan para este período</div>
+      <div className="analysis-facts">
+        {canonicalStrategy.phases.map((phase) => <div className="analysis-fact" key={phase.label}>
+          <strong>{phase.label}</strong>
+          <p>{simplifyTechnicalText(phase.objective)}</p>
+          <ul>{phase.priorities.map((priority) => <li key={priority}>{simplifyTechnicalText(priority)}</li>)}</ul>
+          {phase.metric ? <p><b>Qué mirar:</b> {simplifyTechnicalText(phase.metric)}</p> : null}
+          <p><b>Cuándo avanzar:</b> {simplifyTechnicalText(phase.advanceWhen)}</p>
+        </div>)}
+      </div>
+    </section> : null}
   </div>;
 }

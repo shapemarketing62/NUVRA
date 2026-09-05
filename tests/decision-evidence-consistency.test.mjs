@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { GoalInterpreter } from "../services/intelligence/goal-interpreter.ts";
 import { buildProfileDiagnosis } from "../services/diagnostic/diagnostic-engine.ts";
 import { buildProfileStrategy } from "../services/strategy/strategy-engine.ts";
+import { decodeActionDecisionDetails } from "../services/strategy/action-decision-details.ts";
+import { presentScoreContext } from "../lib/simple-language-presenter.ts";
 
 const evidence = (id, kind, text, polarity = "neutral", source = kind === "ObservedEvidence" ? "web" : "onboarding") => ({
   id, kind, source, text, polarity, confidence: "ALTA", journeyStage: "action", possibleImpact: "high", attribution: source,
@@ -68,4 +70,31 @@ test("awareness con evidencia insuficiente no convierte el objetivo en problema 
   assert.doesNotMatch(text, /el problema (es|principal es).*alcance|falta de alcance|problema de visibilidad/);
   assert.match(result.strategy.distanciaObjetivo, /medir/);
   assert.ok(result.strategy.actions.every((action) => action.framework === "EvidenceValidation"));
+});
+
+test("un score alto con pocas áreas se presenta con alcance limitado", () => {
+  const presentation = presentScoreContext(71, 3, 7);
+  assert.equal(presentation.label, "Buenas señales en lo evaluado");
+  assert.equal(presentation.limited, true);
+  assert.match(presentation.explanation, /3 áreas/);
+  assert.match(presentation.explanation, /falta información para entender el negocio completo/i);
+  assert.doesNotMatch(presentation.explanation, /31%|coverage|cobertura/i);
+});
+
+test("consulta sin problema validado usa diagnóstico cotidiano y un lugar editable comprobado", () => {
+  const observed = [evidence("observed:official-web", "ObservedEvidence", "El sitio oficial explica tratamientos, ubicación y formas de contacto.", "positive")];
+  const inputProfile = profile({ goal: "aumentar consultas calificadas", observed });
+  const score = { ...emptyScore, total: 71, coverage: 31, dimensions: emptyScore.dimensions.map((item, index) => ({ ...item, points: index < 3 ? [65, 73, 75][index] : null, confidence: index < 3 ? "MEDIA" : "INSUFICIENTE" })) };
+  const result = analyze(inputProfile, score);
+  assert.match(result.diagnosis.bottleneck.title, /medir cuántas consultas reales genera cada canal/i);
+  assert.match(result.diagnosis.bottleneck.explanation, /todavía no sabemos cuántos resultados reales genera cada canal/i);
+  assert.doesNotMatch(result.diagnosis.bottleneck.explanation, /validar alrededor|intervención|hipótesis causal/i);
+  assert.match(result.strategy.distanciaObjetivo, /conviene empezar por explicar cuándo conviene consultar/i);
+  assert.match(result.strategy.distanciaObjetivo, /registrar.*y su origen/i);
+  assert.doesNotMatch(result.strategy.distanciaObjetivo, /hipótesis|intervención|validar alrededor/i);
+  const growthAction = result.strategy.actions.find((action) => /Explicar cuándo conviene consultar/i.test(action.title));
+  assert.ok(growthAction);
+  const details = decodeActionDecisionDetails(growthAction.rationale);
+  assert.equal(details?.where, "las páginas de tratamientos del sitio web oficial");
+  assert.doesNotMatch(details?.where || "", /^Google$/i);
 });

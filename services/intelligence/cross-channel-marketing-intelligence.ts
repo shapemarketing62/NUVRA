@@ -47,11 +47,23 @@ export function buildCrossChannelMarketingIntelligence(profile: BusinessProfile,
     primaryCustomerAction: profile.primaryCustomerAction,
     signals,
     interpretation: primarySource
-      ? `${label(primarySource)} es el canal observado con relación más directa al objetivo y a ${profile.primaryCustomerAction}; los demás canales cumplen funciones de apoyo o validación.`
+      ? crossChannelInterpretation(evaluated, primarySource, profile)
       : "No hay canales observados suficientes para priorizar; la ausencia de datos no se interpreta como mal desempeño.",
     limitations: signals.filter((item) => item.role === "not_evaluated").map((item) => `${label(item.source)}: ${item.limitation}`),
   };
 }
+
+function crossChannelInterpretation(evaluated: SourceType[], primarySource: SourceType, profile: BusinessProfile) {
+  const observed = evaluated.map(label);
+  const connections: string[] = [];
+  if (evaluated.includes("search") && evaluated.includes("web")) connections.push(`la búsqueda muestra cómo puede descubrirse el negocio y el sitio permite observar el recorrido hacia ${profile.primaryCustomerAction}`);
+  if (evaluated.includes("reviews")) connections.push(`las reseñas aportan señales externas de confianza antes de ${profile.primaryCustomerAction}`);
+  if (evaluated.includes("instagram")) connections.push(`Instagram aporta una lectura pública de la oferta y del siguiente paso disponible`);
+  if (connections.length) return `Se analizaron ${joinNatural(observed)}. En conjunto, ${joinNatural(connections)}. ${label(primarySource)} tiene la relación más directa con el objetivo; esto no demuestra por sí solo cuántas personas completan la acción.`;
+  return `Se analizaron ${joinNatural(observed)}. ${label(primarySource)} tiene la relación observada más directa con el objetivo y con ${profile.primaryCustomerAction}; las demás fuentes aportan contexto, no una causa demostrada.`;
+}
+
+function joinNatural(values: string[]) { if (values.length <= 1) return values[0] || "las fuentes disponibles"; return `${values.slice(0, -1).join(", ")} y ${values.at(-1)}`; }
 
 function contextualRelevance(source: SourceType, profile: BusinessProfile) {
   const goal = normalize(profile.goal.goalOriginalText);

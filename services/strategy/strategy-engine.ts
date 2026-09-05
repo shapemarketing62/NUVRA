@@ -176,6 +176,11 @@ export function buildProfileStrategy(context: StrategyContext, diagnosis: Diagno
       expectedResult: opportunity.expectedResult,
       estimatedCost: opportunity.estimatedCost,
       metric: opportunity.metric,
+      baseline: null,
+      timeframe: opportunity.experimentDesign.duration || opportunity.timeframe,
+      successCriterion: opportunity.experimentDesign.successCriteria,
+      ifWorks: opportunity.experimentDesign.ifWorks,
+      ifNot: opportunity.experimentDesign.ifNot,
       causal: opportunity.causalDecision,
       experiment: opportunity.experimentDesign,
     }),
@@ -227,11 +232,11 @@ export function buildProfileStrategy(context: StrategyContext, diagnosis: Diagno
       ? `${context.nombre} fue analizado con la información disponible, pero todavía no hay evidencia suficiente para confirmar dónde se frenan las consultas o decisiones comerciales.`
       : primary
       ? `${scoreResult.total === null ? `${context.nombre} fue analizado con la información disponible.` : `${context.nombre} tiene un Nuvra Score de ${scoreResult.total}/100.`} La evidencia más firme señala: ${primary.hypothesis}`
-      : `${scoreResult.total === null ? `${context.nombre} fue analizado con la información disponible.` : `${context.nombre} tiene un Nuvra Score de ${scoreResult.total}/100.`} No hay una única falla comprobada; la decisión más útil es trabajar el objetivo con una prueba acotada y medible.`,
+      : `${scoreResult.total === null ? `${context.nombre} fue analizado con la información disponible.` : `${context.nombre} tiene un Nuvra Score de ${scoreResult.total}/100.`} Lo evaluado aporta información útil, pero todavía no muestra qué canal genera resultados comerciales reales.`,
     distanciaObjetivo: decision.evidence.status === "insufficient"
       ? `Durante ${decision.goal.timeframeLabel}, el próximo paso es medir ${decision.decision.primaryKpi}, el origen de las consultas y cuántas avanzan. Con esos datos recién podrá decidirse qué intervención conviene priorizar.`
       : decision.evidence.status === "partial"
-        ? `Durante ${decision.goal.timeframeLabel}, la información disponible permite probar como hipótesis: ${actions[0]?.title.toLowerCase() || `medir ${decision.decision.primaryKpi}`}. Las decisiones sobre inversión y canales quedan por validar.`
+        ? `Durante ${decision.goal.timeframeLabel}, conviene empezar por ${actions[0]?.title.toLowerCase() || `medir ${decision.decision.primaryKpi}`}. Antes de invertir más o sumar canales, hay que registrar ${decision.decision.primaryKpi} y su origen para comprobar qué funciona.`
         : `Durante ${decision.goal.timeframeLabel}, conviene ${primary && actions[0] ? actions[0].title.toLowerCase() : decision.decision.strategicBet}. Por ahora no conviene ${decision.decision.notPriority}.`,
     principalProblema: diagnosis.bottleneck.explanation,
     prioridades: actions.slice(0, 3).map((action) => action.title),

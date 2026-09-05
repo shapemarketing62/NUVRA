@@ -11,6 +11,7 @@ export default function DiagnosticoPage() {
   if (error) return <ErrorState message={error} />;
   if (!diagnosis) return <EmptyState title="Todavía no hay diagnóstico" description="Completá el análisis para obtener una lectura del negocio." />;
   const decisionInsight = canonicalDiagnosis.decisionInsight;
+  const conclusionIsSufficient = canonicalDiagnosis.mainConclusion?.informationState === "sufficient";
   const observations = evidence.filter((item) => item.relatedConclusion).slice(0, 5);
   const evidenceOrigin = (sourceType: string, informationState: "sufficient" | "limited" | "unknown") => {
     if (sourceType === "Información aportada") return "Nos lo contaste";
@@ -23,22 +24,22 @@ export default function DiagnosticoPage() {
     
     <div className="analysis-module-grid">
       <section className="analysis-module analysis-module-primary">
-        <div className="analysis-kicker">Problema principal</div>
+        <div className="analysis-kicker">{conclusionIsSufficient ? "Diagnóstico principal" : "Principal oportunidad por comprobar"}</div>
         <h2>{simplifyTechnicalText(canonicalDiagnosis.mainConclusion?.title || diagnosis.bottleneck?.title || "Sin una causa principal")}</h2>
         <p style={{ marginTop: 12 }}>{simplifyTechnicalText(canonicalDiagnosis.mainConclusion?.relationshipToGoal || diagnosis.bottleneck?.explanation || "")}</p>
       </section>
       
       <section className="analysis-module analysis-module-accent">
-        <div className="analysis-kicker">Hipótesis principal</div>
+        <div className="analysis-kicker">Qué puede estar pasando</div>
         <h2>{simplifyTechnicalText(decisionInsight?.hypothesis || canonicalDiagnosis.mainConclusion?.explanation || "Necesitamos validar dónde se frena el recorrido comercial.")}</h2>
         <div className="analysis-tags">
-          <StatusBadge tone="warning">Lo estamos validando</StatusBadge>
+          <StatusBadge tone="warning">Información por completar</StatusBadge>
         </div>
       </section>
     </div>
     
     <section className="analysis-module analysis-module-wide">
-      <div className="analysis-kicker">Por qué creemos que pasa</div>
+      <div className="analysis-kicker">Por qué llegamos a esta lectura</div>
       <ul>
         {(decisionInsight?.whyThisDecision || []).map((item) => <li key={item}>{simplifyTechnicalText(item)}</li>)}
       </ul>
@@ -100,7 +101,7 @@ export default function DiagnosticoPage() {
       </section>
       
       <section className="analysis-module">
-        <div className="analysis-kicker">Qué necesitamos validar</div>
+        <div className="analysis-kicker">Qué todavía no sabemos</div>
         <ul>
           {(decisionInsight?.unknowns || canonicalDiagnosis.unknowns).slice(0, 4).map((item) => <li key={item}>{simplifyTechnicalText(item)}</li>)}
         </ul>

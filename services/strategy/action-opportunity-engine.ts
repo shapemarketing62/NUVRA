@@ -203,7 +203,18 @@ function tokens(value: string) { return new Set(value.toLowerCase().normalize("N
 function evidenceByIds(profile: BusinessProfile, ids: string[]) { const wanted = new Set(ids); return profile.commercialEvidence.filter((item) => wanted.has(item.id)); }
 function goalEvidence(profile: BusinessProfile) { const items = profile.commercialEvidence.filter((item) => item.id === "declared:goal" || item.id === "declared:additional" || (item.kind === "ObservedEvidence" && item.polarity !== "negative")).slice(0, 6); return items.length ? items : profile.commercialEvidence.filter((item) => item.polarity !== "negative").slice(0, 4); }
 function averageConfidence(items: BusinessProfile["commercialEvidence"]) { if (!items.length) return .35; return Math.round(items.reduce((sum, item) => sum + (item.confidence === "ALTA" ? .82 : item.confidence === "MEDIA" ? .62 : .4), 0) / items.length * 100) / 100; }
-function bestExecutionChannel(profile: BusinessProfile, decision: MarketingDecisionContext) { if (decision.goal.type === "orders" && decision.channels.contactMethods.includes("WhatsApp")) return "WhatsApp"; if (profile.activeChannels.includes("instagram")) return "Instagram"; if (profile.activeChannels.includes("search")) return "Google"; return decision.channels.primary; }
+function bestExecutionChannel(profile: BusinessProfile, decision: MarketingDecisionContext) {
+  if (decision.goal.type === "orders" && decision.channels.contactMethods.includes("WhatsApp")) return "el chat de WhatsApp donde comienzan los pedidos";
+  if (profile.activeChannels.includes("web")) {
+    if (profile.commercialModel === "commerce") return "las páginas de productos del sitio web oficial";
+    if (profile.commercialModel === "appointments" || /salud|est[eé]tica|cl[ií]nica|odont/i.test(profile.originalIndustry)) return "las páginas de tratamientos del sitio web oficial";
+    return "las páginas de servicios del sitio web oficial";
+  }
+  if (profile.activeChannels.includes("instagram")) return "la bio y las publicaciones del perfil oficial de Instagram";
+  if (decision.channels.contactMethods.includes("WhatsApp")) return "el mensaje inicial con el que el equipo responde por WhatsApp";
+  if (decision.channels.contactMethods.length) return `el punto de contacto por ${decision.channels.contactMethods[0]}`;
+  return "los materiales comerciales que el equipo usa para responder consultas";
+}
 function contactChannel(decision: MarketingDecisionContext) { return decision.channels.contactMethods[0] || decision.channels.primary; }
 function extractDemandPeriod(value: string | null) { if (!value) return null; const text = value.toLowerCase(); const day = "(lunes|martes|mi[eé]rcoles|jueves|viernes)"; const range = text.match(new RegExp(`${day}\\s+(?:a|hasta)\\s+${day}`)); if (range) return `${range[1]} a ${range[2]}`; if (/lunes|martes|mi[eé]rcoles|jueves|viernes/.test(text)) { const days = ["lunes", "martes", "miércoles", "jueves", "viernes"].filter((candidate) => text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").includes(candidate.normalize("NFD").replace(/[\u0300-\u036f]/g, ""))); return days.length > 2 ? `${days[0]} a ${days.at(-1)}` : days.join(" y "); } return /fin de semana/.test(text) ? "los días de semana" : null; }
 function extractRetentionPeriod(value: string | null) { return value?.match(/primer(?:a|as|o|os)?\s+[a-záéíóúñ0-9]+(?:\s+a\s+[a-záéíóúñ0-9]+)?\s+(?:semanas?|meses?)/i)?.[0].toLowerCase() || null; }

@@ -130,6 +130,10 @@ export function buildAnalysisTrace(input: {
   const discarded = [
     ...(Array.isArray(input.discovery.rejectedSources) ? input.discovery.rejectedSources : []).map((candidate) => ({ item: candidate.url, reason: `Descartado por validación de entidad: ${candidate.status || "rejected"}.` })),
     ...Object.entries(input.aggregated.sources).filter(([, evidence]) => evidence.status !== "evaluated").map(([source, evidence]) => ({ item: source, reason: String(evidence.metadata?.reason || `Fuente ${evidence.status}.`) })),
+    ...Object.entries(input.aggregated.sources).flatMap(([source, evidence]) => {
+      const validation = evidence.metadata?.entityValidation as { rejectedFindings?: Array<{ findingId?: string; status?: string; reasons?: string[] }> } | undefined;
+      return (validation?.rejectedFindings || []).map((item) => ({ item: item.findingId || source, reason: `Evidencia descartada por identidad ${item.status || "ambigua"}: ${(item.reasons || []).join(" ")}` }));
+    }),
   ];
   const problemCandidates = Array.isArray(input.profile.problemCandidates) ? input.profile.problemCandidates : [];
   const selectedProblem = problemCandidates.find((candidate) => candidate.validationStatus === "validated" && Array.isArray(candidate?.evidenceFor) && candidate.evidenceFor.includes(input.diagnosis?.bottleneck?.findingId || "")) || problemCandidates.find((candidate) => candidate.validationStatus === "validated");

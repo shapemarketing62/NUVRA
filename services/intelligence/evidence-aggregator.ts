@@ -1,6 +1,7 @@
 import { SourceAnalyzer, type SourceEvidence, type SourceType, type EvidenceFinding } from "./source-analyzer.ts";
 import { executeSource, type SourceExecutionPolicy } from "./source-execution.ts";
 import type { Business } from "@prisma/client";
+import { validateSourceEvidence } from "./evidence-entity-validator.ts";
 
 // Extender Business temporalmente para incluir goals
 interface BusinessWithGoals extends Business {
@@ -63,8 +64,9 @@ export class EvidenceAggregator {
     options: { includeSources?: SourceType[]; preloaded?: Partial<Record<SourceType, SourceEvidence>> } = {}
   ): Promise<AggregatedEvidence> {
     const businessWithGoals = business as BusinessWithGoals;
-    const evidenceMap: Record<SourceType, SourceEvidence> = { ...(options.preloaded || {}) } as Record<SourceType, SourceEvidence>;
-    const allFindings: EvidenceFinding[] = Object.values(options.preloaded || {}).flatMap((evidence) => evidence?.findings || []);
+    const validatedPreloaded = Object.fromEntries(Object.entries(options.preloaded || {}).map(([type, evidence]) => [type, evidence ? validateSourceEvidence(this.normalizeSourceEvidence(evidence), business) : evidence])) as Partial<Record<SourceType, SourceEvidence>>;
+    const evidenceMap: Record<SourceType, SourceEvidence> = { ...validatedPreloaded } as Record<SourceType, SourceEvidence>;
+    const allFindings: EvidenceFinding[] = Object.values(validatedPreloaded).flatMap((evidence) => evidence?.findings || []);
 
     // Las fuentes se ejecutan de forma concurrente y aislada. Una excepción, un
     // timeout o un proveedor caído solo modifica el estado de esa fuente.
@@ -146,7 +148,7 @@ export class EvidenceAggregator {
     settled.forEach((result, index) => {
       const type = entries[index][0];
       if (result.status === "fulfilled") {
-        const evidence = this.normalizeSourceEvidence(result.value[1]);
+        const evidence = validateSourceEvidence(this.normalizeSourceEvidence(result.value[1]), business);
         evidenceMap[result.value[0]] = evidence;
         allFindings.push(...evidence.findings);
       } else {

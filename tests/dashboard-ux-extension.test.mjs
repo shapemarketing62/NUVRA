@@ -36,10 +36,10 @@ test("la interfaz distingue observación, declaración e hipótesis", () => {
 });
 
 test("diagnóstico, estrategia y acciones siguen divulgación progresiva", () => {
-  assert.ok(pages.diagnosis.indexOf("Problema principal") < pages.diagnosis.indexOf("Hipótesis principal"));
-  assert.ok(pages.diagnosis.indexOf("Hipótesis principal") < pages.diagnosis.indexOf("Por qué creemos que pasa"));
-  assert.ok(pages.diagnosis.indexOf("Por qué creemos que pasa") < pages.diagnosis.indexOf("Evidencia"));
-  assert.ok(pages.diagnosis.indexOf("Qué necesitamos validar") < pages.diagnosis.indexOf("Qué está funcionando"));
+  assert.ok(pages.diagnosis.indexOf("Diagnóstico principal") < pages.diagnosis.indexOf("Qué puede estar pasando"));
+  assert.ok(pages.diagnosis.indexOf("Qué puede estar pasando") < pages.diagnosis.indexOf("Por qué llegamos a esta lectura"));
+  assert.ok(pages.diagnosis.indexOf("Por qué llegamos a esta lectura") < pages.diagnosis.indexOf("Evidencia"));
+  assert.ok(pages.diagnosis.indexOf("Qué todavía no sabemos") < pages.diagnosis.indexOf("Qué está funcionando"));
   assert.ok(pages.strategy.indexOf(">Objetivo<") < pages.strategy.indexOf(">Decisión<"));
   assert.ok(pages.strategy.indexOf("Por qué esta decisión") < pages.strategy.indexOf("Indicador principal"));
   assert.match(pages.actions, /<details className="action-plan"><summary>Ver plan de ejecución<\/summary>/);

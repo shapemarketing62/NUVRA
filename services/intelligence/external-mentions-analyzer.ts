@@ -141,6 +141,7 @@ export class ExternalMentionsSourceAnalyzer extends SourceAnalyzer {
         const relevance = this.calculateMentionRelevance(result, classification.type, evaluated, business, ubicacion);
         const evidenceConfidence = this.calculateEvidenceConfidence(result, entityMatchConfidence, relevance.score);
         const accepted = classification.type !== "irrelevant"
+          && (evaluated.status === "confirmed" || (evaluated.status === "probable" && entityMatchConfidence >= 0.72))
           && entityMatchConfidence >= 0.55
           && relevance.score >= 0.5
           && evidenceConfidence !== "BAJA";

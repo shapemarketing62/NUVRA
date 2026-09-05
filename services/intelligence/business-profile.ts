@@ -167,7 +167,9 @@ export function buildBusinessProfile(business: BusinessWithGoal, aggregated: Agg
     contextualFindings.push({ id: `context:${signal.id}`, findingId: signal.id, area, type: signal.type === "capacity" ? "context" : signal.type === "demand_pattern" ? "problem" : "strength", source: "other", evidence: signal.evidence, attribution: "Información aportada por el negocio", interpretation: `El negocio informó este dato y debe usarse para decidir qué priorizar: ${signal.evidence}`, goalRelation: `Este dato modifica cómo conviene avanzar hacia “${goal.objetivo || "hacer crecer el negocio"}”.`, confidence: "ALTA", impact: signal.type === "demand_pattern" ? "medium" : "low", goalRelevance: relevance.goalRelevance, businessRelevance: relevance.businessRelevance, priorityScore: Math.round(relevance.goalRelevance * relevance.businessRelevance * declaredImportance) });
   }
 
-  const activeChannels = Object.entries(aggregated.sources).filter(([, evidence]) => evidence.status === "evaluated").map(([source]) => source as SourceType);
+  const activeChannels = Object.entries(aggregated.sources)
+    .filter(([, evidence]) => evidence.status === "evaluated" && evidence.findings.length > 0)
+    .map(([source]) => source as SourceType);
   const declaredChannels = parseDeclaredChannels(business.canales);
   if (business.webUrl && !activeChannels.includes("web")) activeChannels.push("web");
   if (business.instagramHandle && !activeChannels.includes("instagram")) activeChannels.push("instagram");

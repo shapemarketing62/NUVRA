@@ -15,6 +15,7 @@ function fixture(overrides = {}) {
       sourceMessages: { web: "Sitio analizado", instagram: "Necesita autorización", search: "Búsqueda analizada" },
       competitorSummary: { competitors: [{ name: "Competidor", competitorType: "direct", officialWebsite: "https://competitor.test", officialSocialProfile: null, classification: "confirmed_competitor", entityMatchConfidence: 0.98, entityConfidenceReasons: ["private reason"] }] },
       externalMentionsSummary: { mentions: [{ url: "https://news.test/note", title: "Nota pública", mentionType: "earned_media", source: "news.test", sentiment: "unknown", evidenceConfidence: "high", sourceQuality: 0.91 }], totalAccepted: 1, totalFound: 1, totalRejected: 0, byType: { earned_media: 1 } },
+      channelMetrics: [{ source: "web", status: "evaluated", summary: "Sitio activo; se analizaron 2 páginas.", metrics: [{ key: "pages", label: "Páginas analizadas", value: 2, availability: "observed" }, { key: "private", label: "Datos privados", value: null, availability: "requires_connection", detail: "Disponible al conectar" }] }],
     },
     businessProfile: {
       commercialEvidence: [{
@@ -38,6 +39,7 @@ function fixture(overrides = {}) {
     analysisTrace: {
       prioritization: { selectedProblemId: "problem:action", rule: "private methodology" },
       conclusionContributions: { problems: [{ id: "problem:action", sufficiency: "sufficient" }] },
+      crossChannel: { interpretation: "La búsqueda muestra el descubrimiento y el sitio permite observar el paso para pedir turno." },
       scoreExplanation: { evidenceCeiling: 0.8, methodology: { privateWeight: 0.9 } },
       prompts: ["private prompt"],
     },
@@ -158,4 +160,14 @@ test("H: la evidencia pública excluye campos internos y sensibles", () => {
   for (const forbidden of ["analysisAudit", "analysisTrace", "private methodology", "private prompt", "private-origin", "private reason", "entityMatchConfidence", "evidenceConfidence", "evidenceCeiling", "sourceQuality", "allowsClaims", "disallowsClaims"]) {
     assert.doesNotMatch(serialized, new RegExp(forbidden, "i"));
   }
+});
+
+test("I: proyecta métricas comprensibles y fases sin convertir null en cero", () => {
+  const result = buildDashboardViewModel(fixture());
+  assert.equal(result.intelligence?.channelMetrics[0].metrics[0].value, 2);
+  assert.equal(result.intelligence?.channelMetrics[0].metrics[1].value, null);
+  assert.equal(result.intelligence?.channelMetrics[0].metrics[1].availability, "requires_connection");
+  assert.match(result.intelligence?.crossChannelInterpretation || "", /búsqueda/);
+  assert.equal(result.canonicalStrategy?.phases.length, 1);
+  assert.equal(result.canonicalStrategy?.phases[0].priorities[0], "Agregar acceso directo a turnos");
 });

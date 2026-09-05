@@ -278,6 +278,13 @@ export class EntityMatcher {
       status = "rejected";
     }
 
+    const countryDomainConflict = this.countryDomainConflict(domain, target.location);
+    if (countryDomainConflict) {
+      status = "rejected";
+      signals.countryDomainConflict = -1;
+      reasons.push(countryDomainConflict);
+    }
+
     return {
       ...candidate,
       matchScore,
@@ -449,6 +456,26 @@ export class EntityMatcher {
       }
     }
     return null;
+  }
+
+  private static countryDomainConflict(domain: string, targetLocation?: string): string | null {
+    const location = this.normalizeText(targetLocation || "");
+    if (!location || !domain) return null;
+    const expected = location.includes("argentina") ? "ar"
+      : location.includes("chile") ? "cl"
+      : location.includes("mexico") ? "mx"
+      : location.includes("colombia") ? "co"
+      : location.includes("uruguay") ? "uy"
+      : location.includes("peru") ? "pe"
+      : location.includes("espana") ? "es"
+      : null;
+    if (!expected) return null;
+    const countryTld = domain.match(/\.([a-z]{2})$/)?.[1] || null;
+    if (!countryTld || countryTld === expected) return null;
+    const knownCountryTlds = new Set(["ar", "cl", "mx", "co", "uy", "pe", "es", "br"]);
+    return knownCountryTlds.has(countryTld)
+      ? `El dominio .${countryTld} contradice el país del negocio`
+      : null;
   }
 
   private static categoryFamily(category: string): string | null {
