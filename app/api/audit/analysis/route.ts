@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { apiError, handleApiError } from "@/lib/server/api-response";
-import { authorizeBusiness, requireUser, buildAuthorizationDebug, buildCandidateConsistencyProbe, buildDatabaseConnectionFingerprint, buildDirectConsistencyProbe } from "@/lib/server/authorization";
+import { authorizeBusiness, requireUser, buildAuthorizationDebug, buildCandidateConsistencyProbe, buildDatabaseConnectionFingerprint, buildDirectConsistencyProbe, buildBusinessIdInputDebug, buildBusinessIdComparisonDebug } from "@/lib/server/authorization";
 import { resolveAuthorizedBusinessForInternalAudit } from "@/lib/internal-analysis-audit-access";
 import { roleCan } from "@/lib/access-policy";
 import { randomUUID } from "crypto";
@@ -134,6 +134,7 @@ export async function GET(req: NextRequest) {
   try {
     const auth = await requireUser();
     if (!auth.ok) return apiError("unauthorized", 401);
+    const rawBusinessIdInput = req.nextUrl.searchParams.get("businessId") || req.nextUrl.searchParams.get("id");
     const resolved = await resolveRequestedBusiness(req, auth.user);
     if (!resolved.ok) {
       if (resolved.reason === "ambiguous_business_name") {
@@ -148,14 +149,18 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ requestId, timestamp, serverPid, databaseConnection, error: resolved.reason, candidates: resolved.candidates, authorizationDebug: { requestedBy: "name", candidates: candidateDebug }, consistencyProbe }, { status: 409, headers: { "Cache-Control": "private, no-store" } });
       }
       const status = resolved.reason === "unauthorized" ? 401 : resolved.reason === "validation_error" ? 400 : resolved.reason === "not_found" ? 404 : 403;
-      const debug = await buildAuthorizationDebug(req.nextUrl.searchParams.get("businessId") || req.nextUrl.searchParams.get("id"));
-      const directConsistencyProbe = req.nextUrl.searchParams.get("businessId") || req.nextUrl.searchParams.get("id") ? await buildDirectConsistencyProbe(req.nextUrl.searchParams.get("businessId") || req.nextUrl.searchParams.get("id")!) : null;
-      return NextResponse.json({ requestId, timestamp, serverPid, databaseConnection, ...apiError(resolved.reason, status), authorizationDebug: { requestedBy: "businessId", ...debug }, directConsistencyProbe });
+      const debug = await buildAuthorizationDebug(rawBusinessIdInput);
+      const directConsistencyProbe = rawBusinessIdInput ? await buildDirectConsistencyProbe(rawBusinessIdInput) : null;
+      const businessIdInputDebug = buildBusinessIdInputDebug(rawBusinessIdInput);
+      const businessIdComparisonDebug = await buildBusinessIdComparisonDebug(rawBusinessIdInput, null, null, null);
+      return NextResponse.json({ requestId, timestamp, serverPid, databaseConnection, ...apiError(resolved.reason, status), authorizationDebug: { requestedBy: "businessId", ...debug }, directConsistencyProbe, businessIdInputDebug, businessIdComparisonDebug });
     }
     const access = resolved.access;
     const businessId = access.business.id;
     const authorizationDebug = await buildAuthorizationDebug(businessId);
     const directConsistencyProbe = await buildDirectConsistencyProbe(businessId);
+    const businessIdInputDebug = buildBusinessIdInputDebug(rawBusinessIdInput);
+    const businessIdComparisonDebug = await buildBusinessIdComparisonDebug(rawBusinessIdInput, businessId, businessId, businessId);
 
     const business = await prisma.business.findUnique({
       where: { id: businessId },
@@ -336,6 +341,8 @@ export async function GET(req: NextRequest) {
       authorizationDebug,
       databaseConnection,
       directConsistencyProbe,
+      businessIdInputDebug,
+      businessIdComparisonDebug,
     };
 
     return NextResponse.json(response, { headers: { "Cache-Control": "private, no-store" } });

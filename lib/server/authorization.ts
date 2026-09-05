@@ -257,6 +257,155 @@ export async function buildDatabaseConnectionFingerprint(): Promise<DatabaseConn
   return { requestId, timestamp, runtimeDatasource, databaseIdentityHash, serverIdentityHash, currentSchema, searchPathHash, backendPid, connectionMode };
 }
 
+export type BusinessIdInputDebug = {
+  raw: string;
+  rawLength: number;
+  trimmed: string;
+  trimmedLength: number;
+  asciiOnly: boolean;
+  equalsTrimmed: boolean;
+  normalized: string;
+  normalizedLength: number;
+  rawHash: string;
+  trimmedHash: string;
+  codePoints: Array<{ index: number; code: number; hex: string; category: string }>;
+  json: string;
+  suspicious: boolean;
+  suspiciousReasons: string[];
+};
+
+export type NearbyBusinessCandidate = {
+  id: string;
+  length: number;
+  hash: string;
+  exactEqualsInput: boolean;
+  exactEqualsTrimmedInput: boolean;
+};
+
+export type BusinessIdComparisonDebug = {
+  input: BusinessIdInputDebug;
+  nearbyCandidates: NearbyBusinessCandidate[];
+  exactMatchInDb: boolean;
+  trimmedMatchInDb: boolean;
+  normalizedMatchInDb: boolean;
+  firstDifferentIndex: number | null;
+  inputCodePointAtDifference: number | null;
+  dbCodePointAtDifference: number | null;
+};
+
+export function classifyCodePoint(code: number): string {
+  if (code >= 0x30 && code <= 0x39) return "digit";
+  if (code >= 0x41 && code <= 0x5A) return "uppercase_letter";
+  if (code >= 0x61 && code <= 0x7A) return "lowercase_letter";
+  if (code === 0x2D || code === 0x5F) return "id_continue";
+  if (code <= 0x1F || code === 0x7F) return "control";
+  if (/\s/.test(String.fromCharCode(code))) return "whitespace";
+  if (code >= 0x200B && code <= 0x200D) return "zero_width";
+  if (code > 0x7F) return "non_ascii";
+  return "other";
+}
+
+export function buildBusinessIdInputDebug(rawInput: string | null): BusinessIdInputDebug {
+  const raw = rawInput ?? "";
+  const trimmed = raw.trim();
+  const normalized = raw.normalize("NFC");
+  const suspiciousReasons: string[] = [];
+
+  for (let i = 0; i < raw.length; i += 1) {
+    const code = raw.codePointAt(i) ?? 0;
+    const category = classifyCodePoint(code);
+    if (category === "whitespace" || category === "zero_width" || category === "non_ascii" || category === "control") {
+      suspiciousReasons.push(`index_${i}_${category}`);
+    }
+  }
+
+  return {
+    raw,
+    rawLength: raw.length,
+    trimmed,
+    trimmedLength: trimmed.length,
+    asciiOnly: /^[\x00-\x7F]*$/.test(raw),
+    equalsTrimmed: raw === trimmed,
+    normalized,
+    normalizedLength: normalized.length,
+    rawHash: createHash("sha256").update(raw).digest("hex").slice(0, 32),
+    trimmedHash: createHash("sha256").update(trimmed).digest("hex").slice(0, 32),
+    codePoints: Array.from(raw).map((char, index) => ({ index, code: char.codePointAt(0) ?? 0, hex: `U+${(char.codePointAt(0) ?? 0).toString(16).toUpperCase().padStart(4, "0")}`, category: classifyCodePoint(char.codePointAt(0) ?? 0) })),
+    json: JSON.stringify(raw),
+    suspicious: Boolean(suspiciousReasons.length),
+    suspiciousReasons,
+  };
+}
+
+export async function findNearbyBusinessIds(prefix: string, tx: unknown, limit = 5): Promise<NearbyBusinessCandidate[]> {
+  const trimmedPrefix = prefix.trim();
+  if (!trimmedPrefix || trimmedPrefix.length < 3) return [];
+  const safePrefix = trimmedPrefix.slice(0, 12);
+  const rows = await (tx as { business: { findMany: (args: unknown) => Promise<Array<{ id: string }>> } }).business.findMany({
+    where: { id: { startsWith: safePrefix } },
+    select: { id: true },
+    orderBy: { createdAt: "desc" },
+    take: limit,
+  });
+
+  return rows.map((row) => ({
+    id: row.id,
+    length: row.id.length,
+    hash: createHash("sha256").update(row.id).digest("hex").slice(0, 32),
+    exactEqualsInput: row.id === prefix,
+    exactEqualsTrimmedInput: row.id === trimmedPrefix,
+  }));
+}
+
+export function compareBusinessIdStrings(input: string, dbId: string | null | undefined): { firstDifferentIndex: number | null; inputCodePointAtDifference: number | null; dbCodePointAtDifference: number | null } {
+  if (!dbId) return { firstDifferentIndex: null, inputCodePointAtDifference: null, dbCodePointAtDifference: null };
+  const inputChars = Array.from(input);
+  const dbChars = Array.from(dbId);
+  const max = Math.max(inputChars.length, dbChars.length);
+  for (let i = 0; i < max; i += 1) {
+    const inputCode = inputChars[i]?.codePointAt(0) ?? null;
+    const dbCode = dbChars[i]?.codePointAt(0) ?? null;
+    if (inputCode !== dbCode) {
+      return { firstDifferentIndex: i, inputCodePointAtDifference: inputCode, dbCodePointAtDifference: dbCode };
+    }
+  }
+  if (inputChars.length !== dbChars.length) {
+    const diffIndex = Math.min(inputChars.length, dbChars.length);
+    const inputCode = diffIndex < inputChars.length ? (inputChars[diffIndex].codePointAt(0) ?? null) : null;
+    const dbCode = diffIndex < dbChars.length ? (dbChars[diffIndex].codePointAt(0) ?? null) : null;
+    return { firstDifferentIndex: diffIndex, inputCodePointAtDifference: inputCode, dbCodePointAtDifference: dbCode };
+  }
+  return { firstDifferentIndex: null, inputCodePointAtDifference: null, dbCodePointAtDifference: null };
+}
+
+export async function buildBusinessIdComparisonDebug(rawInput: string | null, exactBusinessId: string | null | undefined, trimmedBusinessId: string | null | undefined, normalizedBusinessId: string | null | undefined): Promise<BusinessIdComparisonDebug> {
+  const input = buildBusinessIdInputDebug(rawInput);
+  let nearbyCandidates: NearbyBusinessCandidate[] = [];
+
+  if (input.trimmed.length >= 3) {
+    try {
+      nearbyCandidates = await prisma.$transaction(async (tx) => findNearbyBusinessIds(input.trimmed, tx, 5));
+    } catch {
+      nearbyCandidates = [];
+    }
+  }
+
+  const exactComparison = compareBusinessIdStrings(input.raw, exactBusinessId);
+  const trimmedComparison = compareBusinessIdStrings(input.trimmed, trimmedBusinessId);
+  const normalizedComparison = compareBusinessIdStrings(input.normalized, normalizedBusinessId);
+
+  return {
+    input,
+    nearbyCandidates,
+    exactMatchInDb: exactComparison.firstDifferentIndex === null && input.raw.length === (exactBusinessId?.length ?? 0),
+    trimmedMatchInDb: trimmedComparison.firstDifferentIndex === null && input.trimmed.length === (trimmedBusinessId?.length ?? 0),
+    normalizedMatchInDb: normalizedComparison.firstDifferentIndex === null && input.normalized.length === (normalizedBusinessId?.length ?? 0),
+    firstDifferentIndex: exactComparison.firstDifferentIndex ?? trimmedComparison.firstDifferentIndex ?? normalizedComparison.firstDifferentIndex,
+    inputCodePointAtDifference: exactComparison.inputCodePointAtDifference ?? trimmedComparison.inputCodePointAtDifference ?? normalizedComparison.inputCodePointAtDifference,
+    dbCodePointAtDifference: exactComparison.dbCodePointAtDifference ?? trimmedComparison.dbCodePointAtDifference ?? normalizedComparison.dbCodePointAtDifference,
+  };
+}
+
 export type DirectConsistencyProbe = {
   requestId: string;
   timestamp: string;
@@ -272,6 +421,9 @@ export type DirectConsistencyProbe = {
     found: boolean;
     organizationId: string | null;
   };
+  exactInputRead: { found: boolean; organizationId: string | null };
+  trimmedInputRead: { found: boolean; organizationId: string | null };
+  normalizedInputRead: { found: boolean; organizationId: string | null };
   consistency: {
     sameResult: boolean;
   };
@@ -303,6 +455,46 @@ export async function buildDirectConsistencyProbe(businessId: string): Promise<D
       rawOrganizationId = null;
     }
 
+    const trimmed = businessId.trim();
+    const normalized = businessId.normalize("NFC");
+
+    let exactInputReadFound = false;
+    let exactInputReadOrg: string | null = null;
+    let trimmedInputReadFound = false;
+    let trimmedInputReadOrg: string | null = null;
+    let normalizedInputReadFound = false;
+    let normalizedInputReadOrg: string | null = null;
+
+    if (trimmed !== businessId || normalized !== businessId) {
+      try {
+        const [exactInput, trimmedInput, normalizedInput] = await Promise.all([
+          tx.business.findUnique({ where: { id: businessId }, select: { id: true, organizationId: true } }),
+          tx.business.findUnique({ where: { id: trimmed }, select: { id: true, organizationId: true } }),
+          tx.business.findUnique({ where: { id: normalized }, select: { id: true, organizationId: true } }),
+        ]);
+        exactInputReadFound = Boolean(exactInput);
+        exactInputReadOrg = exactInput?.organizationId ?? null;
+        trimmedInputReadFound = Boolean(trimmedInput);
+        trimmedInputReadOrg = trimmedInput?.organizationId ?? null;
+        normalizedInputReadFound = Boolean(normalizedInput);
+        normalizedInputReadOrg = normalizedInput?.organizationId ?? null;
+      } catch {
+        exactInputReadFound = false;
+        exactInputReadOrg = null;
+        trimmedInputReadFound = false;
+        trimmedInputReadOrg = null;
+        normalizedInputReadFound = false;
+        normalizedInputReadOrg = null;
+      }
+    } else {
+      exactInputReadFound = Boolean(uniqueResult);
+      exactInputReadOrg = uniqueResult?.organizationId ?? null;
+      trimmedInputReadFound = exactInputReadFound;
+      trimmedInputReadOrg = exactInputReadOrg;
+      normalizedInputReadFound = exactInputReadFound;
+      normalizedInputReadOrg = exactInputReadOrg;
+    }
+
     const uniqueFound = Boolean(uniqueResult);
     const firstFound = Boolean(firstResult);
     const manyCount = manyResults.length;
@@ -314,6 +506,9 @@ export async function buildDirectConsistencyProbe(businessId: string): Promise<D
     return {
       orm: { findUniqueFound: uniqueFound, findFirstFound: firstFound, findManyCount: manyCount, relationFound, organizationId },
       raw: { found: rawFound, organizationId: rawOrganizationId },
+      exactInputRead: { found: exactInputReadFound, organizationId: exactInputReadOrg },
+      trimmedInputRead: { found: trimmedInputReadFound, organizationId: trimmedInputReadOrg },
+      normalizedInputRead: { found: normalizedInputReadFound, organizationId: normalizedInputReadOrg },
       consistency: { sameResult },
     };
   });
