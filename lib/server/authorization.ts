@@ -122,7 +122,23 @@ export type TransactionContext = {
   isInRecovery: boolean | null;
 };
 
+function emptyTransactionContext(): TransactionContext {
+  return {
+    backendPid: null,
+    databaseIdentityHash: null,
+    currentSchema: null,
+    searchPathHash: null,
+    transactionIsolation: null,
+    transactionReadOnly: null,
+    isInRecovery: null,
+  };
+}
+
 export async function readTransactionContext(tx: any): Promise<TransactionContext> {
+  const databaseUrl = process.env.DATABASE_URL || "";
+  if (!databaseUrl.startsWith("postgresql://") && !databaseUrl.startsWith("postgres://")) {
+    return emptyTransactionContext();
+  }
   try {
     const rows = await tx.$queryRaw<Array<Record<string, unknown>>>`
       SELECT
@@ -136,15 +152,7 @@ export async function readTransactionContext(tx: any): Promise<TransactionContex
     `;
     const row = rows[0];
     if (!row) {
-      return {
-        backendPid: null,
-        databaseIdentityHash: null,
-        currentSchema: null,
-        searchPathHash: null,
-        transactionIsolation: null,
-        transactionReadOnly: null,
-        isInRecovery: null,
-      };
+      return emptyTransactionContext();
     }
 
     const rowRecord = row as unknown as Record<string, unknown>;
@@ -164,15 +172,7 @@ export async function readTransactionContext(tx: any): Promise<TransactionContex
       isInRecovery: Boolean(rowRecord.in_recovery),
     };
   } catch {
-    return {
-      backendPid: null,
-      databaseIdentityHash: null,
-      currentSchema: null,
-      searchPathHash: null,
-      transactionIsolation: null,
-      transactionReadOnly: null,
-      isInRecovery: null,
-    };
+    return emptyTransactionContext();
   }
 }
 

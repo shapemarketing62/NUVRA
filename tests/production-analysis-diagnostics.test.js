@@ -6,6 +6,7 @@ const path = require("node:path");
 const root = path.resolve(__dirname, "..");
 const route = fs.readFileSync(path.join(root, "app/api/audit/analysis/route.ts"), "utf8");
 const access = fs.readFileSync(path.join(root, "lib/internal-analysis-audit-access.ts"), "utf8");
+const singleRequest = fs.readFileSync(path.join(root, "lib/server/internal-audit-single-request.ts"), "utf8");
 
 test("diagnóstico de producción exige sesión, rol INTERNAL y acceso al negocio", () => {
   assert.match(route, /const auth = await requireUser\(\)/);
@@ -26,7 +27,8 @@ test("diagnóstico selecciona el history más reciente y conserva el anterior", 
 test("diagnóstico acepta businessId o nombre exacto sin ampliar el acceso de organización", () => {
   assert.match(route, /searchParams\.get\("businessId"\)/);
   assert.match(route, /searchParams\.get\("name"\)/);
-  assert.match(route, /where:\s*\{\s*nombre:\s*name,\s*organizationId:\s*\{\s*in:\s*authorizedOrganizationIds\s*\}/);
+  assert.match(route, /findAuthorizedAuditBusinesses\(prisma, name, authorizedOrganizationIds\)/);
+  assert.match(singleRequest, /where:\s*\{\s*nombre:\s*exactName,\s*organizationId:\s*\{\s*in:\s*authorizedOrganizationIds\s*\}/);
   assert.match(route, /error:\s*resolved\.reason,\s*candidates:\s*resolved\.candidates/);
   assert.match(access, /const result = await authorize\(candidate\.id\)/);
   assert.match(access, /authorizedMatches\.slice\(0, 10\)/);
@@ -59,4 +61,20 @@ test("diagnóstico devuelve la ruta productiva mínima sin snapshots completos",
   assert.doesNotMatch(route, /response\s*=\s*\{[\s\S]*?analysisTrace\s*:/);
   assert.doesNotMatch(route, /response\s*=\s*\{[\s\S]*?strategy\s*:/);
   assert.doesNotMatch(route, /response\s*=\s*\{[\s\S]*?diagnosis\s*:/);
+});
+
+test("modo compare sigue siendo INTERNAL-only y usa una sola transacción", () => {
+  assert.match(route, /searchParams\.get\("compare"\) === "1"/);
+  assert.match(route, /auth\.user\.internalRole !== "INTERNAL"/);
+  assert.match(route, /buildSingleRequestComparison/);
+  assert.match(singleRequest, /return prisma\.\$transaction\(async \(tx\) =>/);
+  assert.match(singleRequest, /findAuthorizedAuditBusinesses\(tx,/);
+  assert.doesNotMatch(singleRequest, /\$queryRawUnsafe/);
+});
+
+test("modo compare no expone secretos y limita las lecturas a organizaciones autorizadas", () => {
+  assert.match(singleRequest, /roleCan\(membership\.role, "business\.read"\)/);
+  assert.match(singleRequest, /safeRead\(rawInputRows\[0\], authorizedOrganizations\)/);
+  assert.match(route, /Cache-Control": "private, no-store"/);
+  assert.doesNotMatch(singleRequest, /DATABASE_URL|server_addr|inet_server_addr|passwordHash|accessToken|refreshToken/);
 });

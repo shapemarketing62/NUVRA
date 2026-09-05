@@ -4,6 +4,7 @@ import { apiError, handleApiError } from "@/lib/server/api-response";
 import { authorizeBusiness, requireUser, buildAuthorizationDebug, buildCandidateConsistencyProbe, buildDatabaseConnectionFingerprint, buildDirectConsistencyProbe, buildBusinessIdInputDebug, buildBusinessIdComparisonDebug } from "@/lib/server/authorization";
 import { resolveAuthorizedBusinessForInternalAudit } from "@/lib/internal-analysis-audit-access";
 import { roleCan } from "@/lib/access-policy";
+import { buildSingleRequestComparison, findAuthorizedAuditBusinesses } from "@/lib/server/internal-audit-single-request";
 import { randomUUID } from "crypto";
 
 const MAX_IDENTIFIER_LENGTH = 100;
@@ -101,24 +102,7 @@ async function resolveRequestedBusiness(req: NextRequest, user: InternalAuditSes
     exactName,
     maxIdentifierLength: MAX_IDENTIFIER_LENGTH,
     maxBusinessNameLength: MAX_BUSINESS_NAME_LENGTH,
-    findByExactName: async (name, authorizedOrganizationIds) => (await prisma.business.findMany({
-      where: { nombre: name, organizationId: { in: authorizedOrganizationIds } },
-      select: {
-        id: true,
-        nombre: true,
-        organizationId: true,
-        createdAt: true,
-        analysisHistory: { orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 1, select: { createdAt: true } },
-      },
-      orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
-      take: 11,
-    })).flatMap((match) => match.organizationId ? [{
-      id: match.id,
-      name: match.nombre,
-      organizationId: match.organizationId,
-      createdAt: match.createdAt,
-      latestAnalysisAt: match.analysisHistory[0]?.createdAt || null,
-    }] : []),
+    findByExactName: (name, authorizedOrganizationIds) => findAuthorizedAuditBusinesses(prisma, name, authorizedOrganizationIds),
     authorizeById: async (id) => {
       const access = await authorizeBusiness(id, "business.read");
       return access.ok ? { ok: true as const, access } : access;
@@ -130,11 +114,27 @@ export async function GET(req: NextRequest) {
   const requestId = randomUUID();
   const timestamp = new Date().toISOString();
   const serverPid = process.pid;
-  const databaseConnection = await buildDatabaseConnectionFingerprint();
   try {
     const auth = await requireUser();
     if (!auth.ok) return apiError("unauthorized", 401);
     const rawBusinessIdInput = req.nextUrl.searchParams.get("businessId") || req.nextUrl.searchParams.get("id");
+    const exactName = req.nextUrl.searchParams.get("name")?.trim() || null;
+    if (req.nextUrl.searchParams.get("compare") === "1") {
+      if (auth.user.internalRole !== "INTERNAL") return apiError("forbidden", 403);
+      if (!rawBusinessIdInput || !exactName || rawBusinessIdInput.length > MAX_IDENTIFIER_LENGTH || exactName.length > MAX_BUSINESS_NAME_LENGTH) {
+        return apiError("validation_error", 400);
+      }
+      const comparison = await buildSingleRequestComparison({ user: auth.user, inputBusinessId: rawBusinessIdInput, exactName });
+      if (!comparison.ok) return apiError(comparison.reason, comparison.reason === "not_found" ? 404 : 403);
+      return NextResponse.json({
+        requestId,
+        timestamp,
+        serverPid,
+        singleRequestComparison: comparison.comparison,
+      }, { headers: { "Cache-Control": "private, no-store" } });
+    }
+
+    const databaseConnection = await buildDatabaseConnectionFingerprint();
     const resolved = await resolveRequestedBusiness(req, auth.user);
     if (!resolved.ok) {
       if (resolved.reason === "ambiguous_business_name") {
