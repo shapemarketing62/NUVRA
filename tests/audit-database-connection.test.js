@@ -33,7 +33,7 @@ require.extensions[".ts"] = function (module, filename) {
 
 const { PrismaClient } = require("@prisma/client");
 const prisma = new PrismaClient();
-const { buildDatabaseConnectionFingerprint, buildDirectConsistencyProbe } = require("../lib/server/authorization.ts");
+const { buildDatabaseConnectionFingerprint, buildDirectConsistencyProbe, buildCandidateConsistencyProbe } = require("../lib/server/authorization.ts");
 
 const cleanup = [];
 
@@ -111,6 +111,8 @@ test("buildDirectConsistencyProbe agrees on modern business", async () => {
   try {
     const probe = await buildDirectConsistencyProbe(business.id);
     assert.equal(probe.businessId, business.id);
+    assert.equal(probe.transactionContext.databaseIdentityHash, null);
+    assert.equal(probe.transactionContext.currentSchema, null);
     assert.equal(probe.orm.findUniqueFound, true);
     assert.equal(probe.orm.findFirstFound, true);
     assert.equal(probe.orm.findManyCount, 1);
@@ -160,6 +162,32 @@ test("buildDirectConsistencyProbe raw query uses quoted Business identifiers for
   const authorizationSource = fs.readFileSync(path.join(root, "lib/server/authorization.ts"), "utf8");
   const rawQueryMatch = authorizationSource.match(/SELECT\s+"id",\s+"organizationId"\s+FROM\s+"Business"\s+WHERE\s+"id"\s*=\s*\$\{businessId\}\s+LIMIT\s+1/);
   assert.ok(rawQueryMatch, "raw query should quote Business.id and Business.organizationId for PostgreSQL compatibility");
+});
+
+test("buildCandidateConsistencyProbe includes transaction-local context and business snapshot in SQLite", async () => {
+  const organization = await prisma.organization.create({
+    data: { name: "Org Tx Diag", slug: `org-tx-diag-${crypto.randomUUID()}`, planTier: "FREE" },
+  });
+
+  const { user } = await createInternalUserWithMemberships([
+    { organizationId: organization.id, role: "viewer" },
+  ]);
+
+  const business = await prisma.business.create({
+    data: { nombre: "Tx Diag", rubro: "Salud", organizationId: organization.id },
+  });
+
+  const restore = mockCurrentUser(user, user.memberships);
+  try {
+    const probe = await buildCandidateConsistencyProbe([business.id], "Tx Diag", [organization.id]);
+    assert.equal(probe.probes.length, 1);
+    assert.equal(probe.probes[0].businessId, business.id);
+    assert.equal(probe.transactionContext.databaseIdentityHash, null);
+    assert.equal(probe.transactionContext.currentSchema, null);
+    assert.equal(probe.probes[0].authorization.result, true);
+  } finally {
+    restore();
+  }
 });
 
 test.after(async () => {

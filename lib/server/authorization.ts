@@ -112,9 +112,105 @@ export async function buildAuthorizationDebug(businessId: string | null): Promis
   return { session, memberships, business: businessInfo, authorization };
 }
 
+export type TransactionContext = {
+  backendPid: number | null;
+  databaseIdentityHash: string | null;
+  currentSchema: string | null;
+  searchPathHash: string | null;
+  transactionIsolation: string | null;
+  transactionReadOnly: boolean | null;
+  isInRecovery: boolean | null;
+};
+
+export async function readTransactionContext(tx: any): Promise<TransactionContext> {
+  try {
+    const rows = await tx.$queryRaw<Array<Record<string, unknown>>>`
+      SELECT
+        pg_backend_pid() AS backend_pid,
+        current_database() AS database,
+        current_schema() AS schema,
+        current_setting('search_path') AS search_path,
+        current_setting('transaction_isolation') AS transaction_isolation,
+        current_setting('transaction_read_only') AS transaction_read_only,
+        pg_is_in_recovery() AS in_recovery
+    `;
+    const row = rows[0];
+    if (!row) {
+      return {
+        backendPid: null,
+        databaseIdentityHash: null,
+        currentSchema: null,
+        searchPathHash: null,
+        transactionIsolation: null,
+        transactionReadOnly: null,
+        isInRecovery: null,
+      };
+    }
+
+    const rowRecord = row as unknown as Record<string, unknown>;
+    const databaseName = String(rowRecord.database ?? "");
+    const schemaName = String(rowRecord.schema ?? "");
+    const searchPath = String(rowRecord.search_path ?? "");
+    const identity = `${databaseName}:${schemaName}`;
+    const databaseIdentityHash = createHash("sha256").update(identity).digest("hex").slice(0, 32);
+
+    return {
+      backendPid: Number(rowRecord.backend_pid),
+      databaseIdentityHash,
+      currentSchema: schemaName || null,
+      searchPathHash: createHash("sha256").update(searchPath).digest("hex").slice(0, 32),
+      transactionIsolation: String(rowRecord.transaction_isolation ?? "").trim() || null,
+      transactionReadOnly: String(rowRecord.transaction_read_only ?? "").trim() === "on",
+      isInRecovery: Boolean(rowRecord.in_recovery),
+    };
+  } catch {
+    return {
+      backendPid: null,
+      databaseIdentityHash: null,
+      currentSchema: null,
+      searchPathHash: null,
+      transactionIsolation: null,
+      transactionReadOnly: null,
+      isInRecovery: null,
+    };
+  }
+}
+
+export type BusinessTableSnapshot = {
+  count: number | null;
+  latestCreatedAt: string | null;
+  targetRow: { found: boolean; organizationId: string | null };
+};
+
+export async function readBusinessTableSnapshot(tx: any, targetBusinessId: string | null): Promise<BusinessTableSnapshot> {
+  try {
+    const [countRow, latestRow, targetRow] = await Promise.all([
+      tx.$queryRaw<Array<Record<string, unknown>>>`SELECT COUNT(*) AS count FROM "Business"`,
+      tx.$queryRaw<Array<Record<string, unknown>>>`SELECT MAX("createdAt") AS latest_created_at FROM "Business"`,
+      targetBusinessId
+        ? tx.$queryRaw<Array<Record<string, unknown>>>`SELECT "id", "organizationId" FROM "Business" WHERE "id" = ${targetBusinessId} LIMIT 1`
+        : Promise.resolve([] as Array<Record<string, unknown>>),
+    ]);
+
+    return {
+      count: countRow[0] ? Number((countRow[0] as unknown as Record<string, unknown>).count ?? 0) : null,
+      latestCreatedAt: latestRow[0] ? String((latestRow[0] as unknown as Record<string, unknown>).latest_created_at ?? "") : null,
+      targetRow: { found: Boolean(targetRow[0]), organizationId: targetRow[0] ? String((targetRow[0] as unknown as Record<string, unknown>).organizationId ?? "") : null },
+    };
+  } catch {
+    return {
+      count: null,
+      latestCreatedAt: null,
+      targetRow: { found: false, organizationId: null },
+    };
+  }
+}
+
 export type CandidateConsistencyProbe = {
   requestId: string;
   timestamp: string;
+  transactionContext: TransactionContext;
+  businessTableSnapshot: BusinessTableSnapshot;
   probes: Array<{
     businessId: string;
     nameLookup: { organizationId: string | null };
@@ -133,7 +229,10 @@ export async function buildCandidateConsistencyProbe(
   const requestId = randomUUID();
   const timestamp = new Date().toISOString();
 
-  const probes = await prisma.$transaction(async (tx) => {
+  const { probes, transactionContext, businessTableSnapshot } = await prisma.$transaction(async (tx) => {
+    const transactionContext = await readTransactionContext(tx);
+    const businessTableSnapshot = await readBusinessTableSnapshot(tx, candidateIds[0] ?? null);
+
     const results = [];
     for (const businessId of candidateIds) {
       const [nameMatches, direct, withRelation] = await Promise.all([
@@ -165,7 +264,7 @@ export async function buildCandidateConsistencyProbe(
         },
       });
     }
-    return results;
+    return { probes: results, transactionContext, businessTableSnapshot };
   });
 
   const authResults = await Promise.all(candidateIds.map((id) => authorizeBusiness(id, "business.read")));
@@ -181,7 +280,7 @@ export async function buildCandidateConsistencyProbe(
     };
   });
 
-  return { requestId, timestamp, probes: enriched };
+  return { requestId, timestamp, transactionContext, businessTableSnapshot, probes: enriched };
 }
 
 export type DatabaseConnectionFingerprint = {
@@ -228,7 +327,7 @@ export async function buildDatabaseConnectionFingerprint(): Promise<DatabaseConn
       const rows = await prisma.$queryRaw<Array<Record<string, unknown>>>`
         SELECT current_database() AS database, current_schema() AS schema, current_setting('search_path') AS search_path, pg_backend_pid() AS backend_pid, inet_server_addr() AS server_addr
       `;
-      const row = rows[0];
+    const row = rows[0] as unknown as Record<string, unknown>;
       if (row) {
         const databaseName = String(row.database ?? "");
         const schemaName = String(row.schema ?? "");
@@ -410,6 +509,8 @@ export type DirectConsistencyProbe = {
   requestId: string;
   timestamp: string;
   businessId: string;
+  transactionContext: TransactionContext;
+  businessTableSnapshot: BusinessTableSnapshot;
   orm: {
     findUniqueFound: boolean;
     findFirstFound: boolean;
@@ -434,6 +535,11 @@ export async function buildDirectConsistencyProbe(businessId: string): Promise<D
   const timestamp = new Date().toISOString();
 
   const result = await prisma.$transaction(async (tx) => {
+    const [transactionContext, businessTableSnapshot] = await Promise.all([
+      readTransactionContext(tx),
+      readBusinessTableSnapshot(tx, businessId),
+    ]);
+
     const [uniqueResult, firstResult, manyResults, withRelation] = await Promise.all([
       tx.business.findUnique({ where: { id: businessId }, select: { id: true, organizationId: true } }),
       tx.business.findFirst({ where: { id: businessId }, select: { id: true, organizationId: true } }),
@@ -504,6 +610,8 @@ export async function buildDirectConsistencyProbe(businessId: string): Promise<D
     const sameResult = (uniqueFound === firstFound && firstFound === (manyCount > 0) && relationFound === Boolean(organizationId)) && organizationId === rawOrganizationId;
 
     return {
+      transactionContext,
+      businessTableSnapshot,
       orm: { findUniqueFound: uniqueFound, findFirstFound: firstFound, findManyCount: manyCount, relationFound, organizationId },
       raw: { found: rawFound, organizationId: rawOrganizationId },
       exactInputRead: { found: exactInputReadFound, organizationId: exactInputReadOrg },
