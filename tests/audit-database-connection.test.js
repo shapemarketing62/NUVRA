@@ -156,6 +156,12 @@ test("buildDirectConsistencyProbe reports consistent nulls when organizationId i
   }
 });
 
+test("buildDirectConsistencyProbe raw query uses quoted Business identifiers for camelCase columns", async () => {
+  const authorizationSource = fs.readFileSync(path.join(root, "lib/server/authorization.ts"), "utf8");
+  const rawQueryMatch = authorizationSource.match(/SELECT\s+"id",\s+"organizationId"\s+FROM\s+"Business"\s+WHERE\s+"id"\s*=\s*\$\{businessId\}\s+LIMIT\s+1/);
+  assert.ok(rawQueryMatch, "raw query should quote Business.id and Business.organizationId for PostgreSQL compatibility");
+});
+
 test.after(async () => {
   for (const item of cleanup) {
     await prisma.membership.deleteMany({ where: { userId: item.userId } });

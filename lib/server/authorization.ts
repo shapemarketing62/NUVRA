@@ -445,7 +445,7 @@ export async function buildDirectConsistencyProbe(businessId: string): Promise<D
     let rawOrganizationId: string | null = null;
     try {
       const rawRows = await tx.$queryRaw<Array<{ id: string; organizationId: string | null }>>`
-        SELECT id, organizationId FROM "Business" WHERE id = ${businessId} LIMIT 1
+        SELECT "id", "organizationId" FROM "Business" WHERE "id" = ${businessId} LIMIT 1
       `;
       const rawRow = rawRows[0];
       rawFound = Boolean(rawRow);
