@@ -254,6 +254,9 @@ export async function GET(req: NextRequest) {
             status: safeText(provider.status || query.status, 60),
             resultCount: finiteNumber(query.resultCount) || 0,
             errorType: safeText(provider.errorType || query.errorType, 80),
+            errorCategory: safeText(provider.errorCategory, 40),
+            httpStatus: finiteNumber(provider.httpStatus),
+            attempt: finiteNumber(provider.attempt),
             };
           });
         }),

@@ -1,4 +1,4 @@
-import type { SearchProvider, SearchResult } from "./search-provider.ts";
+import { SearchProviderRequestError, type SearchProvider, type SearchResult } from "./search-provider.ts";
 import type { Business } from "@prisma/client";
 
 interface TavilySearchResponse {
@@ -28,7 +28,7 @@ export class TavilySearchProvider implements SearchProvider {
   async search(query: string, _business: Business, options: { signal?: AbortSignal } = {}): Promise<SearchResult[]> {
     const apiKey = process.env.TAVILY_API_KEY;
     if (!apiKey) {
-      throw new Error("TAVILY_API_KEY no configurada");
+      throw new SearchProviderRequestError("authentication");
     }
 
     const response = await fetch(this.apiUrl, {
@@ -47,11 +47,22 @@ export class TavilySearchProvider implements SearchProvider {
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Tavily API error: ${response.status} ${response.statusText} - ${errorText}`);
+      const category = response.status === 401 || response.status === 403
+        ? "authentication"
+        : response.status === 429
+          ? "rate_limited"
+          : response.status >= 500
+            ? "provider_5xx"
+            : "unknown";
+      throw new SearchProviderRequestError(category, { httpStatus: response.status });
     }
 
-    const data = (await response.json()) as TavilySearchResponse;
+    let data: TavilySearchResponse;
+    try {
+      data = (await response.json()) as TavilySearchResponse;
+    } catch (error) {
+      throw new SearchProviderRequestError("invalid_response", { cause: error });
+    }
 
     if (!data.results || !Array.isArray(data.results)) {
       return [];

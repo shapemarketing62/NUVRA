@@ -18,7 +18,7 @@ export interface AnalysisTrace {
     primaryWebUrl: string | null;
     primaryInstagram: string | null;
     primaryGoogleMaps: string | null;
-    queries: Array<{ query: string; intent: string; status: string; resultCount: number; providers: Array<{ provider: string; status: string; errorType?: string }> }>;
+    queries: Array<{ query: string; intent: string; status: string; resultCount: number; providers: Array<{ provider: string; status: string; errorType?: string; errorCategory?: string; httpStatus?: number; attempt?: number }> }>;
     candidates: Array<{ title: string; url: string; type: string; status: string; matchScore: number; signals: unknown; reason: string; corroboratingSources: string[] }>;
   };
   found: Array<{ evidenceId: string; kind: string; source: string; stage: string; text: string; confidence: string }>;

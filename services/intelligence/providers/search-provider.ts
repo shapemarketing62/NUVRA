@@ -22,6 +22,57 @@ export interface SearchProviderTraceAttempt {
   provider: "tavily" | "duckduckgo";
   status: "completed" | "no_results" | "unavailable";
   errorType?: string;
+  errorCategory?: SearchProviderErrorCategory;
+  httpStatus?: number;
+  attempt?: number;
+}
+
+export type SearchProviderErrorCategory =
+  | "authentication"
+  | "rate_limited"
+  | "timeout"
+  | "provider_5xx"
+  | "network"
+  | "invalid_response"
+  | "unknown";
+
+export interface SafeSearchProviderError {
+  category: SearchProviderErrorCategory;
+  httpStatus?: number;
+}
+
+export class SearchProviderRequestError extends Error {
+  readonly category: SearchProviderErrorCategory;
+  readonly httpStatus?: number;
+
+  constructor(category: SearchProviderErrorCategory, options: { httpStatus?: number; cause?: unknown } = {}) {
+    super(`search_provider_${category}`, { cause: options.cause });
+    this.name = "SearchProviderRequestError";
+    this.category = category;
+    this.httpStatus = options.httpStatus;
+  }
+}
+
+/** Returns only allow-listed diagnostics. It never returns messages, bodies or request data. */
+export function classifySearchProviderError(error: unknown): SafeSearchProviderError {
+  if (error instanceof SearchProviderRequestError) {
+    return { category: error.category, ...(error.httpStatus ? { httpStatus: error.httpStatus } : {}) };
+  }
+
+  const value = error && typeof error === "object" ? error as Record<string, unknown> : {};
+  const status = typeof value.status === "number" ? value.status : undefined;
+  if (status === 401 || status === 403) return { category: "authentication", httpStatus: status };
+  if (status === 429) return { category: "rate_limited", httpStatus: status };
+  if (status !== undefined && status >= 500 && status <= 599) return { category: "provider_5xx", httpStatus: status };
+
+  const name = typeof value.name === "string" ? value.name : "";
+  const code = typeof value.code === "string" ? value.code.toUpperCase() : "";
+  if (name === "AbortError" || ["ETIMEDOUT", "ESOCKETTIMEDOUT"].includes(code)) return { category: "timeout" };
+  if (error instanceof SyntaxError) return { category: "invalid_response" };
+  if (error instanceof TypeError || ["ECONNRESET", "ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "UND_ERR_CONNECT_TIMEOUT"].includes(code)) {
+    return { category: "network" };
+  }
+  return { category: "unknown" };
 }
 
 /**

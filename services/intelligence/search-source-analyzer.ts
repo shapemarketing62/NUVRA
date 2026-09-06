@@ -1,5 +1,5 @@
 import { SourceAnalyzer, type SourceEvidence, type SourceRelevance, type SourceType, type EvidenceFinding, type SourceAnalysisContext } from "./source-analyzer.ts";
-import { DuckDuckGoProvider, type SearchProvider, type SearchProviderTraceAttempt, type SearchResult } from "./providers/search-provider.ts";
+import { classifySearchProviderError, DuckDuckGoProvider, type SearchProvider, type SearchProviderTraceAttempt, type SearchResult } from "./providers/search-provider.ts";
 import { TavilySearchProvider } from "./providers/tavily-search-provider.ts";
 
 import type { Business } from "@prisma/client";
@@ -32,8 +32,9 @@ export class SmartSearchProvider implements SearchProvider {
         this.attemptsByQuery.set(query, [...attempts]);
         return results;
       } catch (error) {
-        attempts.push({ provider: "tavily", status: "unavailable", errorType: providerErrorType(error) });
-        console.error("[SmartSearchProvider] Tavily falló, intentando fallback DuckDuckGo...", providerErrorType(error));
+        const safeError = classifySearchProviderError(error);
+        attempts.push({ provider: "tavily", status: "unavailable", errorType: providerErrorType(error), errorCategory: safeError.category, ...(safeError.httpStatus ? { httpStatus: safeError.httpStatus } : {}), attempt: 1 });
+        console.error("[SmartSearchProvider] Tavily failed", { ...safeError, attempt: 1 });
         // Fallback a DDG si Tavily falla incluso teniendo la key (ej: error de API, rate limit)
       }
     } else {

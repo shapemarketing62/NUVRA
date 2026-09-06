@@ -1,5 +1,5 @@
 import { SearchProviderUnavailableError, SmartSearchProvider } from "../intelligence/search-source-analyzer.ts";
-import type { SearchProvider, SearchResult } from "../intelligence/providers/search-provider.ts";
+import type { SearchProvider, SearchProviderErrorCategory, SearchResult } from "../intelligence/providers/search-provider.ts";
 import {
   EntityMatcher,
 } from "./entity-matcher.ts";
@@ -15,7 +15,7 @@ export interface DiscoveryQueryAttempt {
   status: "completed" | "no_results" | "provider_unavailable";
   resultCount: number;
   errorType?: string;
-  providers?: Array<{ provider: string; status: "completed" | "no_results" | "unavailable"; errorType?: string }>;
+  providers?: Array<{ provider: string; status: "completed" | "no_results" | "unavailable"; errorType?: string; errorCategory?: SearchProviderErrorCategory; httpStatus?: number; attempt?: number }>;
 }
 
 export interface DiscoveryResult {
