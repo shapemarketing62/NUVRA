@@ -16,7 +16,8 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const { businessId } = z.object({ businessId: z.string().min(1).max(100) }).parse(await readJsonBody(req, 4_000));
+    const body = await readJsonBody(req, 4_000);
+    const { businessId, assetDecisions } = z.object({ businessId: z.string().min(1).max(100), assetDecisions: z.array(z.object({ key: z.string(), observedValue: z.string(), userConfirmation: z.enum(["confirmed", "rejected", "needs_update"]), userValue: z.string().optional() })).optional() }).parse(body);
     const access = await authorizeBusiness(businessId, "analysis.run", "analysis.basic");
     if (!access.ok) return apiError(access.reason, access.reason === "unauthorized" ? 401 : 403);
     if (requiresVerifiedEmail("analysis.run") && !access.user.emailVerifiedAt) return apiError("forbidden", 403);
@@ -24,7 +25,7 @@ export async function POST(req: NextRequest) {
     if (!(await canConsume(access.organization.id, "monthlyAnalyses", 1, access.user.id))) return apiError("usage_limit_reached", 403);
 
     const correlationId=requestId(req.headers);const supplied=req.headers.get("idempotency-key");const idempotencyKey=supplied&&/^[A-Za-z0-9._:-]{8,128}$/.test(supplied)?supplied:automaticIdempotencyKey({organizationId:access.organization.id,businessId,userId:access.user.id});
-    const execution=await new AnalysisExecutionService().run({organizationId:access.organization.id,businessId,userId:access.user.id,requestId:correlationId,idempotencyKey,signal:req.signal});
+    const execution=await new AnalysisExecutionService().run({organizationId:access.organization.id,businessId,userId:access.user.id,requestId:correlationId,idempotencyKey,assetDecisions:assetDecisions||[],signal:req.signal});
     if(execution.reused){const status=execution.run.status;return NextResponse.json({status,analysisRunId:execution.run.id,reused:true,...(execution.result||{})},{status:status==="queued"||status==="running"?202:200,headers:{"x-request-id":correlationId}})}
     if (!execution.result?.success) {
       return apiError("source_unavailable", 422);

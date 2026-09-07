@@ -168,12 +168,16 @@ test("el dashboard siempre muestra puntajes y explica con claridad cuándo hay p
   assert.doesNotMatch(dashboard, /CoverageBar|PRELIMINAR|Falta claridad en la dimensión prioritaria|Podemos afinar esta área|No hay un único problema/);
 });
 
-test("el onboarding no precarga ejemplos ni menciona el caso de prueba", () => {
+test("el onboarding V2 mantiene lenguaje simple y sin datos de prueba hardcodeados", () => {
   const onboarding = fs.readFileSync(new URL("../app/onboarding/page.tsx", import.meta.url), "utf8");
-  assert.doesNotMatch(onboarding, /placeholder=/);
-  assert.doesNotMatch(onboarding, /AP Medicina Estética|También puede quedar vacío/i);
-  assert.match(onboarding, /<Field label="Rubro"><TextInput value=\{data\.rubro\}/);
-  assert.doesNotMatch(onboarding, /RUBROS|<Select/);
-  assert.match(onboarding, /plazoId: "", plazoCustom: "", presupuestoMarketing: "", capacidadEjecucion: ""/);
+  assert.doesNotMatch(onboarding, /AP Medicina Estética|Estética Dental Argentina|Starbucks/i);
+  assert.match(onboarding, /Empecemos por tu negocio/);
+  assert.match(onboarding, /<Field label="Nombre del negocio"/);
+  assert.match(onboarding, /<Field label="¿A qué se dedica\?"/);
+  assert.match(onboarding, /<Field label="¿Dónde trabaja principalmente tu negocio\?"/);
   assert.match(onboarding, /No tengo página web/);
+  assert.match(onboarding, /No tengo Instagram/);
+  assert.match(onboarding, /¿Qué querés mejorar\?/);
+  assert.match(onboarding, /Tu realidad hoy/);
+  assert.doesNotMatch(onboarding, /buyer persona|funnel|acquisition|conversion rate|positioning|value proposition|evidence suficiency|coverage|business maturity/i);
 });

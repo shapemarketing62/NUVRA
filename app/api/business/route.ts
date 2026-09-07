@@ -34,7 +34,7 @@ export async function POST(req: NextRequest) {
         nombre: data.nombre,
         organizationId: membership.organizationId,
         rubro: data.rubro,
-        descripcion: data.descripcion,
+        descripcion: data.descripcion || buildOnboardingNotes(data.capacidadComercial, data.limitaciones),
         ubicacion: data.ubicacion,
         ciudad: data.ciudad,
         pais: data.pais,
@@ -153,6 +153,13 @@ function normalizeEditableWebsite(value: string | null | undefined) {
   if (!["http:", "https:"].includes(parsed.protocol) || !parsed.hostname || parsed.username || parsed.password) throw new Error("invalid_website_url");
   parsed.hash = "";
   return parsed.toString();
+}
+
+function buildOnboardingNotes(capacidadComercial: string | null | undefined, limitaciones: string | null | undefined): string | undefined {
+  const parts: string[] = [];
+  if (capacidadComercial) parts.push(`Capacidad comercial: ${capacidadComercial}`);
+  if (limitaciones?.trim()) parts.push(`Limitaciones: ${limitaciones.trim()}`);
+  return parts.length ? parts.join("\n") : undefined;
 }
 
 export async function PATCH(req: NextRequest) {

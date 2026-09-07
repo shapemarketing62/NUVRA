@@ -64,7 +64,24 @@ function deriveFindingConfidence(finding: any): "ALTA" | "MEDIA" | "BAJA" {
   return "BAJA";
 }
 
-export async function runFullAnalysis(businessId: string, options: { signal?: AbortSignal } = {}): Promise<RunAnalysisResult> {
+function applyAssetDecisions(result: any, decisions: Array<{ key: string; observedValue: string; userConfirmation: string; userValue?: string }>) {
+  if (!decisions || !decisions.length) return result;
+  const web = decisions.find((d) => d.key === "web");
+  const instagram = decisions.find((d) => d.key === "instagram");
+  const tiktok = decisions.find((d) => d.key === "tiktok");
+  const maps = decisions.find((d) => d.key === "maps");
+  const next = { ...result };
+  if (web?.userConfirmation === "confirmed" && web.userValue) next.primaryWebUrl = web.userValue;
+  if (web?.userConfirmation === "rejected") next.primaryWebUrl = null;
+  if (instagram?.userConfirmation === "confirmed" && instagram.userValue) next.primaryInstagram = instagram.userValue;
+  if (instagram?.userConfirmation === "rejected") next.primaryInstagram = null;
+  if (tiktok?.userConfirmation === "confirmed" && tiktok.userValue) next.primaryTikTok = tiktok.userValue;
+  if (tiktok?.userConfirmation === "rejected") next.primaryTikTok = null;
+  if (maps?.userConfirmation === "rejected") next.primaryGoogleMaps = null;
+  return next;
+}
+
+export async function runFullAnalysis(businessId: string, options: { signal?: AbortSignal; assetDecisions?: Array<{ key: string; observedValue: string; userConfirmation: string; userValue?: string }> } = {}): Promise<RunAnalysisResult> {
   const startedAt = Date.now();
   let currentStage = "load_business";
   stageLog("1_inicio", { businessId, startedAt });
@@ -116,7 +133,7 @@ export async function runFullAnalysis(businessId: string, options: { signal?: Ab
     policy: { timeoutMs: 15_000, retries: 1, backoffMs: 300 },
     signal: options.signal,
   });
-  const discoveryResult = discoveryExecution.value || emptyDiscoveryResult(discoveryTarget);
+  const discoveryResult = applyAssetDecisions(discoveryExecution.value || emptyDiscoveryResult(discoveryTarget), options.assetDecisions || []);
 
   stageLog("1_5_discovery", {
     businessId,

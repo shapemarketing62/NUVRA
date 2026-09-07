@@ -49,8 +49,8 @@ async function detectedPartial(businessId: string) {
 }
 
 export class AnalysisExecutionService {
-  constructor(private readonly execute: (businessId: string, signal?: AbortSignal) => Promise<RunAnalysisResult> = (businessId, signal) => runFullAnalysis(businessId, { signal })) {}
-  async run(input: { organizationId: string; businessId: string; userId: string; requestId: string; idempotencyKey: string; signal?: AbortSignal }) {
+  constructor(private readonly execute: (businessId: string, options?: { signal?: AbortSignal; assetDecisions?: Array<{ key: string; observedValue: string; userConfirmation: string; userValue?: string }> }) => Promise<RunAnalysisResult> = (businessId, options) => runFullAnalysis(businessId, options)) {}
+  async run(input: { organizationId: string; businessId: string; userId: string; requestId: string; idempotencyKey: string; signal?: AbortSignal; assetDecisions?: Array<{ key: string; observedValue: string; userConfirmation: string; userValue?: string }> }) {
     let run = await prisma.analysisRun.findUnique({ where: { organizationId_idempotencyKey: { organizationId: input.organizationId, idempotencyKey: input.idempotencyKey } } });
     if (run) return { run, reused: true, result: publicStoredResult(run.result) };
     try { run = await prisma.analysisRun.create({ data: { organizationId: input.organizationId, businessId: input.businessId, idempotencyKey: input.idempotencyKey, requestId: input.requestId, status: "queued" } }); }
@@ -59,7 +59,7 @@ export class AnalysisExecutionService {
     return runWithLogContext({ requestId: input.requestId, organizationId: input.organizationId, businessId: input.businessId }, async () => {
       const started = Date.now(); logger.info({ operation: "analysis.run", outcome: "success", phase: "started" });
       try {
-        const result = await controlled((signal) => this.execute(input.businessId, signal), input.signal);
+        const result = await controlled((signal) => this.execute(input.businessId, { signal, assetDecisions: input.assetDecisions }), input.signal);
         const status: AnalysisRunStatus = result.success ? (result.analysisStatus || (await detectedPartial(input.businessId) ? "partial" : "completed")) : "failed";
         const saved = safeResult(result); const updated = await prisma.analysisRun.update({ where: { id: run.id }, data: { status, result: JSON.stringify(storedResult(result)), errorCode: result.success ? null : result.internalFailure?.failedAt || "source_unavailable", completedAt: new Date() } });
         logger.info({ operation: "analysis.run", durationMs: Date.now() - started, outcome: result.success ? "success" : "failure", analysisRunId: run.id, status, failedAt: result.internalFailure?.failedAt }); return { run: updated, reused: false, result: saved };

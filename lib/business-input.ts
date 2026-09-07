@@ -27,6 +27,8 @@ export const businessInputSchema = z.object({
   magnitud: z.number().min(0).max(1000).optional().nullable(),
   plazoDias: z.number().int().min(1).max(3650),
   plazoLabel: z.string().trim().min(1).max(80),
+  capacidadComercial: z.enum(["si", "algunas", "limite", "no_se"]).optional().nullable(),
+  limitaciones: z.string().max(2000).optional().nullable(),
 }).superRefine((data, context) => {
   if (data.noWebDeclared && data.webUrl) context.addIssue({ code: z.ZodIssueCode.custom, path: ["webUrl"], message: "No se puede declarar que no hay página web y enviar una URL." });
   if (data.noInstagramDeclared && data.instagramHandle) context.addIssue({ code: z.ZodIssueCode.custom, path: ["instagramHandle"], message: "No se puede declarar que no hay Instagram y enviar un perfil." });

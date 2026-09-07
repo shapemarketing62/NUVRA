@@ -40,7 +40,7 @@ function AnalyzeContent() {
     fetch("/api/analyze/run", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ businessId }),
+      body: JSON.stringify({ businessId, assetDecisions: (() => { try { const raw = sessionStorage.getItem("nuvra_asset_decisions"); return raw ? JSON.parse(raw) : null; } catch { return null; } })() }),
     })
       .then(async (res) => {
         clearInterval(stepTimer);

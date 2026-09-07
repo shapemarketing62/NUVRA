@@ -123,13 +123,15 @@ test("plazo personalizado se valida y conserva para el análisis", () => {
 test("onboarding representa y envía las declaraciones sin web e Instagram", () => {
   const onboarding = fs.readFileSync(new URL("../app/onboarding/page.tsx", import.meta.url), "utf8");
   const input = fs.readFileSync(new URL("../components/ui/index.tsx", import.meta.url), "utf8");
-  assert.match(onboarding, /data\.plazoId === "custom" && <Field label="Plazo personalizado"/);
-  assert.match(onboarding, /data\.plazoId !== "custom" \|\| customTimeframe/);
+  assert.match(onboarding, /Empecemos por tu negocio/);
   assert.match(onboarding, /disabled=\{data\.noWeb\}/);
   assert.match(onboarding, /disabled=\{data\.noInstagram\}/);
-  assert.match(onboarding, /noWebDeclared: data\.noWeb, noInstagramDeclared: data\.noInstagram/);
-  assert.doesNotMatch(onboarding, /OBJETIVOS|options=\{OBJETIVOS\}/);
-  assert.match(onboarding, /¿Qué querés lograr\?<\/h1>.*<TextArea value=\{data\.objetivo\}/s);
+  assert.match(onboarding, /noWebDeclared: data\.noWeb/);
+  assert.match(onboarding, /noInstagramDeclared: data\.noInstagram/);
+  assert.match(onboarding, /¿Qué querés mejorar\?/);
+  assert.match(onboarding, /Tu realidad hoy/);
+  assert.match(onboarding, /No tengo página web/);
+  assert.match(onboarding, /No tengo Instagram/);
   assert.match(onboarding, /objetivo: data\.objetivo\.trim\(\)/);
   assert.match(input, /<input className=\{`input \$\{className\}`\}/);
   assert.match(input, /onChange=\{\(event\)=>onChange\(event\.target\.value\)\} \{\.\.\.rest\}/);
