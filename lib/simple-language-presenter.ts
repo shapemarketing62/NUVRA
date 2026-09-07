@@ -49,6 +49,14 @@ const TECHNICAL_GLOSSARY: Array<[RegExp, string]> = [
   [/\balt text\b/gi, "descripciones de texto en imágenes"],
   [/\borgánica\b/gi, "de forma natural y sin pagar publicidad"],
   [/\borgánico\b/gi, "sin costo publicitario directo"],
+  [/\bevidence sufficiency\b/gi, "solidez de la evidencia"],
+  [/\bcoverage\b/gi, "cobertura de información"],
+  [/\bcounterfactual\b/gi, "explicación alternativa"],
+  [/\bjourney\b/gi, "recorrido"],
+  [/\bsignal\b/gi, "dato observado"],
+  [/\binsight\b/gi, "interpretación"],
+  [/\bdiagnóstico\b/gi, "análisis del negocio"],
+  [/\bestrategia\b/gi, "plan de acción"],
 ];
 
 /**

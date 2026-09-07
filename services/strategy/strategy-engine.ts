@@ -10,6 +10,8 @@ import type { ProblemCandidate } from "../intelligence/commercial-candidates.ts"
 import { StrategicKnowledgeBase, type KnowledgeMatch } from "./strategic-knowledge-base.ts";
 import { ActionOpportunityEngine } from "./action-opportunity-engine.ts";
 import { encodeActionDecisionDetails } from "./action-decision-details.ts";
+import { buildStrategyPlan } from "./strategy-plan-builder.ts";
+import type { StrategyPlan } from "./strategy-plan-builder.ts";
 
 // Force recompilation: 2025-01-17T20:25:00Z
 
@@ -33,6 +35,7 @@ export interface StrategyContext {
 export interface StrategyResult extends StrategyOutput {
   engineType: "deterministic" | "ai";
   frameworks?: Array<{ id: string; title: string; rationale: string; useCase: string; dimension?: string; priority?: number }>;
+  plan?: StrategyPlan;
   audit?: {
     decisionEvidence?: {
       status: "sufficient" | "partial" | "insufficient";
@@ -242,6 +245,7 @@ export function buildProfileStrategy(context: StrategyContext, diagnosis: Diagno
     prioridades: actions.slice(0, 3).map((action) => action.title),
     frameworks: [{ id: frameworkSelection.primary, title: FRAMEWORKS[frameworkSelection.primary]?.name || frameworkSelection.primary, rationale: "Selección interna basada en la hipótesis causal, el objetivo y el recorrido comercial.", useCase: FRAMEWORKS[frameworkSelection.primary]?.description || "", dimension: primary?.journeyStage, priority: 1 }],
     actions,
+    plan: buildStrategyPlan(profile, { objetivo: context.objetivo, plazoLabel: context.plazoLabel, magnitud: context.magnitud }, actions.map((a) => ({ title: a.title, description: a.description || "", timeframe: a.estimatedTime, kpi: a.kpi || "", evidence: a.evidence || "" }))),
     audit: {
       decisionEvidence: {
         status: decision.evidence.status,
@@ -311,7 +315,12 @@ interface Intervention {
 function interventionLocation(profile: BusinessProfile, problem: ProblemCandidate): string {
   const sources = problem.evidenceFor.map((id) => profile.commercialEvidence.find((item) => item.id === id)?.source).filter(Boolean);
   const labels = Array.from(new Set(sources.map((source) => actionSourceLabel(String(source)))));
-  return labels.length ? labels.join(" y ") : profile.primaryChannel ? actionSourceLabel(profile.primaryChannel) : "el canal principal del negocio";
+  if (labels.length) return labels.join(" y ");
+  if (profile.activeChannels.includes("web")) return "el sitio web";
+  if (profile.activeChannels.includes("instagram")) return "Instagram";
+  if (profile.activeChannels.includes("search")) return "Google";
+  if (profile.primaryChannel) return actionSourceLabel(profile.primaryChannel);
+  return "los canales disponibles del negocio";
 }
 
 function interventionFor(profile: BusinessProfile, problem: ProblemCandidate, context: StrategyContext, constrained: boolean, shortTerm: boolean): Intervention {
@@ -596,5 +605,6 @@ function buildDeterministicStrategy(
     prioridades: [diagnosis.bottleneck.title, getBudgetFocus(context), ...diagnosis.priorities.map((p) => p.title)].filter((item, index, all) => all.indexOf(item) === index).slice(0, 3),
     frameworks: [{ id: frameworkSelection.primary, title: FRAMEWORKS[frameworkSelection.primary]?.name || frameworkSelection.primary, rationale: frameworkSelection.rationale, useCase: FRAMEWORKS[frameworkSelection.primary]?.description || "", dimension: weakest?.slug, priority: 1 }, ...frameworksOut],
     actions: actions.filter(isSpecificBusinessAction).slice(0, 5),
+    plan: buildStrategyPlan(null, { objetivo: context.objetivo, plazoLabel: context.plazoLabel, magnitud: context.magnitud }, actions.filter(isSpecificBusinessAction).slice(0, 5).map((a) => ({ title: a.title, description: a.description || "", timeframe: a.estimatedTime, kpi: a.kpi || "", evidence: a.evidence || "" }))),
   };
 }
