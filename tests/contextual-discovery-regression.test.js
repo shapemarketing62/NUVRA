@@ -159,7 +159,7 @@ test("SmartSearchProvider audita Tavily sin resultados sin alterar el fallback",
     provider.ddg = { search: async () => { throw new Error("DDG no debe ejecutarse"); } };
     const results = await provider.search("consulta sin resultados", target);
     assert.deepEqual(results, []);
-    assert.deepEqual(provider.getAttempts("consulta sin resultados"), [{ provider: "tavily", status: "no_results" }]);
+    assert.deepEqual(provider.getAttempts("consulta sin resultados"), [{ provider: "tavily", status: "no_results", resultCount: 0, attempt: 1 }]);
   } finally {
     if (previousKey === undefined) delete process.env.TAVILY_API_KEY;
     else process.env.TAVILY_API_KEY = previousKey;

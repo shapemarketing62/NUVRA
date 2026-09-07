@@ -228,6 +228,7 @@ export async function GET(req: NextRequest) {
         failure: safeFailure(runResult.internalFailure),
       },
       providers: {
+        serperConfigured: Boolean(process.env.SERPER_API_KEY),
         tavilyConfigured: Boolean(process.env.TAVILY_API_KEY),
         tavilyAttempted: providerAttempts.some((attempt) => record(attempt).provider === "tavily"),
         googlePlacesConfigured: Boolean(process.env.GOOGLE_PLACES_API_KEY),

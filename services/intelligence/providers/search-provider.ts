@@ -19,8 +19,9 @@ export interface SearchProvider {
 }
 
 export interface SearchProviderTraceAttempt {
-  provider: "tavily" | "duckduckgo";
+  provider: "serper" | "tavily" | "duckduckgo";
   status: "completed" | "no_results" | "unavailable";
+  resultCount?: number;
   errorType?: string;
   errorCategory?: SearchProviderErrorCategory;
   httpStatus?: number;
@@ -30,6 +31,7 @@ export interface SearchProviderTraceAttempt {
 export type SearchProviderErrorCategory =
   | "authentication"
   | "rate_limited"
+  | "plan_limit"
   | "timeout"
   | "provider_5xx"
   | "network"
@@ -61,9 +63,7 @@ export function classifySearchProviderError(error: unknown): SafeSearchProviderE
 
   const value = error && typeof error === "object" ? error as Record<string, unknown> : {};
   const status = typeof value.status === "number" ? value.status : undefined;
-  if (status === 401 || status === 403) return { category: "authentication", httpStatus: status };
-  if (status === 429) return { category: "rate_limited", httpStatus: status };
-  if (status !== undefined && status >= 500 && status <= 599) return { category: "provider_5xx", httpStatus: status };
+  if (status !== undefined) return { category: categoryForHttpStatus(status), httpStatus: status };
 
   const name = typeof value.name === "string" ? value.name : "";
   const code = typeof value.code === "string" ? value.code.toUpperCase() : "";
@@ -73,6 +73,14 @@ export function classifySearchProviderError(error: unknown): SafeSearchProviderE
     return { category: "network" };
   }
   return { category: "unknown" };
+}
+
+export function categoryForHttpStatus(status: number): SearchProviderErrorCategory {
+  if (status === 401 || status === 403) return "authentication";
+  if (status === 429) return "rate_limited";
+  if (status === 432) return "plan_limit";
+  if (status >= 500 && status <= 599) return "provider_5xx";
+  return "unknown";
 }
 
 /**

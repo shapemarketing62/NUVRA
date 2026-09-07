@@ -59,14 +59,15 @@ export class BusinessDiscoveryService {
       ubicacion: target.location || "",
     };
 
-    await runWithConcurrency(queries, 3, async (item) => {
+    const executeQuery = async (item: { query: string; intent: DiscoveryQueryIntent }) => {
       if (context.signal?.aborted) throw Object.assign(new Error("discovery_canceled"), { name: "AbortError" });
       try {
         const results = await this.searchProvider.search(item.query, mockBusiness, { signal: context.signal });
         const providerTrace = this.searchProvider.getAttempts?.(item.query) || [];
         const providers = providerTrace.length ? providerTrace : Array.from(new Set(results.map((result) => result.metadata?.acquisitionProvider).filter((value): value is string => typeof value === "string")))
           .map((provider) => ({ provider, status: results.length ? "completed" as const : "no_results" as const }));
-        queryAttempts.push({ query: item.query, intent: item.intent, status: results.length ? "completed" : "no_results", resultCount: results.length, ...(providers.length ? { providers } : {}) });
+        const degradedWithoutResults = results.length === 0 && providers.some((provider) => provider.status === "unavailable");
+        queryAttempts.push({ query: item.query, intent: item.intent, status: results.length ? "completed" : degradedWithoutResults ? "provider_unavailable" : "no_results", resultCount: results.length, ...(providers.length ? { providers } : {}) });
         for (const result of results) rawResults.push({ result, query: item.query, intent: item.intent });
       } catch (error) {
         if (context.signal?.aborted) throw error;
@@ -80,7 +81,19 @@ export class BusinessDiscoveryService {
         });
         console.warn(`[BUSINESS_DISCOVERY] Search query unavailable for "${item.query}":`, error instanceof Error ? error.name : "ProviderError");
       }
-    });
+    };
+
+    if (context.queries) {
+      await runWithConcurrency(queries, 3, executeQuery);
+    } else {
+      const identityAndWebsite = queries.filter((item) => item.intent === "identity" || item.intent === "website");
+      const nonRedundant = queries.filter((item) => item.intent !== "identity" && item.intent !== "website");
+      for (let index = 0; index < identityAndWebsite.length; index += 3) {
+        await runWithConcurrency(identityAndWebsite.slice(index, index + 3), 3, executeQuery);
+        if (this.hasSufficientWebsiteEvidence(rawResults, target)) break;
+      }
+      await runWithConcurrency(nonRedundant, 3, executeQuery);
+    }
 
     // 2. Clasificar candidatos brutos
     const rawCandidates: CandidateSource[] = [];
@@ -151,6 +164,25 @@ export class BusinessDiscoveryService {
       queryAttempts: queryAttempts.sort((a, b) => queries.findIndex((item) => item.query === a.query) - queries.findIndex((item) => item.query === b.query)),
       discoveredAt: new Date(),
     };
+  }
+
+  private hasSufficientWebsiteEvidence(
+    rawResults: Array<{ result: SearchResult; query: string; intent: DiscoveryQueryIntent }>,
+    target: BusinessEntityTarget,
+  ): boolean {
+    if (new Set(rawResults.map((item) => item.result.url).filter(Boolean)).size < 3) return false;
+    const webCandidates = rawResults
+      .filter((item) => item.result.url)
+      .map(({ result, intent }) => ({
+        title: result.title,
+        url: result.url,
+        snippet: result.snippet,
+        type: this.classifyResultType(result.url, result.title, result.snippet, intent),
+        metadata: result.metadata,
+      }))
+      .filter((candidate) => candidate.type === "web")
+      .map((candidate) => EntityMatcher.evaluateCandidate(candidate, target));
+    return webCandidates.some((candidate) => candidate.status === "confirmed" && (candidate.matchScore || 0) >= 0.7);
   }
 
   /**

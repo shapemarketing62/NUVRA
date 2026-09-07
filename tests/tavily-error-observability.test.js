@@ -30,6 +30,7 @@ test("clasifica estados HTTP sin conservar cuerpos", () => {
   assert.deepEqual(classifySearchProviderError({ status: 401 }), { category: "authentication", httpStatus: 401 });
   assert.deepEqual(classifySearchProviderError({ status: 403 }), { category: "authentication", httpStatus: 403 });
   assert.deepEqual(classifySearchProviderError({ status: 429 }), { category: "rate_limited", httpStatus: 429 });
+  assert.deepEqual(classifySearchProviderError({ status: 432 }), { category: "plan_limit", httpStatus: 432 });
   for (const status of [500, 502, 503]) {
     assert.deepEqual(classifySearchProviderError({ status }), { category: "provider_5xx", httpStatus: status });
   }
@@ -87,8 +88,9 @@ test("SmartSearch registra y traza solo campos permitidos", async () => {
       errorType: "SearchProviderRequestError",
       errorCategory: "rate_limited",
       httpStatus: 429,
+      resultCount: 0,
       attempt: 1,
-    }, { provider: "duckduckgo", status: "no_results" }]);
+    }, { provider: "duckduckgo", status: "no_results", resultCount: 0, attempt: 1 }]);
 
     const serialized = JSON.stringify({ logs, trace: provider.getAttempts("consulta segura") });
     assert.doesNotMatch(serialized, /super-secret-api-key|authorization|bearer/i);

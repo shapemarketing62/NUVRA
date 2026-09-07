@@ -1,4 +1,4 @@
-import { SearchProviderRequestError, type SearchProvider, type SearchResult } from "./search-provider.ts";
+import { categoryForHttpStatus, SearchProviderRequestError, type SearchProvider, type SearchResult } from "./search-provider.ts";
 import type { Business } from "@prisma/client";
 
 interface TavilySearchResponse {
@@ -47,14 +47,7 @@ export class TavilySearchProvider implements SearchProvider {
     });
 
     if (!response.ok) {
-      const category = response.status === 401 || response.status === 403
-        ? "authentication"
-        : response.status === 429
-          ? "rate_limited"
-          : response.status >= 500
-            ? "provider_5xx"
-            : "unknown";
-      throw new SearchProviderRequestError(category, { httpStatus: response.status });
+      throw new SearchProviderRequestError(categoryForHttpStatus(response.status), { httpStatus: response.status });
     }
 
     let data: TavilySearchResponse;

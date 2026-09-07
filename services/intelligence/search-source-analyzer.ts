@@ -1,5 +1,6 @@
 import { SourceAnalyzer, type SourceEvidence, type SourceRelevance, type SourceType, type EvidenceFinding, type SourceAnalysisContext } from "./source-analyzer.ts";
 import { classifySearchProviderError, DuckDuckGoProvider, type SearchProvider, type SearchProviderTraceAttempt, type SearchResult } from "./providers/search-provider.ts";
+import { SerperSearchProvider } from "./providers/serper-search-provider.ts";
 import { TavilySearchProvider } from "./providers/tavily-search-provider.ts";
 
 import type { Business } from "@prisma/client";
@@ -12,6 +13,7 @@ interface BusinessWithGoals extends Business {
  * Implementación de SearchProvider que coordina Tavily con fallback a DuckDuckGo.
  */
 export class SmartSearchProvider implements SearchProvider {
+  private serper = new SerperSearchProvider();
   private tavily = new TavilySearchProvider();
   private ddg = new DuckDuckGoProvider();
   private attemptsByQuery = new Map<string, SearchProviderTraceAttempt[]>();
@@ -21,33 +23,49 @@ export class SmartSearchProvider implements SearchProvider {
   }
 
   async search(query: string, business: Business, options: { signal?: AbortSignal } = {}): Promise<SearchResult[]> {
+    const hasSerperKey = !!process.env.SERPER_API_KEY;
     const hasTavilyKey = !!process.env.TAVILY_API_KEY;
     const attempts: SearchProviderAttempt[] = [];
+
+    if (hasSerperKey) {
+      try {
+        console.log("[SmartSearchProvider] Intentando búsqueda con Serper...");
+        const results = await this.serper.search(query, business, options);
+        attempts.push({ provider: "serper", status: results.length ? "completed" : "no_results", resultCount: results.length, attempt: 1 });
+        this.attemptsByQuery.set(query, [...attempts]);
+        return results;
+      } catch (error) {
+        const safeError = classifySearchProviderError(error);
+        attempts.push({ provider: "serper", status: "unavailable", resultCount: 0, errorType: providerErrorType(error), errorCategory: safeError.category, ...(safeError.httpStatus ? { httpStatus: safeError.httpStatus } : {}), attempt: 1 });
+        console.error("[SmartSearchProvider] Serper failed", { ...safeError, attempt: 1 });
+      }
+    }
 
     if (hasTavilyKey) {
       try {
         console.log("[SmartSearchProvider] Intentando búsqueda con Tavily...");
         const results = await this.tavily.search(query, business, options);
-        attempts.push({ provider: "tavily", status: results.length ? "completed" : "no_results" });
+        attempts.push({ provider: "tavily", status: results.length ? "completed" : "no_results", resultCount: results.length, attempt: 1 });
         this.attemptsByQuery.set(query, [...attempts]);
         return results;
       } catch (error) {
         const safeError = classifySearchProviderError(error);
-        attempts.push({ provider: "tavily", status: "unavailable", errorType: providerErrorType(error), errorCategory: safeError.category, ...(safeError.httpStatus ? { httpStatus: safeError.httpStatus } : {}), attempt: 1 });
+        attempts.push({ provider: "tavily", status: "unavailable", resultCount: 0, errorType: providerErrorType(error), errorCategory: safeError.category, ...(safeError.httpStatus ? { httpStatus: safeError.httpStatus } : {}), attempt: 1 });
         console.error("[SmartSearchProvider] Tavily failed", { ...safeError, attempt: 1 });
         // Fallback a DDG si Tavily falla incluso teniendo la key (ej: error de API, rate limit)
       }
     } else {
-      console.log("[SmartSearchProvider] TAVILY_API_KEY no encontrada, usando DuckDuckGo como fallback...");
+      console.log("[SmartSearchProvider] Proveedores de búsqueda configurados agotados; usando DuckDuckGo como fallback...");
     }
 
     try {
       const results = await this.ddg.search(query, business, options);
-      attempts.push({ provider: "duckduckgo", status: results.length ? "completed" : "no_results" });
+      attempts.push({ provider: "duckduckgo", status: results.length ? "completed" : "no_results", resultCount: results.length, attempt: 1 });
       this.attemptsByQuery.set(query, [...attempts]);
       return results;
     } catch (error) {
-      attempts.push({ provider: "duckduckgo", status: "unavailable", errorType: providerErrorType(error) });
+      const safeError = classifySearchProviderError(error);
+      attempts.push({ provider: "duckduckgo", status: "unavailable", resultCount: 0, errorType: providerErrorType(error), errorCategory: safeError.category, ...(safeError.httpStatus ? { httpStatus: safeError.httpStatus } : {}), attempt: 1 });
       this.attemptsByQuery.set(query, [...attempts]);
       console.error("[SmartSearchProvider] DuckDuckGo también falló:", providerErrorType(error));
       throw new SearchProviderUnavailableError(attempts);

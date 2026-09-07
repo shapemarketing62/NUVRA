@@ -460,7 +460,17 @@ function mergeDiscovery(base: DiscoveryResult | undefined, extra: DiscoveryResul
     probableSources: pick("probable"),
     uncertainSources: pick("uncertain"),
     rejectedSources: pick("rejected"),
-    status: base.status === "provider_unavailable" && extra.status === "provider_unavailable" ? "provider_unavailable" : base.status === "partial" || extra.status === "partial" ? "partial" : "completed",
+    status: mergeDiscoveryStatus(base.status, extra.status),
     queryAttempts: [...(base.queryAttempts || []), ...(extra.queryAttempts || [])],
   };
+}
+
+export function mergeDiscoveryStatus(a?: DiscoveryResult["status"], b?: DiscoveryResult["status"]): DiscoveryResult["status"] {
+  const statuses = [a, b].filter((status): status is NonNullable<DiscoveryResult["status"]> => Boolean(status));
+  if (!statuses.length) return "not_attempted";
+  if (statuses.every((status) => status === "provider_unavailable")) return "provider_unavailable";
+  if (statuses.includes("partial") || statuses.includes("provider_unavailable")) return "partial";
+  if (statuses.includes("completed")) return "completed";
+  if (statuses.includes("no_results")) return "no_results";
+  return "not_attempted";
 }
