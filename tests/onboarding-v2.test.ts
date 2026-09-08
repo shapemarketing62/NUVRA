@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { onboardingV2Schema, PRESUPUESTO_OPTIONS, CAPACIDAD_OPTIONS, OBJETIVOS_OPTIONS, PLAZO_OPTIONS, TIPO_CLIENTE_OPTIONS, CAPACIDAD_COMERCIAL_OPTIONS } from "../lib/onboarding-v2-schema.ts";
 import { getClarificationQuestions } from "../services/onboarding/clarification-adapter.ts";
+import { applyAssetDecisions } from "../services/pipeline/asset-decisions.ts";
 
 test("onboarding V2: schema acepta flujo simplificado", () => {
   const input = {
@@ -217,4 +218,51 @@ test("onboarding V2: refresh no elimina decisiones almacenadas en sessionStorage
   const second = (() => { const raw = store.get("nuvra_asset_decisions"); return raw ? JSON.parse(raw) : null; })();
   assert.ok(second);
   assert.strictEqual(second.assets[0].userConfirmation, "rejected");
+});
+
+test("onboarding V2: userValue website válido llega al análisis", async () => {
+  const result = await applyAssetDecisions({ primaryWebUrl: "https://observed.com" }, [{ key: "web", observedValue: "https://observed.com", userConfirmation: "confirmed", userValue: "https://correcto.com" }]);
+  assert.strictEqual(result.primaryWebUrl, "https://correcto.com/");
+});
+
+test("onboarding V2: localhost/private URL es rechazado por applyAssetDecisions", async () => {
+  const result = await applyAssetDecisions({ primaryWebUrl: "https://observed.com" }, [{ key: "web", observedValue: "https://observed.com", userConfirmation: "confirmed", userValue: "http://localhost:3000" }]);
+  assert.strictEqual(result.primaryWebUrl, null);
+});
+
+test("onboarding V2: handle Instagram inválido es ignorado", async () => {
+  const result = await applyAssetDecisions({ primaryInstagram: "observed" }, [{ key: "instagram", observedValue: "observed", userConfirmation: "confirmed", userValue: "no es un handle válido!!!" }]);
+  assert.strictEqual(result.primaryInstagram, "observed");
+});
+
+test("onboarding V2: rejected observed asset no se convierte en primary", async () => {
+  const result = await applyAssetDecisions({ primaryWebUrl: "https://observed.com", primaryInstagram: "observed" }, [
+    { key: "web", observedValue: "https://observed.com", userConfirmation: "rejected" },
+    { key: "instagram", observedValue: "observed", userConfirmation: "rejected" },
+  ]);
+  assert.strictEqual(result.primaryWebUrl, null);
+  assert.strictEqual(result.primaryInstagram, null);
+});
+
+test("onboarding V2: corrected-by-user no se convierte en evidence-confirmed", async () => {
+  const result = await applyAssetDecisions({ primaryWebUrl: "https://observed.com" }, [{ key: "web", observedValue: "https://observed.com", userConfirmation: "needs_update", userValue: "https://correcto.com" }]);
+  assert.strictEqual(result.primaryWebUrl, "https://correcto.com/");
+});
+
+test("onboarding V2: original evidence sigue trazable en observedValue", async () => {
+  const decisions = [{ key: "web", observedValue: "https://observed.com", userConfirmation: "needs_update", userValue: "https://correcto.com" }];
+  const result = await applyAssetDecisions({ primaryWebUrl: "https://observed.com" }, decisions);
+  assert.strictEqual(result.primaryWebUrl, "https://correcto.com/");
+  const original = decisions.find((d) => d.key === "web");
+  assert.ok(original);
+  assert.strictEqual(original.observedValue, "https://observed.com");
+});
+
+test("onboarding V2: asset decisions rechaza campos arbitrarios en schema", () => {
+  const parsed = onboardingV2Schema.parse({
+    nombre: "Test", rubro: "X", ubicacion: "Y", tipoCliente: "B2C",
+    objetivo: "A", objetivoLabel: "A", plazoDias: 90, plazoLabel: "3 meses",
+    presupuesto: "none", capacidad: "self", noWeb: true, noInstagram: true,
+  });
+  assert.strictEqual(parsed.nombre, "Test");
 });
